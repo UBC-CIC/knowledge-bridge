@@ -822,7 +822,7 @@ export class ApiGatewayStack extends cdk.Stack {
         code: lambda.Code.fromAsset("lambda/adminAuthorizerFunction"),
         handler: "adminAuthorizerFunction.handler",
         timeout: Duration.seconds(30),
-        reservedConcurrentExecutions: 100,
+        // reservedConcurrentExecutions: 100,
         vpc: vpcStack.vpc,
         environment: {
           SM_COGNITO_CREDENTIALS: this.secret.secretName,
@@ -860,7 +860,7 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "userAuthorizerFunction.handler",
         timeout: Duration.seconds(30),
         memorySize: 256,
-        reservedConcurrentExecutions: 50,
+        // reservedConcurrentExecutions: 50,
         layers: [jwt],
         role: lambdaRole,
         environment: {
@@ -894,7 +894,7 @@ export class ApiGatewayStack extends cdk.Stack {
         runtime: lambda.Runtime.NODEJS_22_X,
         handler: "publicTokenFunction.handler",
         layers: [jwt],
-        reservedConcurrentExecutions: 50,
+        // reservedConcurrentExecutions: 50,
         code: lambda.Code.fromAsset("lambda/publicTokenFunction"),
         environment: {
           JWT_SECRET: jwtSecret.secretArn,
@@ -1011,7 +1011,7 @@ export class ApiGatewayStack extends cdk.Stack {
         code: lambda.Code.fromAsset("lambda/textGeneration"),
         timeout: cdk.Duration.seconds(60),
         role: lambdaRole,
-        reservedConcurrentExecutions: 100,
+        // reservedConcurrentExecutions: 100,
         layers: [psycopgLayer, powertoolsLayer],
         vpc: vpcStack.vpc,
         tracing: lambda.Tracing.ACTIVE,
@@ -1339,7 +1339,7 @@ export class ApiGatewayStack extends cdk.Stack {
       },
       functionName: `${id}-userFunction`,
       memorySize: 512,
-      reservedConcurrentExecutions: 50,
+      // reservedConcurrentExecutions: 50,
       layers: [postgres],
       role: lambdaRole,
       tracing: lambda.Tracing.ACTIVE,
@@ -1529,7 +1529,7 @@ export class ApiGatewayStack extends cdk.Stack {
       code: lambda.Code.fromAsset("lambda/websocket"),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
-      reservedConcurrentExecutions: 50,
+      // reservedConcurrentExecutions: 50,
       tracing: lambda.Tracing.ACTIVE,
       environment: {
         JWT_SECRET: jwtSecret.secretArn,
@@ -1576,7 +1576,7 @@ export class ApiGatewayStack extends cdk.Stack {
       code: lambda.Code.fromAsset("lambda/websocket"),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
-      reservedConcurrentExecutions: 50,
+      // reservedConcurrentExecutions: 50,
       tracing: lambda.Tracing.ACTIVE,
       environment: {
         TEXT_GEN_FUNCTION_NAME: lambdaTextGen.functionName,
