@@ -1,0 +1,2103 @@
+openapi: 3.0.0
+info:
+  title: specEx API
+  description: Specialization Explorer API
+  version: 1.0.0
+tags:
+  - name: User
+    description: endpoints accessible by the general public
+  - name: Admin
+    description: endpoints accessible by admins
+x-amazon-apigateway-request-validators:
+  all:
+    validateRequestParameters: true
+    validateRequestBody: true
+  params-only:
+    validateRequestParameters: true
+    validateRequestBody: false
+x-amazon-apigateway-request-validator: params-only
+x-amazon-apigateway-gateway-responses:
+  UNAUTHORIZED:
+    statusCode: "401"
+    responseParameters:
+      gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+      gatewayresponse.header.Access-Control-Allow-Methods: "'*'"
+      gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+    responseTemplates:
+      application/json: |
+        {"message":$context.error.messageString}
+x-common-options: &commonOptions
+  options:
+    summary: CORS support
+    description: |
+      Enable CORS by returning correct headers
+    responses:
+      200:
+        $ref: "#/components/responses/Success"
+    x-amazon-apigateway-integration:
+      type: mock
+      requestTemplates:
+        application/json: |
+          {
+            "statusCode" : 200
+          }
+      responses:
+        default:
+          statusCode: "200"
+          responseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+            method.response.header.Access-Control-Allow-Methods: "'*'"
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+          responseTemplates:
+            application/json: |
+              {}
+
+paths:
+  /admin/promote_user:
+    <<: *commonOptions
+    post:
+      tags: [Admin]
+      summary: Update an existing user's email and role (update-only)
+      operationId: admin_update_user
+      security:
+        - adminAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, email, role]
+              properties:
+                user_id:
+                  type: string
+                  description: UUID of the user row to update
+                email:
+                  type: string
+                role:
+                  type: string
+                  enum: [student, admin]
+      responses:
+        "200":
+          description: Updated user
+        "400":
+          description: Bad Request
+        "401":
+          description: Unauthorized
+        "404":
+          description: User not found
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/users:
+    <<: *commonOptions
+    get:
+      tags:
+        - Admin
+      summary: Get system users
+      operationId: get_admin_users
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of users
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+    post:
+      tags:
+        - Admin
+      summary: Create a new admin user
+      operationId: create_admin_user
+      security:
+        - adminAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - display_name
+                - email
+              properties:
+                display_name:
+                  type: string
+                  maxLength: 255
+                email:
+                  type: string
+                  format: email
+                  maxLength: 255
+                institution_id:
+                  type: string
+                  maxLength: 255
+      responses:
+        "201":
+          description: Admin user created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  display_name:
+                    type: string
+                  email:
+                    type: string
+                  role:
+                    type: string
+                    example: "admin"
+        "409":
+          description: Email already exists
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+      x-amazon-apigateway-request-validator: all
+
+
+  /admin/users/{userId}/chat_sessions:
+    <<: *commonOptions
+    get:
+      tags:
+        - Admin
+      summary: Get chat sessions for a specific user
+      operationId: get_admin_user_chat_sessions
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of chat sessions
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/chat_sessions/{sessionId}/messages:
+    <<: *commonOptions
+    get:
+      tags:
+        - Admin
+      summary: Get messages for a specific chat session
+      operationId: get_admin_chat_session_messages
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 200
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of chat messages
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/data_sources:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: List data sources with latest ingestion run
+      operationId: get_admin_data_sources
+      security:
+        - adminAuthorizer: []
+      responses:
+        "200":
+          description: Data sources with latest ingestion run per source
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        data_source:
+                          type: object
+                          properties:
+                            id: { type: string }
+                            name: { type: string }
+                            type:
+                              type: string
+                              enum: [website, csv, markdown, json]
+                            created_at: { type: string }
+                            metadata:
+                              type: object
+                              additionalProperties: true
+                            include_patterns:
+                              type: array
+                              nullable: true
+                              items: { type: string }
+                            exclude_patterns:
+                              type: array
+                              nullable: true
+                              items: { type: string }
+                        latest_ingestion_run:
+                          nullable: true
+                          type: object
+                          properties:
+                            id: { type: string }
+                            data_source_id: { type: string }
+                            status:
+                              type: string
+                              enum: [pending, queued, running, failed, completed]
+                            error_message:
+                              type: string
+                              nullable: true
+                            created_at: { type: string }
+                            completed_at:
+                              type: string
+                              nullable: true
+      "401":
+        description: Unauthorized
+      "500":
+        description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: when_no_match
+        httpMethod: POST
+        type: aws_proxy
+    post:
+      tags: [Admin]
+      summary: Stage data sources for future syncing
+      operationId: add_data_sources
+      security:
+        - adminAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - created_by
+              properties:
+                type:
+                  type: string
+                  enum: [website, csv, markdown]
+                  example: website
+                created_by:
+                  type: string
+                  example: example@email.com
+                name:
+                  type: string
+                  example: https://example.com
+                include_patterns:
+                  type: array
+                  items:
+                    type: string
+                exclude_patterns:
+                  type: array
+                  items:
+                    type: string
+                csv_file_name:
+                  type: string
+                  example: alumni_data_final.csv
+                csv_s3_bucket:
+                  type: string
+                  example: my-kb-bucket
+                csv_s3_key:
+                  type: string
+                  example: uploads/csv/1712345678_alumni_data_final.csv
+                metadata_file_name:
+                  type: string
+                  example: alumni_data_final.csv.metadata.json
+                metadata_s3_bucket:
+                  type: string
+                  example: my-kb-bucket
+                metadata_s3_key:
+                  type: string
+                  example: uploads/json/1712345678_alumni_data_final.csv.metadata.json
+      responses:
+        "200":
+          description: Data source(s) staged successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  action:
+                    type: string
+                  type:
+                    type: string
+                    enum: [website, csv, markdown]
+                  created_by:
+                    type: string
+                  staged_data_source_ids:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: Invalid request
+        "404":
+          description: Route not found
+        "409":
+          description: Conflict
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaKnowledgeBase.Arn}/invocations
+        passthroughBehavior: when_no_match
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/data_sources/sync:
+    <<: *commonOptions
+    post:
+      tags: [Admin]
+      summary: Queue pending data sources and begin syncing
+      operationId: sync_data_sources
+      security:
+        - adminAuthorizer: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                created_by:
+                  type: string
+                  example: example@email.com
+      responses:
+        "200":
+          description: Sync process started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  action:
+                    type: string
+                  sync_session_id:
+                    type: string
+                  queued_count:
+                    type: integer
+                  s3_queued_count:
+                    type: integer
+                  website_queued_count:
+                    type: integer
+        "400":
+          description: Invalid request
+        "404":
+          description: Route not found
+        "409":
+          description: A sync is already running or no pending data sources exist
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaKnowledgeBase.Arn}/invocations
+        passthroughBehavior: when_no_match
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/generate-presigned-url:
+    <<: *commonOptions
+    get:
+      tags:
+        - Admin
+      summary: Generate a pre-signed URL for uploading knowledge base files to S3
+      operationId: generate_presigned_url
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: file_name
+          in: query
+          required: true
+          description: Name of the file to upload
+          schema:
+            type: string
+            maxLength: 255
+        - name: content_type
+          in: query
+          required: false
+          description: MIME type of the file
+          schema:
+            type: string
+            default: "application/octet-stream"
+      responses:
+        "200":
+          description: Pre-signed URL generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  presignedUrl:
+                    type: string
+                    description: The pre-signed URL for uploading
+                  key:
+                    type: string
+                    description: The S3 object key
+                  bucket:
+                    type: string
+                    description: The S3 bucket name
+        "400":
+          description: Bad Request - Missing required parameters
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaKnowledgeBase.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/generate-presigned-urls/batch:
+    <<: *commonOptions
+    post:
+      tags:
+        - Admin
+      summary: Generate pre-signed URLs for multiple files in a single request (batch zip upload)
+      operationId: generate_presigned_urls_batch
+      security:
+        - adminAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [file_name]
+                    properties:
+                      file_name:
+                        type: string
+                        maxLength: 255
+                      content_type:
+                        type: string
+                        default: "application/octet-stream"
+      responses:
+        "200":
+          description: Pre-signed URLs generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  presigned_urls:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        file_name: { type: string }
+                        presigned_url: { type: string }
+                        key: { type: string }
+                        bucket: { type: string }
+        "400":
+          description: Bad Request
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaKnowledgeBase.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/data_sources/batch:
+    <<: *commonOptions
+    post:
+      tags: [Admin]
+      summary: Stage multiple CSV/Markdown + metadata JSON pairs in one request
+      operationId: stage_data_sources_batch
+      security:
+        - adminAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [created_by, items]
+              properties:
+                created_by:
+                  type: string
+                  example: admin@example.com
+                items:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [type, primary_file_name, primary_s3_bucket, primary_s3_key, metadata_file_name, metadata_s3_bucket, metadata_s3_key]
+                    properties:
+                      type:
+                        type: string
+                        enum: [csv, markdown]
+                      primary_file_name: { type: string }
+                      primary_s3_bucket: { type: string }
+                      primary_s3_key: { type: string }
+                      metadata_file_name: { type: string }
+                      metadata_s3_bucket: { type: string }
+                      metadata_s3_key: { type: string }
+      responses:
+        "200":
+          description: Batch staging complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  staged_count: { type: integer }
+                  skipped_count: { type: integer }
+                  error_count: { type: integer }
+                  staged:
+                    type: array
+                    items: { type: object }
+                  skipped:
+                    type: array
+                    items: { type: object }
+                  errors:
+                    type: array
+                    items: { type: object }
+        "400":
+          description: Bad Request
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaKnowledgeBase.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/system-settings:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: Get latest system settings
+      operationId: get_admin_system_settings
+      security:
+        - adminAuthorizer: []
+      responses:
+        "200":
+          description: Latest system settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  max_messages_per_day: { type: integer }
+                  min_messages_before_suggest: { type: integer }
+                  max_characters_per_user_message: { type: integer }
+                  max_characters_per_ai_message: { type: integer }
+                  temperature: { type: number }
+                  top_p: { type: number }
+                  support_score_threshold: { type: number }
+                  scope_alignment_score_threshold: { type: number }
+                  grounded_threshold: { type: number }
+                  partially_grounded_threshold: { type: number }
+                  updated_by: { type: string, nullable: true }
+                  updated_at: { type: string }
+        "401": { description: Unauthorized }
+        "500": { description: Internal Server Error }
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+    put:
+      tags: [Admin]
+      summary: Update system settings (patch)
+      operationId: put_admin_system_settings
+      security:
+        - adminAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                max_messages_per_day: { type: integer }
+                min_messages_before_suggest: { type: integer }
+                max_characters_per_user_message: { type: integer }
+                max_characters_per_ai_message: { type: integer }
+                temperature: { type: number }
+                top_p: { type: number }
+                support_score_threshold: { type: number }
+                scope_alignment_score_threshold: { type: number }
+                grounded_threshold: { type: number }
+                partially_grounded_threshold: { type: number }
+      responses:
+        "200":
+          description: Updated system settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  max_messages_per_day: { type: integer }
+                  min_messages_before_suggest: { type: integer }
+                  max_characters_per_user_message: { type: integer }
+                  max_characters_per_ai_message: { type: integer }
+                  temperature: { type: number }
+                  top_p: { type: number }
+                  support_score_threshold: { type: number }
+                  scope_alignment_score_threshold: { type: number }
+                  grounded_threshold: { type: number }
+                  partially_grounded_threshold: { type: number }
+                  updated_by: { type: string, nullable: true }
+                  updated_at: { type: string }
+        "400": { description: Bad Request }
+        "401": { description: Unauthorized }
+        "500": { description: Internal Server Error }
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/system-messages:
+    <<: *commonOptions
+    get:
+      tags:
+        - Admin
+      summary: Get all system messages (with version history)
+      operationId: get_admin_system_messages
+      security:
+        - adminAuthorizer: []
+      responses:
+        "200":
+          description: All system messages grouped by type, including version history (active first)
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Map of system_message_type -> array of versions (active first, then newest)
+                additionalProperties:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - id
+                      - type
+                      - content
+                      - character_limit
+                      - version
+                      - is_active
+                      - affects_text_generation
+                      - created_by
+                      - created_by_email
+                      - created_at
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      type:
+                        type: string
+                        description: System message type
+                        enum:
+                          - disclaimer
+                          - guardrails
+                          - system_role
+                          - system_checklist
+                          - system_instructions
+                          - initial_prompt
+                          - detective_phase_prompt
+                          - suggestion_phase_prompt
+                          - welcome_message
+                          - partial_hallucination_warning
+                          - full_hallucination_warning
+                      content:
+                        type: string
+                        description: Message content
+                      character_limit:
+                        type: integer
+                        description: Limit of characters allowed in message
+                      version:
+                        type: integer
+                        minimum: 1
+                        description: Incrementing version number per type
+                      is_active:
+                        type: boolean
+                        description: Whether this version is currently active
+                      affects_text_generation:
+                        type: boolean
+                        description: Whether this system nessage affects text generation
+                      created_by:
+                        type: string
+                        format: uuid
+                        nullable: true
+                        description: UUID of the user who created this version (nullable for seeded rows)
+                      created_by_email:
+                        type: string
+                        format: email
+                        nullable: true
+                        description: Email of the user who created this version (nullable for seeded rows)
+                      created_at:
+                        type: string
+                        format: date-time
+                        description: When this version was created
+              examples:
+                example:
+                  value:
+                    disclaimer:
+                      - id: "2f0d8c1a-3e2e-4c5d-9c86-1f0a4f1c0d11"
+                        type: "disclaimer"
+                        content: "AI can make mistakes. Check important info."
+                        character_limit: 400
+                        version: 2
+                        is_active: true
+                        affects_text_generation: false
+                        created_by: "cdfcaadc-cad4-4647-a98f-9e4e0a6e049f"
+                        created_by_email: "admin@example.com"
+                        created_at: "2026-02-18T19:21:18.406Z"
+                      - id: "11111111-2222-3333-4444-555555555555"
+                        type: "disclaimer"
+                        content: "AI can make mistakes. Check important info."
+                        character_limit: 400
+                        version: 1
+                        is_active: false
+                        affects_text_generation: false
+                        created_at: "2026-02-01T12:00:00.000Z"
+                    welcome_message:
+                      - id: "6bda6a51-2af0-4312-8d47-89f6169ae4ad"
+                        type: "welcome_message"
+                        content: "Together we will try to find the right program for you. Click below to start a new conversation."
+                        character_limit: 400
+                        version: 1
+                        is_active: true
+                        affects_text_generation: false
+                        created_at: "2026-02-18T19:21:18.406Z"
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden (not an admin)
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/system-messages/{system_message_type}:
+    <<: *commonOptions
+    post:
+      tags:
+        - Admin
+      summary: Create a new version of a system message and set it active
+      operationId: create_admin_system_message_version
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: system_message_type
+          in: path
+          required: true
+          description: The system message type to create a new version for
+          schema:
+            type: string
+            enum:
+              - disclaimer
+              - guardrails
+              - system_role
+              - system_checklist
+              - system_instructions
+              - initial_prompt
+              - detective_phase_prompt
+              - suggestion_phase_prompt
+              - welcome_message
+              - partial_hallucination_warning
+              - full_hallucination_warning
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+                - adminEmail
+              properties:
+                content:
+                  type: string
+                  description: The full message content for the new version
+                  example: "AI can make mistakes. Check important info."
+                adminEmail:
+                  type: string
+                  description: Email of the admin creating this new version (used to populate created_by)
+                  example: "admin@example.com"
+      responses:
+        "200":
+          description: Created a new system message version (active)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - type
+                  - content
+                  - character_limit
+                  - version
+                  - is_active
+                  - affects_text_generation
+                  - created_at
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  type:
+                    type: string
+                    description: System message type
+                  content:
+                    type: string
+                  character_limit:
+                    type: integer
+                    description: Character limit enforced for this system message version
+                  version:
+                    type: integer
+                    description: New version number (increments per type)
+                  is_active:
+                    type: boolean
+                    description: Whether this version is active (should be true)
+                  affects_text_generation:
+                    type: boolean
+                    description: Whether this message affects text generation
+                  created_by:
+                    type: string
+                    format: uuid
+                    nullable: true
+                  created_by_email:
+                    type: string
+                    format: email
+                    nullable: true
+                  created_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: Bad Request - Invalid type, missing/invalid content/adminEmail, or content exceeds character limit
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden - Not an admin
+        "404":
+          description: Admin user not found for email
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/system-messages/{system_message_type}/{version_id}:
+    <<: *commonOptions
+    delete:
+      tags:
+        - Admin
+      summary: Delete a non-active system message version
+      operationId: delete_admin_system_message_version
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: system_message_type
+          in: path
+          required: true
+          description: The system message type that the version belongs to
+          schema:
+            type: string
+            enum:
+              - disclaimer
+              - guardrails
+              - system_role
+              - system_checklist
+              - system_instructions
+              - initial_prompt
+              - detective_phase_prompt
+              - suggestion_phase_prompt
+              - welcome_message
+              - partial_hallucination_warning
+              - full_hallucination_warning
+        - name: version_id
+          in: path
+          required: true
+          description: UUID of the system message version row to delete
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - adminEmail
+              properties:
+                adminEmail:
+                  type: string
+                  format: email
+                  description: Email of the admin performing the delete (used to validate admin access)
+                  example: "admin@example.com"
+      responses:
+        "200":
+          description: System message version deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - deleted
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  deleted:
+                    type: object
+                    required:
+                      - id
+                      - type
+                      - version
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      type:
+                        type: string
+                        enum:
+                          - disclaimer
+                          - guardrails
+                          - system_role
+                          - system_checklist
+                          - system_instructions
+                          - initial_prompt
+                          - detective_phase_prompt
+                          - suggestion_phase_prompt
+                          - welcome_message
+                          - partial_hallucination_warning
+                          - full_hallucination_warning
+                      version:
+                        type: integer
+                        minimum: 1
+              examples:
+                example:
+                  value:
+                    success: true
+                    deleted:
+                      id: "2f0d8c1a-3e2e-4c5d-9c86-1f0a4f1c0d11"
+                      type: "disclaimer"
+                      version: 2
+        "400":
+          description: Bad Request - Invalid type/version_id/adminEmail, or attempted to delete active version
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden - Not an admin
+        "404":
+          description: Admin user not found or system message version not found
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/system-messages/{system_message_type}/{version_id}/activate:
+    <<: *commonOptions
+    post:
+      tags:
+        - Admin
+      summary: Activate a system message version (and deactivate the previous active version)
+      operationId: activate_admin_system_message_version
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: system_message_type
+          in: path
+          required: true
+          description: The system message type that the version belongs to
+          schema:
+            type: string
+            enum:
+              - disclaimer
+              - guardrails
+              - system_role
+              - system_checklist
+              - system_instructions
+              - initial_prompt
+              - detective_phase_prompt
+              - suggestion_phase_prompt
+              - welcome_message
+              - partial_hallucination_warning
+              - full_hallucination_warning
+        - name: version_id
+          in: path
+          required: true
+          description: UUID of the system message version row to activate
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - adminEmail
+              properties:
+                adminEmail:
+                  type: string
+                  format: email
+                  description: Email of the admin performing the activation (used to validate admin access)
+                  example: "admin@example.com"
+      responses:
+        "200":
+          description: Activation successful (or already active)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - status
+                  - activated
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  status:
+                    type: string
+                    description: Whether the version was activated now or was already active
+                    enum:
+                      - activated
+                      - already_active
+                  activated:
+                    type: object
+                    required:
+                      - id
+                      - type
+                      - content
+                      - character_limit
+                      - version
+                      - is_active
+                      - affects_text_generation
+                      - created_at
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      type:
+                        type: string
+                        enum:
+                          - disclaimer
+                          - guardrails
+                          - system_role
+                          - system_checklist
+                          - system_instructions
+                          - initial_prompt
+                          - detective_phase_prompt
+                          - suggestion_phase_prompt
+                          - welcome_message
+                      content:
+                        type: string
+                      character_limit:
+                        type: integer
+                        description: Character limit enforced for this system message version
+                      version:
+                        type: integer
+                        minimum: 1
+                      is_active:
+                        type: boolean
+                        description: Should be true
+                        example: true
+                      affects_text_generation:
+                        type: boolean
+                        description: Whether this message affects text generation
+                      created_by:
+                        type: string
+                        format: uuid
+                        nullable: true
+                      created_by_email:
+                        type: string
+                        format: email
+                        nullable: true
+                      created_at:
+                        type: string
+                        format: date-time
+                  previous_active:
+                    type: object
+                    nullable: true
+                    description: The previously active version that was deactivated (null if none existed or target was already active)
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      version:
+                        type: integer
+                        minimum: 1
+              examples:
+                activated_example:
+                  value:
+                    success: true
+                    status: "activated"
+                    activated:
+                      id: "2f0d8c1a-3e2e-4c5d-9c86-1f0a4f1c0d11"
+                      type: "disclaimer"
+                      content: "AI can make mistakes. Check important info."
+                      version: 2
+                      is_active: true
+                      created_by: "cdfcaadc-cad4-4647-a98f-9e4e0a6e049f"
+                      created_by_email: "admin@example.com"
+                      created_at: "2026-02-18T19:21:18.406Z"
+                    previous_active:
+                      id: "11111111-2222-3333-4444-555555555555"
+                      version: 3
+                already_active_example:
+                  value:
+                    success: true
+                    status: "already_active"
+                    activated:
+                      id: "2f0d8c1a-3e2e-4c5d-9c86-1f0a4f1c0d11"
+                      type: "disclaimer"
+                      content: "AI can make mistakes. Check important info."
+                      version: 2
+                      is_active: true
+                      created_by_email: "admin@example.com"
+                      created_at: "2026-02-18T19:21:18.406Z"
+        "400":
+          description: Bad Request - Invalid type/version_id/adminEmail
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden - Not an admin
+        "404":
+          description: Admin user not found or system message version not found
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/analytics:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: Get analytics time series
+      operationId: get_admin_analytics
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: timeRange
+          in: query
+          required: false
+          description: Time range for analytics data (e.g., 7d, 30d, 90d, 6m, 1y)
+          schema:
+            type: string
+            default: "90d"
+      responses:
+        "200":
+          description: Analytics time series and totals
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totals:
+                    type: object
+                    properties:
+                      users: { type: integer }
+                      chat_sessions: { type: integer }
+                      messages: { type: integer }
+                      questions: { type: integer }
+                  timeSeries:
+                    type: array
+                    nullable: true
+                    items:
+                      type: object
+                      properties:
+                        date: { type: string }
+                        users: { type: integer }
+                        questions: { type: integer }
+                        chat_sessions: { type: integer }
+        "401": { description: Unauthorized }
+        "500": { description: Internal Server Error }
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: when_no_match
+        httpMethod: POST
+        type: aws_proxy
+
+  /system_message/{message_type}:
+    <<: *commonOptions
+    get:
+      tags:
+        - SystemMessages
+      summary: Get active system message by type
+      operationId: get_system_message_by_type
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: message_type
+          in: path
+          required: true
+          description: System message type
+          schema:
+            type: string
+            enum:
+              - disclaimer
+              - guardrails
+              - system_role
+              - system_checklist
+              - system_instructions
+              - initial_prompt
+              - detective_phase_prompt
+              - suggestion_phase_prompt
+              - welcome_message
+      responses:
+        "200":
+          description: Active system message
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  type:
+                    type: string
+                  message:
+                    type: string
+                  version:
+                    type: integer
+                  created_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: Invalid parameters
+        "401":
+          description: Unauthorized
+        "404":
+          description: No active message found for this type
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${systemMessagesFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /system-settings/max-characters-per-user-message:
+    <<: *commonOptions
+    get:
+      tags: [System]
+      summary: Get max characters allowed per user message
+      operationId: get_system_setting_max_characters_per_user_message
+      security:
+        - userAuthorizer: []
+      responses:
+        "200":
+          description: Max characters allowed per user message
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  max_characters_per_user_message:
+                    type: integer
+                required:
+                  - max_characters_per_user_message
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${systemMessagesFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /chat_sessions/{chat_session_id}:
+    <<: *commonOptions
+    put:
+      tags:
+        - ChatSessions
+      summary: Rename a specific chat session (only the owning user may update)
+      operationId: update_chat_session
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: chat_session_id
+          in: path
+          required: true
+          description: Chat session UUID
+          schema:
+            type: string
+            format: uuid
+        - name: user_id
+          in: query
+          required: true
+          description: User UUID used to verify ownership when renaming
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+              properties:
+                title:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Chat session renamed successfully
+        "400":
+          description: Invalid request
+        "403":
+          description: Forbidden - User does not own this chat session
+        "404":
+          description: Chat session not found
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${chatSessionFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+    delete:
+      tags:
+        - ChatSessions
+      summary: Delete a specific chat session (only the owning user may delete)
+      operationId: delete_chat_session
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: chat_session_id
+          in: path
+          required: true
+          description: Chat session UUID
+          schema:
+            type: string
+            format: uuid
+        - name: user_id
+          in: query
+          required: true
+          description: User UUID used to verify ownership when deleting
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Chat session deleted successfully
+        "400":
+          description: Invalid request
+        "403":
+          description: Forbidden - User does not own this chat session
+        "404":
+          description: Chat session not found
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${chatSessionFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /chat_sessions/{chat_session_id}/text_generation:
+    <<: *commonOptions
+    post:
+      tags:
+        - User
+      summary: Generate text response for a chat session
+      operationId: generate_text
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: chat_session_id
+          in: path
+          required: true
+          description: Chat session UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                user_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Generated text response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                  sources:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          description: Invalid request
+        "404":
+          description: Chat session not found
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaTextGen.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /user/publicToken:
+    options:
+      summary: CORS support
+      description: Enable CORS by returning correct headers
+      responses:
+        200:
+          $ref: "#/components/responses/Success"
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: |
+            {
+              "statusCode" : 200
+            }
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {}
+    get:
+      tags:
+        - Public
+      summary: Get a JWT token for non-authenticated user
+      operationId: get_public_token
+      responses:
+        "200":
+          description: JWT token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PublicTokenFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /user:
+    <<: *commonOptions
+    post:
+      tags:
+        - User
+      summary: Create a new user (guest/student)
+      operationId: create_user
+      security:
+        - userAuthorizer: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum: ["student", "admin"]
+                  description: Role of the user (defaults to 'student' if not provided)
+                email:
+                  type: string
+                  description: Optional email (admins will use Cognito; guests can be null)
+                display_name:
+                  type: string
+                  description: Optional display name
+                metadata:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId:
+                    type: string
+                    format: uuid
+                  role:
+                    type: string
+                    enum: ["student", "admin"]
+                  email:
+                    type: string
+                    nullable: true
+                  display_name:
+                    type: string
+                    nullable: true
+                  created_at:
+                    type: string
+                    format: date-time
+                  last_seen_at:
+                    type: string
+                    format: date-time
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /user/{user_id}:
+    <<: *commonOptions
+    get:
+      tags:
+        - User
+      summary: Get user by id
+      operationId: get_user
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User found
+        "404":
+          description: User not found
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /user/{user_id}:
+    <<: *commonOptions
+    get:
+      tags:
+        - User
+      summary: Get user by id
+      operationId: get_user
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User found
+        "404":
+          description: User not found
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+    put:
+      tags:
+        - User
+      summary: Update user email
+      operationId: update_user_email
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: student@example.com
+      responses:
+        "200":
+          description: User updated successfully
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "404":
+          description: User not found
+        "409":
+          description: Email already in use
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /user/{user_id}/chat_sessions/{chat_session_id}/chat_history:
+    <<: *commonOptions
+    get:
+      tags:
+        - User
+      summary: Get chat history (messages) for a chat session owned by a user
+      operationId: get_chat_session_chat_history
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: User UUID (owner)
+          schema:
+            type: string
+            format: uuid
+        - name: chat_session_id
+          in: path
+          required: true
+          description: Chat session UUID
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: Number of messages to return (default 200, max 1000)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+        - name: offset
+          in: query
+          required: false
+          description: Number of messages to skip (default 0)
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Chat history messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chat_session_id:
+                    type: string
+                    format: uuid
+                  user_id:
+                    type: string
+                    format: uuid
+                  messages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        chat_session_id:
+                          type: string
+                          format: uuid
+                        sender:
+                          type: string
+                          enum: ["user", "AI"]
+                        content:
+                          type: string
+                        sources:
+                          type: object
+                          nullable: true
+                          additionalProperties: true
+                        warning:
+                          type: string
+                          nullable: true
+                        created_at:
+                          type: string
+                          format: date-time
+                  pagination:
+                    type: object
+                    properties:
+                      limit:
+                        type: integer
+                      offset:
+                        type: integer
+                      total:
+                        type: integer
+                      hasMore:
+                        type: boolean
+        "400":
+          description: Invalid parameters
+        "403":
+          description: Forbidden - user does not own this chat session
+        "404":
+          description: User or chat session not found
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /chat_sessions/user/{user_id}:
+    <<: *commonOptions
+    get:
+      tags:
+        - ChatSessions
+      summary: Get chat sessions for a specific user
+      operationId: get_chat_sessions_by_user
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: User UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of chat sessions
+        "400":
+          description: Bad request
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${chatSessionFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /chat_sessions:
+    <<: *commonOptions
+    post:
+      tags:
+        - ChatSessions
+      summary: Create a new chat session for a user
+      operationId: create_chat_session
+      security:
+        - userAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+                  description: User UUID (guest/student user)
+                title:
+                  type: string
+                  nullable: true
+                  description: Optional chat title
+                metadata:
+                  type: object
+                  nullable: true
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Chat session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  user_id:
+                    type: string
+                    format: uuid
+                  title:
+                    type: string
+                    nullable: true
+                  created_at:
+                    type: string
+                    format: date-time
+                  last_active_at:
+                    type: string
+                    format: date-time
+                  metadata:
+                    type: object
+                    nullable: true
+        "400":
+          description: Invalid request
+        "404":
+          description: User not found
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${chatSessionFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /user/exampleEndpoint:
+    options:
+      summary: CORS support
+      description: Enable CORS by returning correct headers
+      responses:
+        200:
+          $ref: "#/components/responses/Success"
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: |
+            {
+              "statusCode" : 200
+            }
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {}
+    get:
+      tags:
+        - User
+      summary: Example endpoint for testing user functionality
+      operationId: get_example_endpoint
+      security:
+        - userAuthorizer: []
+      responses:
+        "200":
+          description: Example endpoint response
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Example endpoint invoked"
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+components:
+  securitySchemes:
+    adminAuthorizer:
+      type: "apiKey"
+      name: "Authorization"
+      in: "header"
+      x-amazon-apigateway-authtype: "custom"
+      x-amazon-apigateway-authorizer:
+        type: token
+        authorizerUri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminLambdaAuthorizer.Arn}/invocations
+        identitySource: method.request.header.Authorization
+
+    userAuthorizer:
+      type: "apiKey"
+      name: "Authorization"
+      in: "header"
+      x-amazon-apigateway-authtype: "custom"
+      x-amazon-apigateway-authorizer:
+        type: token
+        authorizerUri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userLambdaAuthorizer.Arn}/invocations
+        authorizerResultTtlInSeconds: 300
+        identitySource: method.request.header.Authorization
+  responses:
+    Success:
+      description: Request success
+      headers:
+        Access-Control-Allow-Origin:
+          schema:
+            type: string
+        Access-Control-Allow-Methods:
+          schema:
+            type: string
+        Access-Control-Allow-Headers:
+          schema:
+            type: string
+      content: {}

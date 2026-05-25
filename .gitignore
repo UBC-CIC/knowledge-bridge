@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Environment files
+.env*
+
+# Build outputs
+dist/
+build/
+out/
+cdk.out/
+temp/
+
+# Caches
+.cache/
+.npm/
+.eslintcache/
+*.tsbuildinfo
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Python
+venv/
+.ipynb_checkpoints/
+
+# IDE
+.vscode-test/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# RDS CA bundle — downloaded at deploy time
