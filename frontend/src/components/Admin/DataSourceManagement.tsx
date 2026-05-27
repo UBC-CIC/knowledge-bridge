@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Users, HelpCircle, Loader2, MessageCircleMore } from "lucide-react";
+import { Users, HelpCircle, MessageCircleMore } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import MetricCard from "./MetricCard.tsx";
 import IngestionPanel from "./IngestionPanel.tsx";
