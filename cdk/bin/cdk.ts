@@ -6,7 +6,7 @@ import { ApiGatewayStack } from "../lib/api-stack";
 import { DBFlowStack } from "../lib/dbFlow-stack";
 import { AmplifyStack } from "../lib/amplify-stack";
 import { CICDStack } from "../lib/cicd-stack";
-import { KnowledgeBaseStack } from "../lib/knowledge-base-stack";
+import { GlueStack } from "../lib/glue-stack";
 
 const app = new cdk.App();
 
@@ -38,54 +38,33 @@ const dbFlowStack = new DBFlowStack(
   { env }
 );
 
+const glueStack = new GlueStack(app, `${StackPrefix}-Glue`, vpcStack, dbStack, { env });
+glueStack.addDependency(dbStack);
+
 const cicdStack = new CICDStack(app, `${StackPrefix}-CICD`, {
   env,
   githubRepo: githubRepo,
   githubBranch: githubBranch,
   environmentName: environment,
-  lambdaFunctions: [
-    {
-      name: "vectorIndexManagerSigV4",
-      functionName: `${StackPrefix}-KnowledgeBase-VectorIndexManagerFn-v2`,
-      sourceDir: "cdk/lambda/vectorIndexManagerSigV4",
-    },
-  ],
-  pathFilters: [
-    "cdk/lambda/vectorIndexManagerSigV4/**",
-  ],
+  lambdaFunctions: [],
+  pathFilters: [],
 });
-
-const kbStack = new KnowledgeBaseStack(app, `${StackPrefix}-KnowledgeBase`, {
-  env,
-  stackPrefix: StackPrefix,
-  vectorIndexManagerRepository: cicdStack.ecrRepositories["vectorIndexManagerSigV4"],
-  vectorIndexManagerPipelineName: cicdStack.pipelineName,
-  vpc: vpcStack.vpc,
-  vpcCidr: vpcStack.vpcCidrString,
-});
-kbStack.addDependency(cicdStack);
-kbStack.addDependency(vpcStack);
 
 const apiStack = new ApiGatewayStack(
   app,
   `${StackPrefix}-Api`,
   dbStack,
   vpcStack,
-  {
-    env,
-    ecrRepositories: cicdStack.ecrRepositories,
-    knowledgeBaseBucket: kbStack.knowledgeBaseBucket,
-    knowledgeBaseSecret: kbStack.knowledgeBaseSecret,
-  }
+  { env },
+  glueStack.jobName
 );
-apiStack.addDependency(kbStack);
 apiStack.addDependency(cicdStack);
+apiStack.addDependency(glueStack);
 
 const amplifyStack = new AmplifyStack(app, `${StackPrefix}-Amplify`, apiStack, {
   env,
   githubRepo: githubRepo,
   githubBranch: githubBranch,
-  knowledgeBaseBucketName: kbStack.knowledgeBaseBucket.bucketName,
   allowedOriginsParamName: apiStack.allowedOriginsParamName,
 });
 amplifyStack.addDependency(apiStack);
@@ -101,8 +80,8 @@ const stacks = [
   vpcStack,
   dbStack,
   dbFlowStack,
+  glueStack,
   cicdStack,
-  kbStack,
   apiStack,
   amplifyStack,
 ];

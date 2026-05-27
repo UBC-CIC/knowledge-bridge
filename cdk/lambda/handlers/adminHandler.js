@@ -16,6 +16,11 @@ const {
   SecretsManagerClient,
   GetSecretValueCommand,
 } = require("@aws-sdk/client-secrets-manager");
+const { GlueClient, StartJobRunCommand, GetJobRunCommand } = require("@aws-sdk/client-glue");
+const { CloudWatchLogsClient, GetLogEventsCommand, DescribeLogStreamsCommand } = require("@aws-sdk/client-cloudwatch-logs");
+
+const glueClient = new GlueClient({});
+const logsClient = new CloudWatchLogsClient({});
 
 let sqlConnection;
 const secretsManager = new SecretsManagerClient();
@@ -1317,6 +1322,115 @@ exports.handler = async (event) => {
       }
 
         break;
+
+      // POST /admin/ingestion/trigger — start a Glue ingestion job run
+      case "POST /admin/ingestion/trigger": {
+        let body = {};
+        try { body = parseBody(event.body); } catch (_) {}
+        const forceFull = body?.force_full === true ? "true" : "false";
+        const jobName = process.env.GLUE_JOB_NAME;
+        if (!jobName) {
+          response.statusCode = 500;
+          response.body = JSON.stringify({ error: "GLUE_JOB_NAME not configured" });
+          break;
+        }
+
+        // Block if a run is already in-flight (status check against DB)
+        const inFlight = await pool.query(`
+          SELECT id FROM ingestion_runs
+          WHERE run_type = 'site' AND status NOT IN ('completed', 'failed', 'stopped')
+          LIMIT 1
+        `);
+        if (inFlight.rows.length > 0) {
+          response.statusCode = 409;
+          response.body = JSON.stringify({ error: "An ingestion job is already running." });
+          break;
+        }
+
+        const glueResp = await glueClient.send(new StartJobRunCommand({
+          JobName: jobName,
+          Arguments: {
+            "--FORCE_FULL": forceFull,
+            "--TRIGGERED_BY": "manual",
+          },
+        }));
+
+        const glueRunId = glueResp.JobRunId;
+
+        // Insert a site-level run row immediately so the frontend can track it
+        await pool.query(`
+          INSERT INTO ingestion_runs (run_type, triggered_by, status, glue_run_id, started_at, metadata)
+          VALUES ('site', 'manual', 'starting', $1, now(), $2::jsonb)
+        `, [glueRunId, JSON.stringify({ force_full: forceFull === "true", job_name: jobName })]);
+
+        response.body = JSON.stringify({ jobRunId: glueRunId });
+        break;
+      }
+
+      // GET /admin/ingestion/runs — recent site-level run history from DB
+      case "GET /admin/ingestion/runs": {
+        const limit = Math.min(parseInt(event.queryStringParameters?.limit || "10", 10), 50);
+        const { rows } = await pool.query(`
+          SELECT
+            id, glue_run_id, run_type, triggered_by, status,
+            started_at, finished_at,
+            total_documents, processed_documents, ingested_documents,
+            skipped_documents, failed_documents, error_message, metadata
+          FROM ingestion_runs
+          WHERE run_type = 'site'
+          ORDER BY started_at DESC
+          LIMIT $1
+        `, [limit]);
+        response.body = JSON.stringify({ runs: rows });
+        break;
+      }
+
+      // GET /admin/ingestion/logs?jobRunId=xxx&nextToken=yyy&logType=output|error
+      case "GET /admin/ingestion/logs": {
+        const jobRunId = event.queryStringParameters?.jobRunId;
+        const nextToken = event.queryStringParameters?.nextToken;
+        const logType = event.queryStringParameters?.logType || "output";
+        const jobName = process.env.GLUE_JOB_NAME;
+        if (!jobRunId || !jobName) {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: "jobRunId is required" });
+          break;
+        }
+
+        // Get job run status
+        const jobRunResp = await glueClient.send(new GetJobRunCommand({ JobName: jobName, RunId: jobRunId }));
+        const jobRun = jobRunResp.JobRun;
+        const status = jobRun?.JobRunState;
+
+        // output stream = jobRunId, error stream = jobRunId-error
+        const logGroupName = `/aws-glue/python-jobs`;
+        const logStreamPrefix = logType === "error" ? `${jobRunId}-error` : jobRunId;
+        let logLines = [];
+        let nextForwardToken = null;
+
+        try {
+          const streamsResp = await logsClient.send(new DescribeLogStreamsCommand({
+            logGroupName,
+            logStreamNamePrefix: logStreamPrefix,
+          }));
+          const stream = streamsResp.logStreams?.[0];
+          if (stream) {
+            const logsResp = await logsClient.send(new GetLogEventsCommand({
+              logGroupName,
+              logStreamName: stream.logStreamName,
+              nextToken: nextToken || undefined,
+              startFromHead: true,
+            }));
+            logLines = (logsResp.events || []).map(e => ({ timestamp: e.timestamp, message: e.message }));
+            nextForwardToken = logsResp.nextForwardToken;
+          }
+        } catch (logErr) {
+          console.warn("Could not fetch logs:", logErr.message);
+        }
+
+        response.body = JSON.stringify({ status, jobRunId, logLines, nextForwardToken, logType });
+        break;
+      }
 
       // Handle unsupported routes
       default:

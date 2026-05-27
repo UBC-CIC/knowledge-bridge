@@ -112,7 +112,6 @@ def handler(event, context=None):
 
         response_data = get_response(
             query=query,
-            knowledge_base_id=config.KB_ID,
             region=config.REGION,
             llm_region=config.LLM_REGION,
             chat_session_id=chat_session_id,

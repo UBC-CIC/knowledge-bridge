@@ -75,7 +75,6 @@ Output ONLY the search query. Do not include explanations, preambles, or quotes.
 
 def _prepare_conversation(
     query: str,
-    knowledge_base_id: str,
     region: str,
     llm_region: str,
     chat_session_id: str,
@@ -131,13 +130,10 @@ def _prepare_conversation(
         llm_region=llm_region
     )
 
-    # 6. RAG Retrieval (using rewritten query)
+    # 6. RAG Retrieval (pgvector — not yet implemented)
     sources = retrieve_documents(
         search_query,
-        knowledge_base_id,
-        region,
         num_retrieval_results,
-        search_type=search_type
     )
     
     # 7. Build Context
@@ -209,7 +205,6 @@ def _save_ai_response(
 
 def get_response(
     query: str,
-    knowledge_base_id: str,
     region: str,
     llm_region: str,
     chat_session_id: str,
@@ -278,7 +273,6 @@ def get_response(
 
         bedrock_messages, static_system_prompt, dynamic_prompt, sources, phase_name, model_arn = _prepare_conversation(
             query,
-            knowledge_base_id,
             region,
             llm_region,
             chat_session_id,

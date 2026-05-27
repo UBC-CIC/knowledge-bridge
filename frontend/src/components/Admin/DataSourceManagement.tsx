@@ -37,6 +37,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import MetricCard from "./MetricCard.tsx";
+import IngestionPanel from "./IngestionPanel.tsx";
 
 type AnalyticsTotals = {
   users: number;
@@ -958,6 +959,9 @@ export default function DataSourceManagement() {
           tooltip="Total chat messages exchanged across all sessions."
         />
       </div>
+
+      {/* Ingestion Panel */}
+      <IngestionPanel />
 
       {/* Data Source Management Section */}
       <div className="space-y-4">

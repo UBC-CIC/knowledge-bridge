@@ -14,26 +14,21 @@ import * as apigatewayv2 from "aws-cdk-lib/aws-apigatewayv2";
 import { WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Fn } from "aws-cdk-lib";
 import { Asset } from "aws-cdk-lib/aws-s3-assets";
-import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as logs from "aws-cdk-lib/aws-logs";
-import * as ecr from "aws-cdk-lib/aws-ecr";
-import * as s3n from "aws-cdk-lib/aws-s3-notifications";
 import * as bedrock from "aws-cdk-lib/aws-bedrock";
 import * as cr from "aws-cdk-lib/custom-resources";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
+import * as events from "aws-cdk-lib/aws-events";
+import * as eventTargets from "aws-cdk-lib/aws-events-targets";
 import * as crypto from 'crypto';
 
 function computeConfigHash(config: object): string {
   return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
 
-interface ApiGatewayStackProps extends cdk.StackProps {
-  ecrRepositories: { [key: string]: ecr.Repository };
-  knowledgeBaseBucket: s3.IBucket;
-  knowledgeBaseSecret: secretsmanager.ISecret;
-}
+type ApiGatewayStackProps = cdk.StackProps;
 
 export class ApiGatewayStack extends cdk.Stack {
   private readonly api: apigateway.SpecRestApi;
@@ -64,7 +59,8 @@ export class ApiGatewayStack extends cdk.Stack {
     id: string,
     db: DatabaseStack,
     vpcStack: VpcStack,
-    props: ApiGatewayStackProps
+    props: ApiGatewayStackProps,
+    glueJobName?: string
   ) {
     super(scope, id, props);
 
@@ -657,15 +653,6 @@ export class ApiGatewayStack extends cdk.Stack {
     db.secretPathUser.grantRead(lambdaRole);
     this.secret.grantRead(lambdaRole);
 
-    // Explicitly grant access to the KnowledgeBase ID secret without using a broad wildcard
-    lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["secretsmanager:GetSecretValue"],
-        resources: [props.knowledgeBaseSecret.secretArn],
-      })
-    );
-
     // Grant access to EC2
     lambdaRole.addToPolicy(
       new iam.PolicyStatement({
@@ -1022,16 +1009,9 @@ export class ApiGatewayStack extends cdk.Stack {
           REGION: this.region,
           LLM_REGION: this.region,
           BEDROCK_MODEL_ID: `us.anthropic.claude-sonnet-4-6`,
-          KB_SECRET_NAME: props.knowledgeBaseSecret.secretName
         },
       }
     )
-
-    // Grand Knowledge Base Secret Access 
-    lambdaTextGen.addToRolePolicy(new iam.PolicyStatement({
-      actions: ["secretsmanager:GetSecretValue"],
-      resources: [props.knowledgeBaseSecret.secretArn]
-    }))
 
     // Grant SSM parameter access for HaikuArn and SonnetArn
       lambdaTextGen.addToRolePolicy(
@@ -1182,149 +1162,24 @@ export class ApiGatewayStack extends cdk.Stack {
       actions: [
         "bedrock:GetInferenceProfile",
         "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream", // Add streaming permission
+        "bedrock:InvokeModelWithResponseStream",
         "bedrock:Converse",
         "bedrock:ConverseStream",
-        "bedrock:Retrieve", // Add Retrieve permission for Knowledge Base
       ],
       resources: [
         `arn:aws:bedrock:${this.region}::foundation-model/meta.llama3-70b-instruct-v1:0`,
         `arn:aws:bedrock:us-east-1::foundation-model/cohere.embed-v4:0`,
-        // Mistral Large
         `arn:aws:bedrock:${this.region}::foundation-model/mistral.mistral-large-2402-v1:0`,
-        // Claude Sonnet 3 (Direct Foundation Models)
         `arn:aws:bedrock:${this.region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0`,
-        // Claude Sonnet 4.6 (Converse currently resolves this model in us-west-2)
         `arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-sonnet-4-6`,
         `arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6`,
-        // Claude Sonnet 4.5 (Direct Foundation Models)
         `arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0`,
         `arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0`,
-        // Claude Haiku 4.5 (Converse currently resolves this model in us-west-2)
         `arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0`,
         `arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0`,
-        // Knowledge Base
-        `arn:aws:bedrock:${this.region}:${this.account}:knowledge-base/*`,
       ],
     });
     lambdaTextGen.addToRolePolicy(textGenBedrockPolicyStatement);
-
-    // lambdaRole already has read access to db.secretPathUser through the stack-wide policy
-
-
-
-    // --- Knowledge Base Lambda Function ---
-    const lambdaKnowledgeBase = new lambda.Function(this, `${id}-lambdaKnowledgeBase`, {
-      functionName: `${id}-lambdaKnowledgeBase`,
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: "main.handler",
-      code: lambda.Code.fromAsset("lambda/knowledgeBase"),
-      timeout: Duration.seconds(300),
-      role: lambdaRole,
-      layers: [psycopgLayer],
-      memorySize: 512,
-      vpc: vpcStack.vpc,
-      tracing: lambda.Tracing.ACTIVE,
-      environment: {
-        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
-        RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
-        REGION: this.region,
-        SCHEDULER_ROLE_ARN: `arn:aws:iam::${this.account}:role/${id}-schedulerInvokeRole`,
-        SCHEDULER_TARGET_ARN: `arn:aws:lambda:${this.region}:${this.account}:function:${id}-lambdaKnowledgeBase`,
-        KNOWLEDGE_BASE_BUCKET_NAME: props.knowledgeBaseBucket.bucketName,
-        KB_SECRET_NAME: props.knowledgeBaseSecret.secretName
-      },
-    });
-
-    lambdaKnowledgeBase.addEnvironment('ALLOWED_ORIGIN_PARAM', this.allowedOriginsParamName);
-    lambdaKnowledgeBase.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ["ssm:GetParameter", "ssm:GetParameters"],
-      resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${this.allowedOriginsParamName}`],
-    }));
-
-
-    const cfnLambdaKnowledgeBase = lambdaKnowledgeBase.node.defaultChild as lambda.CfnFunction;
-    cfnLambdaKnowledgeBase.overrideLogicalId("lambdaKnowledgeBase");
-
-    lambdaKnowledgeBase.addPermission("AllowApiGatewayInvoke", {
-      principal: new iam.ServicePrincipal("apigateway.amazonaws.com"),
-      action: "lambda:InvokeFunction",
-      sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${this.api.restApiId}/*/*/admin/*`,
-    });
-
-    // lambdaRole already has read access to db.secretPathUser through the stack-wide policy
-
-    // Tightly scopes S3 permissions to only the target knowledge base bucket
-    props.knowledgeBaseBucket.grantReadWrite(lambdaKnowledgeBase);
-
-    lambdaKnowledgeBase.addToRolePolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          "bedrock:ListDataSources",
-          "bedrock:GetDataSource",
-          "bedrock:CreateDataSource",
-          "bedrock:UpdateDataSource",
-          "bedrock:ListIngestionJobs",
-          "bedrock:GetIngestionJob",
-          "bedrock:StartIngestionJob",
-        ],
-        // Tightly scopes Bedrock APIs specifically to knowledge bases
-        resources: [
-          `arn:aws:bedrock:${this.region}:${this.account}:knowledge-base/*`,
-        ],
-      })
-    );
-
-    // Grant access to read Knowledge Base ID
-    props.knowledgeBaseSecret.grantRead(lambdaKnowledgeBase);
-
-    lambdaKnowledgeBase.addToRolePolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          "scheduler:CreateSchedule",
-          "scheduler:DeleteSchedule",
-          "scheduler:GetSchedule",
-        ],
-        resources: [
-          `arn:aws:scheduler:${this.region}:${this.account}:schedule/default/*`,
-        ],
-      })
-    );
-
-    // EventBridge Scheduler role to invoke this Lambda function
-    const schedulerInvokeRole = new iam.Role(this, `${id}-schedulerInvokeRole`, {
-      roleName: `${id}-schedulerInvokeRole`,
-      assumedBy: new iam.ServicePrincipal("scheduler.amazonaws.com"),
-    });
-
-    schedulerInvokeRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["lambda:InvokeFunction"],
-        resources: [
-          `arn:aws:lambda:${this.region}:${this.account}:function:${id}-lambdaKnowledgeBase`,
-        ],
-      })
-    );
-    
-    // Scheduler also requires the caller to be allowed to pass the target role
-    lambdaKnowledgeBase.addToRolePolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["iam:PassRole"],
-        resources: [
-          `arn:aws:iam::${this.account}:role/${id}-schedulerInvokeRole`,
-        ],
-        conditions: {
-          StringEquals: {
-            "iam:PassedToService": "scheduler.amazonaws.com",
-          },
-        },
-      })
-    );
 
     const lambdaUserFunction = new lambda.Function(this, `${id}-userFunction`, {
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -1493,6 +1348,23 @@ export class ApiGatewayStack extends cdk.Stack {
       sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${this.api.restApiId}/*/*/admin*`,
     });
 
+    if (glueJobName) {
+      lambdaAdminFunction.addEnvironment("GLUE_JOB_NAME", glueJobName);
+      lambdaAdminFunction.addToRolePolicy(new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["glue:StartJobRun", "glue:GetJobRun", "glue:GetJobRuns"],
+        resources: [`arn:aws:glue:${this.region}:${this.account}:job/${glueJobName}`],
+      }));
+      lambdaAdminFunction.addToRolePolicy(new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["logs:GetLogEvents", "logs:DescribeLogStreams"],
+        resources: [
+          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws-glue/python-jobs:*`,
+          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws-glue/python-jobs`,
+        ],
+      }));
+    }
+
     lambdaAdminFunction.addEnvironment('ALLOWED_ORIGIN_PARAM', this.allowedOriginsParamName);
     lambdaAdminFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
@@ -1511,6 +1383,37 @@ export class ApiGatewayStack extends cdk.Stack {
     const cfnLambda_admin = lambdaAdminFunction.node
       .defaultChild as lambda.CfnFunction;
     cfnLambda_admin.overrideLogicalId("adminFunction");
+
+    if (glueJobName) {
+      const glueStatusSyncFn = new lambda.Function(this, `${id}-glueStatusSync`, {
+        runtime: lambda.Runtime.NODEJS_22_X,
+        code: lambda.Code.fromAsset("lambda"),
+        handler: "handlers/glueStatusSync.handler",
+        timeout: Duration.seconds(60),
+        vpc: vpcStack.vpc,
+        environment: {
+          SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+          RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
+          GLUE_JOB_NAME: glueJobName,
+        },
+        functionName: `${id}-glueStatusSync`,
+        memorySize: 256,
+        layers: [postgres],
+        role: lambdaRole,
+      });
+
+      glueStatusSyncFn.addToRolePolicy(new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["glue:GetJobRun"],
+        resources: [`arn:aws:glue:${this.region}:${this.account}:job/${glueJobName}`],
+      }));
+
+      new events.Rule(this, `${id}-GlueStatusSyncRule`, {
+        schedule: events.Schedule.rate(Duration.minutes(5)),
+        targets: [new eventTargets.LambdaFunction(glueStatusSyncFn)],
+        description: "Poll Glue job status and sync to ingestion_runs table",
+      });
+    }
 
     // Define WebSocket API and related resources directly in ApiGatewayStack
     this.webSocketApi = new apigatewayv2.WebSocketApi(

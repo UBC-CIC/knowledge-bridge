@@ -53,6 +53,107 @@ x-common-options: &commonOptions
               {}
 
 paths:
+  /admin/ingestion/trigger:
+    <<: *commonOptions
+    post:
+      tags: [Admin]
+      summary: Trigger a SharePoint ingestion Glue job run
+      operationId: trigger_ingestion
+      security:
+        - adminAuthorizer: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force_full:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Job started
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/ingestion/runs:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: List recent site-level ingestion runs from DB
+      operationId: list_ingestion_runs
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: List of ingestion runs
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/ingestion/logs:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: Get logs for a Glue job run
+      operationId: get_ingestion_logs
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: jobRunId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: nextToken
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: logType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [output, error]
+            default: output
+      responses:
+        "200":
+          description: Log lines and pagination token
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
   /admin/promote_user:
     <<: *commonOptions
     post:
@@ -266,391 +367,6 @@ paths:
       x-amazon-apigateway-integration:
         uri:
           Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
-        passthroughBehavior: "when_no_match"
-        httpMethod: POST
-        type: aws_proxy
-
-  /admin/data_sources:
-    <<: *commonOptions
-    get:
-      tags: [Admin]
-      summary: List data sources with latest ingestion run
-      operationId: get_admin_data_sources
-      security:
-        - adminAuthorizer: []
-      responses:
-        "200":
-          description: Data sources with latest ingestion run per source
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        data_source:
-                          type: object
-                          properties:
-                            id: { type: string }
-                            name: { type: string }
-                            type:
-                              type: string
-                              enum: [website, csv, markdown, json]
-                            created_at: { type: string }
-                            metadata:
-                              type: object
-                              additionalProperties: true
-                            include_patterns:
-                              type: array
-                              nullable: true
-                              items: { type: string }
-                            exclude_patterns:
-                              type: array
-                              nullable: true
-                              items: { type: string }
-                        latest_ingestion_run:
-                          nullable: true
-                          type: object
-                          properties:
-                            id: { type: string }
-                            data_source_id: { type: string }
-                            status:
-                              type: string
-                              enum: [pending, queued, running, failed, completed]
-                            error_message:
-                              type: string
-                              nullable: true
-                            created_at: { type: string }
-                            completed_at:
-                              type: string
-                              nullable: true
-      "401":
-        description: Unauthorized
-      "500":
-        description: Internal Server Error
-      x-amazon-apigateway-integration:
-        uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
-        passthroughBehavior: when_no_match
-        httpMethod: POST
-        type: aws_proxy
-    post:
-      tags: [Admin]
-      summary: Stage data sources for future syncing
-      operationId: add_data_sources
-      security:
-        - adminAuthorizer: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - type
-                - created_by
-              properties:
-                type:
-                  type: string
-                  enum: [website, csv, markdown]
-                  example: website
-                created_by:
-                  type: string
-                  example: example@email.com
-                name:
-                  type: string
-                  example: https://example.com
-                include_patterns:
-                  type: array
-                  items:
-                    type: string
-                exclude_patterns:
-                  type: array
-                  items:
-                    type: string
-                csv_file_name:
-                  type: string
-                  example: alumni_data_final.csv
-                csv_s3_bucket:
-                  type: string
-                  example: my-kb-bucket
-                csv_s3_key:
-                  type: string
-                  example: uploads/csv/1712345678_alumni_data_final.csv
-                metadata_file_name:
-                  type: string
-                  example: alumni_data_final.csv.metadata.json
-                metadata_s3_bucket:
-                  type: string
-                  example: my-kb-bucket
-                metadata_s3_key:
-                  type: string
-                  example: uploads/json/1712345678_alumni_data_final.csv.metadata.json
-      responses:
-        "200":
-          description: Data source(s) staged successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                  action:
-                    type: string
-                  type:
-                    type: string
-                    enum: [website, csv, markdown]
-                  created_by:
-                    type: string
-                  staged_data_source_ids:
-                    type: array
-                    items:
-                      type: string
-        "400":
-          description: Invalid request
-        "404":
-          description: Route not found
-        "409":
-          description: Conflict
-        "500":
-          description: Internal Server Error
-      x-amazon-apigateway-integration:
-        uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaKnowledgeBase.Arn}/invocations
-        passthroughBehavior: when_no_match
-        httpMethod: POST
-        type: aws_proxy
-
-  /admin/data_sources/sync:
-    <<: *commonOptions
-    post:
-      tags: [Admin]
-      summary: Queue pending data sources and begin syncing
-      operationId: sync_data_sources
-      security:
-        - adminAuthorizer: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                created_by:
-                  type: string
-                  example: example@email.com
-      responses:
-        "200":
-          description: Sync process started successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                  action:
-                    type: string
-                  sync_session_id:
-                    type: string
-                  queued_count:
-                    type: integer
-                  s3_queued_count:
-                    type: integer
-                  website_queued_count:
-                    type: integer
-        "400":
-          description: Invalid request
-        "404":
-          description: Route not found
-        "409":
-          description: A sync is already running or no pending data sources exist
-        "500":
-          description: Internal Server Error
-      x-amazon-apigateway-integration:
-        uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaKnowledgeBase.Arn}/invocations
-        passthroughBehavior: when_no_match
-        httpMethod: POST
-        type: aws_proxy
-
-  /admin/generate-presigned-url:
-    <<: *commonOptions
-    get:
-      tags:
-        - Admin
-      summary: Generate a pre-signed URL for uploading knowledge base files to S3
-      operationId: generate_presigned_url
-      security:
-        - adminAuthorizer: []
-      parameters:
-        - name: file_name
-          in: query
-          required: true
-          description: Name of the file to upload
-          schema:
-            type: string
-            maxLength: 255
-        - name: content_type
-          in: query
-          required: false
-          description: MIME type of the file
-          schema:
-            type: string
-            default: "application/octet-stream"
-      responses:
-        "200":
-          description: Pre-signed URL generated successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  presignedUrl:
-                    type: string
-                    description: The pre-signed URL for uploading
-                  key:
-                    type: string
-                    description: The S3 object key
-                  bucket:
-                    type: string
-                    description: The S3 bucket name
-        "400":
-          description: Bad Request - Missing required parameters
-        "500":
-          description: Internal Server Error
-      x-amazon-apigateway-integration:
-        uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaKnowledgeBase.Arn}/invocations
-        passthroughBehavior: "when_no_match"
-        httpMethod: POST
-        type: aws_proxy
-
-  /admin/generate-presigned-urls/batch:
-    <<: *commonOptions
-    post:
-      tags:
-        - Admin
-      summary: Generate pre-signed URLs for multiple files in a single request (batch zip upload)
-      operationId: generate_presigned_urls_batch
-      security:
-        - adminAuthorizer: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [files]
-              properties:
-                files:
-                  type: array
-                  maxItems: 200
-                  items:
-                    type: object
-                    required: [file_name]
-                    properties:
-                      file_name:
-                        type: string
-                        maxLength: 255
-                      content_type:
-                        type: string
-                        default: "application/octet-stream"
-      responses:
-        "200":
-          description: Pre-signed URLs generated successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  presigned_urls:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        file_name: { type: string }
-                        presigned_url: { type: string }
-                        key: { type: string }
-                        bucket: { type: string }
-        "400":
-          description: Bad Request
-        "500":
-          description: Internal Server Error
-      x-amazon-apigateway-integration:
-        uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaKnowledgeBase.Arn}/invocations
-        passthroughBehavior: "when_no_match"
-        httpMethod: POST
-        type: aws_proxy
-
-  /admin/data_sources/batch:
-    <<: *commonOptions
-    post:
-      tags: [Admin]
-      summary: Stage multiple CSV/Markdown + metadata JSON pairs in one request
-      operationId: stage_data_sources_batch
-      security:
-        - adminAuthorizer: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [created_by, items]
-              properties:
-                created_by:
-                  type: string
-                  example: admin@example.com
-                items:
-                  type: array
-                  maxItems: 100
-                  items:
-                    type: object
-                    required: [type, primary_file_name, primary_s3_bucket, primary_s3_key, metadata_file_name, metadata_s3_bucket, metadata_s3_key]
-                    properties:
-                      type:
-                        type: string
-                        enum: [csv, markdown]
-                      primary_file_name: { type: string }
-                      primary_s3_bucket: { type: string }
-                      primary_s3_key: { type: string }
-                      metadata_file_name: { type: string }
-                      metadata_s3_bucket: { type: string }
-                      metadata_s3_key: { type: string }
-      responses:
-        "200":
-          description: Batch staging complete
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message: { type: string }
-                  staged_count: { type: integer }
-                  skipped_count: { type: integer }
-                  error_count: { type: integer }
-                  staged:
-                    type: array
-                    items: { type: object }
-                  skipped:
-                    type: array
-                    items: { type: object }
-                  errors:
-                    type: array
-                    items: { type: object }
-        "400":
-          description: Bad Request
-        "500":
-          description: Internal Server Error
-      x-amazon-apigateway-integration:
-        uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaKnowledgeBase.Arn}/invocations
         passthroughBehavior: "when_no_match"
         httpMethod: POST
         type: aws_proxy

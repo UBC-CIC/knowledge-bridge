@@ -12,8 +12,6 @@ _CONFIG_LOADED = False
 # DEFAULT VALUES (Fallbacks)
 # ------------------------------------------------------------------
 
-KB_ID = None
-
 HAIKU_ARN = None
 SONNET_ARN = None
 
@@ -22,8 +20,6 @@ LLM_REGION = os.getenv("LLM_REGION", "us-west-2")
 
 GUARDRAIL_ID = os.getenv('GUARDRAIL_ID')
 GUARDRAIL_VERSION = os.getenv('GUARDRAIL_VERSION')
-
-KB_SECRET_NAME = os.getenv('KB_SECRET_NAME')
 
 # Chat Configuration
 MAX_MESSAGES_PER_DAY = 45
@@ -89,7 +85,6 @@ def load_config(db_connection):
     global _CONFIG_LOADED
     global MAX_MESSAGES_PER_DAY, MIN_EXCHANGES_BEFORE_SUGGEST, MAX_CHARACTERS_PER_USER_MESSAGE, MAX_CHARACTERS_PER_AI_MESSAGE, TEMPERATURE, TOP_P, SUPPORT_SCORE_THRESHOLD, SCOPE_ALIGNMENT_SCORE_THRESHOLD, GROUNDED_THRESHOLD, PARTIALLY_GROUNDED_THRESHOLD
     global GUARDRAILS, ROLE, CHECKLIST, INSTRUCTIONS, DETECTIVE_PHASE_PROMPT, SUGGESTION_PHASE_PROMPT, INITIAL_PROMPT
-    global KB_ID
     global SPEC_LIST
     global SPEC_PROMPT
     global HAIKU_ARN, SONNET_ARN
@@ -100,17 +95,6 @@ def load_config(db_connection):
 
     logger.info("Loading system config from DB and Secrets Manager...")
     
-    # Load Knowledge Base ID from Secrets Manager
-    if not KB_ID:
-        try:
-            client = boto3.client('secretsmanager')
-            response = client.get_secret_value(SecretId=KB_SECRET_NAME)
-            KB_ID = response.get('SecretString')
-            logger.info("Successfully loaded KB_ID from Secrets Manager.")
-        except Exception as e:
-            logger.error(f"Failed to load KB_ID from Secrets Manager: {e}")
-            raise
-
     if not HAIKU_ARN:
         ssm_param = os.environ.get("HAIKU_ARN")
         if not ssm_param:
