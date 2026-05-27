@@ -232,7 +232,7 @@ export default function IngestionPanel() {
       )}
 
       {/* Runs table */}
-      <Card className="border-gray-200 shadow-sm">
+      <Card className="border-gray-200 shadow-sm py-0">
         <CardContent className="p-0">
           {loadingRuns ? (
             <div className="flex items-center gap-2 text-sm text-gray-500 p-6">
