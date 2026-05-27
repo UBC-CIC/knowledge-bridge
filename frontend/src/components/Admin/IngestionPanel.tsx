@@ -281,7 +281,7 @@ export default function IngestionPanel() {
                         <span className="text-gray-700 font-medium">
                           {formatDateTime(run.started_at)}
                         </span>
-                        {run.metadata?.force_full && (
+                        {!!run.metadata?.force_full && (
                           <span className="ml-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
                             full re-ingest
                           </span>
