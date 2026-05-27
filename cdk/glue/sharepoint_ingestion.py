@@ -63,6 +63,7 @@ args = getResolvedOptions(sys.argv, [
     "RDS_PROXY_ENDPOINT",
     "FORCE_FULL",
     "TRIGGERED_BY",
+    "INGESTION_RUN_ID",
 ])
 
 SHAREPOINT_SECRET_NAME = args["SHAREPOINT_SECRET_NAME"]
@@ -72,6 +73,7 @@ DB_SECRET_NAME = args["DB_SECRET_NAME"]
 RDS_PROXY_ENDPOINT = args["RDS_PROXY_ENDPOINT"]
 FORCE_FULL = args.get("FORCE_FULL", "false").lower() == "true"
 TRIGGERED_BY = args.get("TRIGGERED_BY", "manual")
+INGESTION_RUN_ID = args.get("INGESTION_RUN_ID")
 
 REGION = "ca-central-1"
 LLM_REGION = "us-west-2"
@@ -351,6 +353,28 @@ def finish_ingestion_run(run_id: str, status: str, error_message: Optional[str] 
             cur.execute("""
                 UPDATE ingestion_runs SET status = %s, finished_at = now(), error_message = %s WHERE id = %s
             """, (status, error_message, run_id))
+        conn.commit()
+
+def update_site_ingestion_run(run_id: str, site_id: str, status: str,
+                               total: int, processed: int, ingested: int,
+                               skipped: int, failed: int,
+                               error_message: Optional[str] = None):
+    """Update the pre-existing site run row created by the trigger Lambda."""
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE ingestion_runs SET
+                    site_id = %s,
+                    status = %s,
+                    finished_at = now(),
+                    total_documents = %s,
+                    processed_documents = %s,
+                    ingested_documents = %s,
+                    skipped_documents = %s,
+                    failed_documents = %s,
+                    error_message = %s
+                WHERE id = %s
+            """, (site_id, status, total, processed, ingested, skipped, failed, error_message, run_id))
         conn.commit()
 
 def update_run_counts(run_id, processed_delta=0, ingested_delta=0, skipped_delta=0, failed_delta=0):
@@ -773,10 +797,9 @@ async def run_site_ingestion(site_id=SITE_ID, triggered_by="manual", force_full=
     eligible = [l for l in lists.value if is_eligible_sharepoint_list(l)]
     log(f"Found {len(eligible)} eligible lists.")
 
-    site_run_id = start_ingestion_run(site_id=site_row_id, source_id=None, run_type="site", total_documents=len(eligible), triggered_by=triggered_by)
-
-    site_failed = False
-    completed = partial = failed = 0
+    any_failed = False
+    completed = failed = 0
+    total_processed = total_ingested = total_skipped = total_failed = 0
 
     for sp_list in eligible:
         try:
@@ -787,27 +810,40 @@ async def run_site_ingestion(site_id=SITE_ID, triggered_by="manual", force_full=
                 triggered_by=triggered_by,
                 force_full=force_full,
             )
-            if result["status"] == "completed":
+            total_processed += result.get("processed", 0)
+            total_ingested += result.get("processed", 0) - result.get("failed", 0)
+            total_skipped += 0
+            total_failed += result.get("failed", 0)
+            if result["status"] in ("completed", "partial"):
                 completed += 1
-                update_run_counts(site_run_id, processed_delta=1, ingested_delta=1)
-            elif result["status"] == "partial":
-                partial += 1
-                site_failed = True
-                update_run_counts(site_run_id, processed_delta=1, failed_delta=1)
-            elif result["status"] == "failed":
+                if result.get("failed", 0) > 0:
+                    any_failed = True
+            else:
                 failed += 1
-                site_failed = True
-                update_run_counts(site_run_id, processed_delta=1, failed_delta=1)
+                any_failed = True
         except Exception as e:
             logger.error(f"Failed list {sp_list.display_name}: {e}", exc_info=True)
-            site_failed = True
+            any_failed = True
             failed += 1
-            update_run_counts(site_run_id, processed_delta=1, failed_delta=1)
 
     refresh_site_status(site_row_id)
-    final_status = "partial" if site_failed else "completed"
-    finish_ingestion_run(site_run_id, final_status, error_message=None if not site_failed else json.dumps({"completed": completed, "partial": partial, "failed": failed}))
-    log(f"Site ingestion done: status={final_status}, completed={completed}, partial={partial}, failed={failed}")
+    final_status = "failed" if (failed == len(eligible) and len(eligible) > 0) else "completed"
+    error_msg = None if not any_failed else json.dumps({"lists_completed": completed, "lists_failed": failed})
+
+    if INGESTION_RUN_ID:
+        update_site_ingestion_run(
+            run_id=INGESTION_RUN_ID,
+            site_id=site_row_id,
+            status=final_status,
+            total=len(eligible),
+            processed=total_processed,
+            ingested=total_ingested,
+            skipped=total_skipped,
+            failed=total_failed,
+            error_message=error_msg,
+        )
+
+    log(f"Site ingestion done: status={final_status}, completed={completed}, failed={failed}")
     return site_row_id
 
 

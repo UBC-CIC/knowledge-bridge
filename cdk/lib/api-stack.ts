@@ -1359,8 +1359,10 @@ export class ApiGatewayStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["logs:GetLogEvents", "logs:DescribeLogStreams"],
         resources: [
-          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws-glue/python-jobs:*`,
-          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws-glue/python-jobs`,
+          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws-glue/python-jobs/output:*`,
+          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws-glue/python-jobs/output`,
+          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws-glue/python-jobs/error:*`,
+          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws-glue/python-jobs/error`,
         ],
       }));
     }
@@ -1383,6 +1385,22 @@ export class ApiGatewayStack extends cdk.Stack {
     const cfnLambda_admin = lambdaAdminFunction.node
       .defaultChild as lambda.CfnFunction;
     cfnLambda_admin.overrideLogicalId("adminFunction");
+
+    new lambda.Function(this, `${id}-sqlRunner`, {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      code: lambda.Code.fromAsset("lambda"),
+      handler: "handlers/sqlRunner.handler",
+      timeout: Duration.seconds(30),
+      vpc: vpcStack.vpc,
+      environment: {
+        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+        RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
+      },
+      functionName: `${id}-sqlRunner`,
+      memorySize: 256,
+      layers: [postgres],
+      role: lambdaRole,
+    });
 
     if (glueJobName) {
       const glueStatusSyncFn = new lambda.Function(this, `${id}-glueStatusSync`, {

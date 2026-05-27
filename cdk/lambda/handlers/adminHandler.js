@@ -892,73 +892,6 @@ exports.handler = async (event) => {
         break;
       }
 
-      // Fetches data sources and latest ingestion run per source
-      case "GET /admin/data_sources": {
-        try {
-
-          const rows = await sqlConnection`
-            SELECT
-              ds.id::text AS ds_id,
-              ds.name AS ds_name,
-              ds.type::text AS ds_type,
-              ds.created_at::text AS ds_created_at,
-              COALESCE(ds.metadata, '{}'::jsonb) AS ds_metadata,
-              ds.include_patterns AS ds_include_patterns,
-              ds.exclude_patterns AS ds_exclude_patterns,
-
-              ir.id::text AS ir_id,
-              ir.data_source_id::text AS ir_data_source_id,
-              ir.status::text AS ir_status,
-              ir.error_message AS ir_error_message,
-              ir.created_at::text AS ir_created_at,
-              ir.completed_at::text AS ir_completed_at
-            FROM data_sources ds
-            LEFT JOIN LATERAL (
-              SELECT *
-              FROM ingestion_runs ir
-              WHERE ir.data_source_id = ds.id
-              ORDER BY ir.created_at DESC
-              LIMIT 1
-            ) ir ON TRUE
-            ORDER BY ds.created_at DESC
-          `;
-
-          const items = rows.map((r) => {
-            const data_source = {
-              id: r.ds_id,
-              name: r.ds_name,
-              type: r.ds_type,
-              created_at: r.ds_created_at,
-              metadata: r.ds_metadata ?? {},
-              include_patterns: r.ds_include_patterns ?? undefined,
-              exclude_patterns: r.ds_exclude_patterns ?? undefined,
-            };
-
-            const latest_ingestion_run = r.ir_id
-              ? {
-                id: r.ir_id,
-                data_source_id: r.ir_data_source_id,
-                status: r.ir_status,
-                error_message: r.ir_error_message ?? null,
-                created_at: r.ir_created_at,
-                completed_at: r.ir_completed_at ?? null,
-              }
-              : null;
-
-            return { data_source, latest_ingestion_run };
-          });
-
-          response.statusCode = 200;
-          response.body = JSON.stringify({ items });
-          break;
-        } catch (err) {
-          console.error("GET /admin/data_sources error:", err);
-          response.statusCode = 500;
-          response.body = JSON.stringify({ message: "Internal Server Error" });
-          break;
-        }
-      }
-
       // Fetch latest system settings
       case "GET /admin/system-settings": {
         const rows = await sqlConnection`
@@ -1336,32 +1269,40 @@ exports.handler = async (event) => {
         }
 
         // Block if a run is already in-flight (status check against DB)
-        const inFlight = await pool.query(`
+        const inFlight = await sqlConnection`
           SELECT id FROM ingestion_runs
-          WHERE run_type = 'site' AND status NOT IN ('completed', 'failed', 'stopped')
+          WHERE run_type = 'site' AND status = 'running'
           LIMIT 1
-        `);
-        if (inFlight.rows.length > 0) {
+        `;
+        if (inFlight.length > 0) {
           response.statusCode = 409;
           response.body = JSON.stringify({ error: "An ingestion job is already running." });
           break;
         }
+
+        // Insert the DB row first to get its UUID, then start Glue passing that UUID
+        const metadataJson = { force_full: forceFull === "true", job_name: jobName };
+        const inserted = await sqlConnection`
+          INSERT INTO ingestion_runs (run_type, triggered_by, status, started_at, metadata)
+          VALUES ('site', 'manual', 'running', now(), ${JSON.stringify(metadataJson)}::jsonb)
+          RETURNING id
+        `;
+        const ingestionRunId = inserted[0].id;
 
         const glueResp = await glueClient.send(new StartJobRunCommand({
           JobName: jobName,
           Arguments: {
             "--FORCE_FULL": forceFull,
             "--TRIGGERED_BY": "manual",
+            "--INGESTION_RUN_ID": ingestionRunId,
           },
         }));
-
         const glueRunId = glueResp.JobRunId;
 
-        // Insert a site-level run row immediately so the frontend can track it
-        await pool.query(`
-          INSERT INTO ingestion_runs (run_type, triggered_by, status, glue_run_id, started_at, metadata)
-          VALUES ('site', 'manual', 'starting', $1, now(), $2::jsonb)
-        `, [glueRunId, JSON.stringify({ force_full: forceFull === "true", job_name: jobName })]);
+        // Store the glue run ID back on the row
+        await sqlConnection`
+          UPDATE ingestion_runs SET glue_run_id = ${glueRunId} WHERE id = ${ingestionRunId}
+        `;
 
         response.body = JSON.stringify({ jobRunId: glueRunId });
         break;
@@ -1370,7 +1311,7 @@ exports.handler = async (event) => {
       // GET /admin/ingestion/runs — recent site-level run history from DB
       case "GET /admin/ingestion/runs": {
         const limit = Math.min(parseInt(event.queryStringParameters?.limit || "10", 10), 50);
-        const { rows } = await pool.query(`
+        const runs = await sqlConnection`
           SELECT
             id, glue_run_id, run_type, triggered_by, status,
             started_at, finished_at,
@@ -1379,9 +1320,9 @@ exports.handler = async (event) => {
           FROM ingestion_runs
           WHERE run_type = 'site'
           ORDER BY started_at DESC
-          LIMIT $1
-        `, [limit]);
-        response.body = JSON.stringify({ runs: rows });
+          LIMIT ${limit}
+        `;
+        response.body = JSON.stringify({ runs });
         break;
       }
 
@@ -1402,9 +1343,8 @@ exports.handler = async (event) => {
         const jobRun = jobRunResp.JobRun;
         const status = jobRun?.JobRunState;
 
-        // output stream = jobRunId, error stream = jobRunId-error
-        const logGroupName = `/aws-glue/python-jobs`;
-        const logStreamPrefix = logType === "error" ? `${jobRunId}-error` : jobRunId;
+        const logGroupName = logType === "error" ? `/aws-glue/python-jobs/error` : `/aws-glue/python-jobs/output`;
+        const logStreamPrefix = jobRunId;
         let logLines = [];
         let nextForwardToken = null;
 
@@ -1413,6 +1353,7 @@ exports.handler = async (event) => {
             logGroupName,
             logStreamNamePrefix: logStreamPrefix,
           }));
+          console.log("DescribeLogStreams result:", JSON.stringify(streamsResp.logStreams?.map(s => s.logStreamName)));
           const stream = streamsResp.logStreams?.[0];
           if (stream) {
             const logsResp = await logsClient.send(new GetLogEventsCommand({
