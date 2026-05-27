@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Play, Loader2, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import { Button } from "@/components/ui/button";
@@ -199,7 +199,7 @@ export default function IngestionPanel() {
     <div className="space-y-4">
       {/* Header + controls */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h3 className="text-xl font-semibold text-gray-900">SharePoint Ingestion</h3>
+        <h3 className="text-2xl font-bold text-gray-900">SharePoint Ingestion</h3>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
             <input
@@ -222,12 +222,6 @@ export default function IngestionPanel() {
               <><Play className="mr-2 h-4 w-4" />Run Ingestion</>
             )}
           </Button>
-          {isInFlight && (
-            <span className="flex items-center gap-1.5 text-sm text-blue-600">
-              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              Job in progress — polling for updates
-            </span>
-          )}
         </div>
       </div>
 
@@ -265,8 +259,8 @@ export default function IngestionPanel() {
                   const isActive = !TERMINAL.has(run.status);
                   const hasStats = run.status === "completed" || run.ingested_documents > 0 || run.failed_documents > 0;
                   return (
-                    <>
-                      <TableRow key={run.id} className={isViewing ? "bg-gray-50/50" : ""}>
+                    <React.Fragment key={run.id}>
+                      <TableRow className={isViewing ? "bg-gray-50/50" : ""}>
                         <TableCell className="text-sm text-gray-500 font-medium">{index + 1}</TableCell>
 
                         <TableCell>
@@ -380,7 +374,7 @@ export default function IngestionPanel() {
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </React.Fragment>
                   );
                 })}
               </TableBody>
