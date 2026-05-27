@@ -24,26 +24,33 @@ Amplify.configure({
   },
 });
 
-
-
-
-
 function App() {
   return (
     <BrowserRouter>
       <UserProvider>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/" element={<HomePage />}>
+            {/* Single login for all users */}
+            <Route path="/login" element={<AdminLogin />} />
+
+            {/* Chat — any authenticated user */}
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <HomePage />
+                </ProtectedRoute>
+              }
+            >
               <Route path="chat" element={<AIChatPage />} />
             </Route>
 
-            {/* Admin Routes */}
+            {/* Admin dashboard — admin group only */}
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route
               path="/admin/dashboard"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requireAdmin>
                   <AdminDashboard />
                 </ProtectedRoute>
               }

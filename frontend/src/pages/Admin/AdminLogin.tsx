@@ -14,10 +14,8 @@ import { confirmSignIn } from "aws-amplify/auth";
 import { Eye, EyeOff } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import Footer from "@/components/Footer";
-import { useUser } from "@/providers/user";
 
 export default function AdminLogin() {
-  const { userId } = useUser();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -30,51 +28,22 @@ export default function AdminLogin() {
   const [requiresNewPassword, setRequiresNewPassword] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as any)?.from?.pathname || "/admin/dashboard";
+  const from = (location.state as any)?.from?.pathname || "/";
 
   useEffect(() => {
     const checkAuthStatus = async () => {
       try {
         const session = await AuthService.getAuthSession(true);
         if (session?.tokens?.accessToken) {
-          // User is already authenticated, redirect to dashboard
           navigate(from, { replace: true });
         }
-      } catch (error) {
-        // User is not authenticated, stay on login page
-        console.log("Not authenticated");
+      } catch {
+        // not authenticated, stay on login page
       }
     };
 
     checkAuthStatus();
-  }, [navigate]);
-
-  const updateAdminUser = async (email: string) => {
-    if (!userId) throw new Error("Missing userId");
-
-    const session = await AuthService.getAuthSession(true);
-    const token = session.tokens.idToken;
-
-    const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/promote_user`, {
-      method: "POST",
-      headers: {
-        Authorization: token,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        user_id: userId,
-        email,
-        role: "admin",
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Failed to update admin user: ${res.status} ${text}`);
-    }
-
-    return res.json();
-  };
+  }, [navigate, from]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,12 +59,8 @@ export default function AdminLogin() {
       }
 
       if (result.isSignedIn) {
-        await updateAdminUser(email);
         navigate(from, { replace: true });
-      } else if (
-        result.nextStep?.signInStep ===
-        "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED"
-      ) {
+      } else if (result.nextStep?.signInStep === "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED") {
         setRequiresNewPassword(true);
       }
     } catch (err: any) {
@@ -122,12 +87,8 @@ export default function AdminLogin() {
     setIsLoading(true);
 
     try {
-      const user = await confirmSignIn({
-        challengeResponse: newPassword,
-      });
-
+      const user = await confirmSignIn({ challengeResponse: newPassword });
       if (user.isSignedIn) {
-        // Clear cache to ensure fresh session
         AuthService.clearAuthCache();
         navigate(from, { replace: true });
       }
@@ -144,12 +105,12 @@ export default function AdminLogin() {
         <Card className="w-full max-w-md">
           <CardHeader className="space-y-1 text-center">
             <CardTitle className="text-2xl font-bold">
-              {requiresNewPassword ? "Set New Password" : "Admin Login"}
+              {requiresNewPassword ? "Set New Password" : "Sign In"}
             </CardTitle>
             <CardDescription>
               {requiresNewPassword
                 ? "Please set a new password for your account"
-                : "Enter your credentials to access the admin dashboard"}
+                : "Enter your credentials to continue"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -160,7 +121,7 @@ export default function AdminLogin() {
                   <Input
                     id="email"
                     type="email"
-                    placeholder="admin@example.com"
+                    placeholder="you@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
@@ -197,7 +158,7 @@ export default function AdminLogin() {
                   </div>
                 )}
                 <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Logging in..." : "Login"}
+                  {isLoading ? "Signing in..." : "Sign In"}
                 </Button>
               </form>
             ) : (
@@ -241,9 +202,7 @@ export default function AdminLogin() {
                     />
                     <button
                       type="button"
-                      onClick={() =>
-                        setShowConfirmPassword(!showConfirmPassword)
-                      }
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                       className="absolute right-3 top-1/2 -translate-y-1/2"
                     >
                       {showConfirmPassword ? (

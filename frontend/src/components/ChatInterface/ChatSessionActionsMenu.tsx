@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { MoreVertical, Pencil, Trash2, Download } from "lucide-react";
+import { AuthService } from "@/functions/authService";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -113,13 +114,8 @@ export default function ChatSessionActionsMenu({
     }
 
     try {
-      const tokenResp = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/user/publicToken`);
-      if (!tokenResp.ok) {
-        throw new Error("Failed to acquire public token");
-      }
-
-      const tokenData = await tokenResp.json();
-      const token = tokenData.token as string;
+      const session = await AuthService.getAuthSession(true);
+      const token = session?.tokens?.idToken as string;
 
       const url = new URL(`${import.meta.env.VITE_API_ENDPOINT}/chat_sessions/${chatSessionId}`);
       url.searchParams.set("user_id", userId);

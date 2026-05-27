@@ -2,66 +2,71 @@ const {
   SecretsManagerClient,
   GetSecretValueCommand,
 } = require("@aws-sdk/client-secrets-manager");
-const jwt = require("jsonwebtoken");
+const { CognitoJwtVerifier } = require("aws-jwt-verify");
 
 const secretsManager = new SecretsManagerClient();
-let cachedSecret;
-let cacheExpiry = 0;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+let jwtVerifier;
+
+async function initializeVerifier() {
+  const response = await secretsManager.send(
+    new GetSecretValueCommand({ SecretId: process.env.SM_COGNITO_CREDENTIALS })
+  );
+  const credentials = JSON.parse(response.SecretString);
+
+  // Accept both groups — admins can use all user-facing endpoints
+  jwtVerifier = CognitoJwtVerifier.create([
+    {
+      userPoolId: credentials.VITE_COGNITO_USER_POOL_ID,
+      tokenUse: "id",
+      clientId: credentials.VITE_COGNITO_USER_POOL_CLIENT_ID,
+      groups: "users",
+    },
+    {
+      userPoolId: credentials.VITE_COGNITO_USER_POOL_ID,
+      tokenUse: "id",
+      clientId: credentials.VITE_COGNITO_USER_POOL_CLIENT_ID,
+      groups: "admin",
+    },
+  ]);
+}
 
 exports.handler = async (event) => {
-  const token = event.authorizationToken?.replace("Bearer ", "");
+  if (!jwtVerifier) {
+    await initializeVerifier();
+  }
 
+  const token = event.authorizationToken?.replace("Bearer ", "");
   if (!token) {
     console.warn("No token provided");
     throw new Error("Unauthorized");
   }
 
   try {
-    if (!cachedSecret || Date.now() > cacheExpiry) {
-      const response = await secretsManager.send(
-        new GetSecretValueCommand({ SecretId: process.env.JWT_SECRET })
-      );
-      cachedSecret = JSON.parse(response.SecretString).jwtSecret;
-      cacheExpiry = Date.now() + CACHE_TTL_MS;
-    }
+    const payload = await jwtVerifier.verify(token);
 
-    const decoded = jwt.verify(token, cachedSecret);
+    const arnParts = event.methodArn.split("/");
+    const wildcardResource = `${arnParts.slice(0, 2).join("/")}/*/*`;
 
-    // Extract API Gateway ARN parts to create wildcard resource
-    // methodArn format: arn:aws:execute-api:region:account:apiId/stage/method/resource
-    const arnParts = event.methodArn.split('/');
-    const apiGatewayArnPrefix = arnParts.slice(0, 2).join('/'); // arn:aws:execute-api:region:account:apiId/stage
-    const wildcardResource = `${apiGatewayArnPrefix}/*/*`; // Allow all methods and resources
-
-    const policy = generatePolicy(
-      decoded.sub || "user",
-      "Allow",
-      wildcardResource
-    );
-    policy.context = {
-      userId: decoded.sub || "user",
-      ...decoded,
+    return {
+      principalId: payload.sub,
+      policyDocument: {
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Action: "execute-api:Invoke",
+            Effect: "Allow",
+            Resource: wildcardResource,
+          },
+        ],
+      },
+      context: {
+        userId: payload.sub,
+        email: payload.email,
+        role: payload["cognito:groups"]?.[0] ?? "users",
+      },
     };
-    return policy;
   } catch (err) {
     console.error("Authorization error:", err.message);
     throw new Error("Unauthorized");
   }
 };
-
-function generatePolicy(principalId, effect, resource) {
-  return {
-    principalId,
-    policyDocument: {
-      Version: "2012-10-17",
-      Statement: [
-        {
-          Action: "execute-api:Invoke",
-          Effect: effect,
-          Resource: resource,
-        },
-      ],
-    },
-  };
-}

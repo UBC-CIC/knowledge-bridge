@@ -137,7 +137,7 @@ export class ApiGatewayStack extends cdk.Stack {
       signInAliases: {
         email: true,
       },
-      selfSignUpEnabled: true,
+      selfSignUpEnabled: false,
       autoVerify: {
         email: true,
       },
@@ -349,11 +349,6 @@ export class ApiGatewayStack extends cdk.Stack {
             throttlingBurstLimit: 200,
           },
 
-          // FREQUENT: Public token endpoint
-          "/user/publicToken/GET": {
-            throttlingRateLimit: 50,
-            throttlingBurstLimit: 100,
-          },
         },
       },
     });
@@ -643,6 +638,11 @@ export class ApiGatewayStack extends cdk.Stack {
       roleArn: adminRole.roleArn,
     });
 
+    new cognito.CfnUserPoolGroup(this, `${id}-UsersGroup`, {
+      groupName: "users",
+      userPoolId: this.userPool.userPoolId,
+    });
+
     const lambdaRole = new iam.Role(this, `${id}-postgresLambdaRole`, {
       roleName: `${id}-postgresLambdaRole`,
       assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
@@ -790,16 +790,6 @@ export class ApiGatewayStack extends cdk.Stack {
       },
     });
 
-    const jwtSecret = new secretsmanager.Secret(this, `${id}-JwtSecret`, {
-      secretName: `${id}-KBA-JWTSecret`,
-      generateSecretString: {
-        secretStringTemplate: JSON.stringify({}),
-        generateStringKey: "jwtSecret",
-        excludePunctuation: false,
-        excludeCharacters: '"@/\\\'',
-        passwordLength: 128,
-      },
-    });
 
     const adminAuthorizationFunction = new lambda.Function(
       this,
@@ -851,12 +841,11 @@ export class ApiGatewayStack extends cdk.Stack {
         layers: [jwt],
         role: lambdaRole,
         environment: {
-          JWT_SECRET: jwtSecret.secretArn,
+          SM_COGNITO_CREDENTIALS: this.secret.secretName,
         },
         functionName: `${id}-userLambdaAuthorizer`,
       }
     );
-    jwtSecret.grantRead(userAuthFunction);
     userAuthFunction.grantInvoke(
       new iam.ServicePrincipal("apigateway.amazonaws.com")
     );
@@ -874,75 +863,6 @@ export class ApiGatewayStack extends cdk.Stack {
       .defaultChild as lambda.CfnFunction;
     apiGW_userauthorizationFunction.overrideLogicalId("userLambdaAuthorizer");
 
-    const publicTokenLambda = new lambda.Function(
-      this,
-      `${id}-PublicTokenFunction`,
-      {
-        runtime: lambda.Runtime.NODEJS_22_X,
-        handler: "publicTokenFunction.handler",
-        layers: [jwt],
-        // reservedConcurrentExecutions: 50,
-        code: lambda.Code.fromAsset("lambda/publicTokenFunction"),
-        environment: {
-          JWT_SECRET: jwtSecret.secretArn,
-        },
-        timeout: Duration.seconds(30),
-        memorySize: 128,
-        role: lambdaRole,
-      }
-    );
-
-    jwtSecret.grantRead(publicTokenLambda);
-
-    // Add the permission to the Lambda function's policy to allow API Gateway access
-    publicTokenLambda.grantInvoke(
-      new iam.ServicePrincipal("apigateway.amazonaws.com")
-    );
-
-    new cloudwatch.Alarm(this, 'PublicTokenConcurrencyAlarm', {
-      metric: publicTokenLambda.metric('ConcurrentExecutions', { statistic: cloudwatch.Stats.MAXIMUM }),
-      threshold: 40,
-      evaluationPeriods: 2,
-      datapointsToAlarm: 2,
-      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-      alarmDescription: 'Public Token Lambda approaching concurrency limit',
-    });
-
-    // Change Logical ID to match the one decleared in YAML file of Open API
-    const apiGW_publicTokenFunction = publicTokenLambda.node
-      .defaultChild as lambda.CfnFunction;
-    apiGW_publicTokenFunction.overrideLogicalId("PublicTokenFunction");
-
-    const preSignupLambda = new lambda.Function(this, `preSignupLambda`, {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      code: lambda.Code.fromAsset("lambda/authorization"),
-      handler: "preSignUp.handler",
-      timeout: Duration.seconds(30),
-      environment: {
-        ALLOWED_EMAIL_DOMAINS: "/KBA/AllowedEmailDomains",
-      },
-      vpc: vpcStack.vpc,
-      functionName: `${id}-preSignupLambda`,
-      memorySize: 128,
-      role: coglambdaRole,
-    });
-
-    preSignupLambda.addEnvironment('ALLOWED_ORIGIN_PARAM', this.allowedOriginsParamName);
-    preSignupLambda.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ["ssm:GetParameter", "ssm:GetParameters"],
-      resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${this.allowedOriginsParamName}`],
-    }));
-
-
-    publicTokenLambda.addEnvironment('ALLOWED_ORIGIN_PARAM', this.allowedOriginsParamName);
-    publicTokenLambda.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ["ssm:GetParameter", "ssm:GetParameters"],
-      resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${this.allowedOriginsParamName}`],
-    }));
-
-
     userAuthFunction.addEnvironment('ALLOWED_ORIGIN_PARAM', this.allowedOriginsParamName);
     userAuthFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
@@ -958,18 +878,13 @@ export class ApiGatewayStack extends cdk.Stack {
       resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${this.allowedOriginsParamName}`],
     }));
 
-    this.userPool.addTrigger(
-      cognito.UserPoolOperation.PRE_SIGN_UP,
-      preSignupLambda
-    );
-
     const AutoSignupLambda = new lambda.Function(
       this,
       `${id}-addAdminOnSignUp`,
       {
         runtime: lambda.Runtime.NODEJS_22_X,
         code: lambda.Code.fromAsset("lambda/authorization"),
-        handler: "addAdminOnSignUp.handler",
+        handler: "addUserOnSignUp.handler",
         timeout: Duration.seconds(30),
         environment: {
           SM_DB_CREDENTIALS: db.secretPathTableCreator.secretName,
@@ -1453,7 +1368,7 @@ export class ApiGatewayStack extends cdk.Stack {
       // reservedConcurrentExecutions: 50,
       tracing: lambda.Tracing.ACTIVE,
       environment: {
-        JWT_SECRET: jwtSecret.secretArn,
+        SM_COGNITO_CREDENTIALS: this.secret.secretName,
       },
       layers: [jwt],
     });
@@ -1543,7 +1458,7 @@ export class ApiGatewayStack extends cdk.Stack {
     disconnectFunction.addToRolePolicy(wsPolicy);
     defaultFunction.addToRolePolicy(wsPolicy);
 
-    jwtSecret.grantRead(connectFunction);
+    this.secret.grantRead(connectFunction);
     // Grant the default function permission to invoke the text generation function
     lambdaTextGen.grantInvoke(defaultFunction);
 
