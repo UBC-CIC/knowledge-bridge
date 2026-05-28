@@ -1289,7 +1289,7 @@ exports.handler = async (event) => {
 
         const activeRuns = await sqlConnection`
           SELECT id, glue_run_id FROM ingestion_runs
-          WHERE run_type = 'site' AND status = 'running' AND glue_run_id IS NOT NULL
+          WHERE run_type = 'site' AND status = 'running'
           LIMIT 1
         `;
         if (activeRuns.length === 0) {
@@ -1300,10 +1300,12 @@ exports.handler = async (event) => {
 
         const { id: runId, glue_run_id: glueRunId } = activeRuns[0];
 
-        await glueClient.send(new BatchStopJobRunCommand({
-          JobName: jobName,
-          JobRunIds: [glueRunId],
-        }));
+        if (glueRunId) {
+          await glueClient.send(new BatchStopJobRunCommand({
+            JobName: jobName,
+            JobRunIds: [glueRunId],
+          }));
+        }
 
         await sqlConnection`
           UPDATE ingestion_runs SET status = 'stopping' WHERE id = ${runId}
@@ -1328,6 +1330,7 @@ exports.handler = async (event) => {
             try {
               const jr = await glueClient.send(new GetJobRunCommand({ JobName: jobName, RunId: row.glue_run_id }));
               const glueState = jr.JobRun?.JobRunState;
+              console.log(`Reconcile stopping run ${row.id}: Glue state=${glueState}`);
               if (glueState && !["RUNNING", "STARTING", "STOPPING"].includes(glueState)) {
                 await sqlConnection`
                   UPDATE ingestion_runs
@@ -1335,7 +1338,9 @@ exports.handler = async (event) => {
                   WHERE id = ${row.id}
                 `;
               }
-            } catch (_) { /* best-effort */ }
+            } catch (reconcileErr) {
+              console.error(`Failed to reconcile stopping run ${row.id}:`, reconcileErr.message);
+            }
           }
         }
 

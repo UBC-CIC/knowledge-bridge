@@ -230,14 +230,14 @@ export default function IngestionPanel() {
             />
             Force full re-ingest
           </label>
-          {activeRun?.status === "running" && (
+          {(activeRun?.status === "running" || activeRun?.status === "stopping") && (
             <Button
               variant="outline"
               className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
               onClick={stopJob}
-              disabled={stopping}
+              disabled={stopping || activeRun?.status === "stopping"}
             >
-              {stopping ? (
+              {(stopping || activeRun?.status === "stopping") ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Stopping...</>
               ) : (
                 <><Square className="mr-2 h-4 w-4" />Stop</>

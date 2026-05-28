@@ -1269,7 +1269,7 @@ export class ApiGatewayStack extends cdk.Stack {
       lambdaAdminFunction.addEnvironment("GLUE_JOB_NAME", glueJobName);
       lambdaAdminFunction.addToRolePolicy(new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        actions: ["glue:StartJobRun", "glue:GetJobRun", "glue:GetJobRuns"],
+        actions: ["glue:StartJobRun", "glue:GetJobRun", "glue:GetJobRuns", "glue:BatchStopJobRun"],
         resources: [`arn:aws:glue:${this.region}:${this.account}:job/${glueJobName}`],
       }));
       lambdaAdminFunction.addToRolePolicy(new iam.PolicyStatement({
