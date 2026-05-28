@@ -13,21 +13,11 @@ async function initializeVerifier() {
   );
   const credentials = JSON.parse(response.SecretString);
 
-  // Accept both groups — admins can use all user-facing endpoints
-  jwtVerifier = CognitoJwtVerifier.create([
-    {
-      userPoolId: credentials.VITE_COGNITO_USER_POOL_ID,
-      tokenUse: "id",
-      clientId: credentials.VITE_COGNITO_USER_POOL_CLIENT_ID,
-      groups: "users",
-    },
-    {
-      userPoolId: credentials.VITE_COGNITO_USER_POOL_ID,
-      tokenUse: "id",
-      clientId: credentials.VITE_COGNITO_USER_POOL_CLIENT_ID,
-      groups: "admin",
-    },
-  ]);
+  jwtVerifier = CognitoJwtVerifier.create({
+    userPoolId: credentials.VITE_COGNITO_USER_POOL_ID,
+    tokenUse: "id",
+    clientId: credentials.VITE_COGNITO_USER_POOL_CLIENT_ID,
+  });
 }
 
 exports.handler = async (event) => {

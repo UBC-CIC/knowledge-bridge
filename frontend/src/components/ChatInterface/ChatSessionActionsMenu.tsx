@@ -114,8 +114,7 @@ export default function ChatSessionActionsMenu({
     }
 
     try {
-      const session = await AuthService.getAuthSession(true);
-      const token = session?.tokens?.idToken as string;
+      const token = await AuthService.getIdToken();
 
       const url = new URL(`${import.meta.env.VITE_API_ENDPOINT}/chat_sessions/${chatSessionId}`);
       url.searchParams.set("user_id", userId);

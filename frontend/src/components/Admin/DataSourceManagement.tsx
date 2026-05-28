@@ -26,8 +26,7 @@ export default function DataSourceManagement() {
       try {
         setLoading(true);
         setError(null);
-        const session = await AuthService.getAuthSession(true);
-        const token = session.tokens.idToken;
+        const token = await AuthService.getIdToken();
         const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/analytics`, {
           headers: { Authorization: token, "Content-Type": "application/json" },
         });

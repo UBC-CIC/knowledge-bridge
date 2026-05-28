@@ -15,8 +15,7 @@ export default function DeleteChatButton({ chatSessionId, userId, onDeleted }: D
     if (!confirm("Are you sure you want to delete this chat session?")) return;
 
     try {
-      const session = await AuthService.getAuthSession(true);
-      const token = session?.tokens?.idToken as string;
+      const token = await AuthService.getIdToken();
 
       const url = new URL(`${import.meta.env.VITE_API_ENDPOINT}/chat_sessions/${chatSessionId}`);
       if (userId) url.searchParams.set("user_id", userId);

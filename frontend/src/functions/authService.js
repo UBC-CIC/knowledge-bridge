@@ -100,6 +100,13 @@ export class AuthService {
     }
   }
 
+  static async getIdToken() {
+    const session = await fetchAuthSession({ forceRefresh: false });
+    const token = session?.tokens?.idToken;
+    if (!token) throw new Error("No ID token available");
+    return token.toString();
+  }
+
   static async getAuthSession(useCache = true) {
     try {
       // Check cache first if enabled

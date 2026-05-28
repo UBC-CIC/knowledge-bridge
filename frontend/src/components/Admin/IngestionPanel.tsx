@@ -72,10 +72,7 @@ export default function IngestionPanel() {
   const activeRun = runs[0] ?? null;
   const isInFlight = activeRun ? !TERMINAL.has(activeRun.status) : false;
 
-  const getToken = async () => {
-    const session = await AuthService.getAuthSession(true);
-    return session.tokens.idToken as string;
-  };
+  const getToken = () => AuthService.getIdToken();
 
   const fetchRuns = useCallback(async () => {
     try {

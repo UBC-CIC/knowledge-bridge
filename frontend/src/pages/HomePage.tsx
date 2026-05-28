@@ -26,10 +26,7 @@ export default function HomePage() {
   const [disclaimer, setDisclaimer] = useState<string>(DEFAULT_DISCLAIMER);
   const [isLoadingDisclaimer, setIsLoadingDisclaimer] = useState(true);
 
-  const getToken = async () => {
-    const session = await AuthService.getAuthSession(true);
-    return session.tokens.idToken as string;
-  };
+  const getToken = () => AuthService.getIdToken();
 
   const normalizeChatSession = (session: any): ChatSession => ({
     id: session.id,

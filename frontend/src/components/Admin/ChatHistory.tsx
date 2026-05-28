@@ -96,9 +96,9 @@ export default function ChatHistory() {
     }, []);
 
     const getAuthHeaders = async () => {
-        const session = await AuthService.getAuthSession(true);
+        const token = await AuthService.getIdToken();
         return {
-            Authorization: session.tokens.idToken,
+            Authorization: token,
             "Content-Type": "application/json",
         };
     };

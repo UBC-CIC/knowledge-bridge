@@ -90,8 +90,7 @@ export default function Analytics() {
       setLoading(true);
       setError(null);
 
-      const session = await AuthService.getAuthSession(true);
-      const token = session.tokens.idToken;
+      const token = await AuthService.getIdToken();
 
       const analyticsUrl = `${import.meta.env.VITE_API_ENDPOINT}/admin/analytics?timeRange=${timeRange}`;
 

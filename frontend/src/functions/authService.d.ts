@@ -33,6 +33,7 @@ export class AuthService {
   static signOut(): Promise<AuthResult>;
   static getCurrentUser(): Promise<UserResult>;
   static getAuthToken(useCache?: boolean): Promise<TokenResult>;
+  static getIdToken(): Promise<string>;
   static getAuthSession(useCache?: boolean): Promise<any>;
   static clearAuthCache(): void;
   static isTokenExpiringSoon(token: any): boolean;

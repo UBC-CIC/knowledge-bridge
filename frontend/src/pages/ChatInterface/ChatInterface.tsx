@@ -24,10 +24,7 @@ const WELCOME_PROMPT = `Hello! Please act as the Specialization Explorer.
    - Do you want to pursue research or enter industry after graduation?
 3. Be friendly and inviting.`;
 
-const getToken = async (): Promise<string> => {
-  const session = await AuthService.getAuthSession(true);
-  return session?.tokens?.idToken as string;
-};
+const getToken = () => AuthService.getIdToken();
 
 export default function AIChatPage() {
   const { setCurrentMessages, setActiveChatName } = useView();
