@@ -120,7 +120,6 @@ exports.handler = async (event) => {
 
         const userId = body?.user_id;
         const email = (body?.email || "").trim().toLowerCase();
-        const role = body?.role; // 'admin' | 'student'
 
         if (!userId) {
           response.statusCode = 400;
@@ -134,25 +133,16 @@ exports.handler = async (event) => {
           break;
         }
 
-        const validRoles = ["admin", "student"];
-        if (!validRoles.includes(role)) {
-          response.statusCode = 400;
-          response.body = JSON.stringify({ error: "role must be 'admin' or 'student'" });
-          break;
-        }
-
         const updated = await sqlConnection`
           UPDATE users
           SET
             email = ${email},
-            role = ${role}::user_role,
             last_seen_at = NOW()
           WHERE id = ${userId}::uuid
           RETURNING
             id,
             email,
             display_name,
-            role,
             created_at,
             last_seen_at,
             messages_sent,
@@ -271,7 +261,7 @@ exports.handler = async (event) => {
 
         // Find admin user id (ensure role is admin)
         const adminRows = await sqlConnection`
-          SELECT id, email, role
+          SELECT id, email
           FROM users
           WHERE email = ${adminEmail}
           LIMIT 1
@@ -283,11 +273,6 @@ exports.handler = async (event) => {
           break;
         }
 
-        if (adminRows[0].role !== "admin") {
-          response.statusCode = 403;
-          response.body = JSON.stringify({ error: "User is not an admin" });
-          break;
-        }
 
         const createdByUserId = adminRows[0].id;
 
@@ -453,7 +438,7 @@ exports.handler = async (event) => {
 
         // Find admin user id
         const adminRows = await sqlConnection`
-          SELECT id, email, role
+          SELECT id, email
           FROM users
           WHERE email = ${adminEmail}
           LIMIT 1
@@ -465,11 +450,6 @@ exports.handler = async (event) => {
           break;
         }
 
-        if (adminRows[0].role !== "admin") {
-          response.statusCode = 403;
-          response.body = JSON.stringify({ error: "User is not an admin" });
-          break;
-        }
 
         try {
           const deleted = await sqlConnection.begin(async (tx) => {
@@ -598,7 +578,7 @@ exports.handler = async (event) => {
 
         // Find admin user id (ensure role is admin)
         const adminRows = await sqlConnection`
-          SELECT id, email, role
+          SELECT id, email
           FROM users
           WHERE email = ${adminEmail}
           LIMIT 1
@@ -610,11 +590,6 @@ exports.handler = async (event) => {
           break;
         }
 
-        if (adminRows[0].role !== "admin") {
-          response.statusCode = 403;
-          response.body = JSON.stringify({ error: "User is not an admin" });
-          break;
-        }
 
         try {
           const result = await sqlConnection.begin(async (tx) => {
@@ -768,9 +743,9 @@ exports.handler = async (event) => {
         // Insert new admin user into database
         // Using postgres library template literal syntax for better performance
         const result = await sqlConnection`
-          INSERT INTO users (display_name, email, institution_id, role)
-          VALUES (${display_name}, ${email}, ${institution_id || null}, 'admin')
-          RETURNING id, display_name, email, role, institution_id, created_at
+          INSERT INTO users (display_name, email, institution_id)
+          VALUES (${display_name}, ${email}, ${institution_id || null})
+          RETURNING id, display_name, email, institution_id, created_at
         `;
 
         response.statusCode = 201; // Created
@@ -949,7 +924,7 @@ exports.handler = async (event) => {
           const offset = parseInt(qs.offset ?? "0", 10);
 
           const rows = await sqlConnection`
-            SELECT id, email, display_name, role, created_at, last_seen_at
+            SELECT id, email, display_name, created_at, last_seen_at
             FROM users
             ORDER BY COALESCE(last_seen_at, created_at) DESC
             LIMIT ${limit} OFFSET ${offset}
@@ -1179,7 +1154,7 @@ exports.handler = async (event) => {
 
         // get admin user ID and confirm role
         const adminRows = await sqlConnection`
-          SELECT id, role
+          SELECT id
           FROM users
           WHERE email = ${adminEmail}
           LIMIT 1
@@ -1191,11 +1166,6 @@ exports.handler = async (event) => {
           break;
         }
 
-        if (adminRows[0].role !== "admin") {
-          response.statusCode = 403;
-          response.body = JSON.stringify({ error: "User is not an admin" });
-          break;
-        }
 
         const updatedByUserId = adminRows[0].id;
 

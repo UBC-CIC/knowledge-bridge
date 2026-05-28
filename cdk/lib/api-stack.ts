@@ -774,6 +774,8 @@ export class ApiGatewayStack extends cdk.Stack {
 
     // Redundant secrets manager access block removed
 
+    coglambdaRole.attachInlinePolicy(adminAddUserToGroupPolicyLambda);
+
     coglambdaRole.addToPolicy(
       new iam.PolicyStatement({
         actions: ["ssm:GetParameter"],
@@ -898,7 +900,7 @@ export class ApiGatewayStack extends cdk.Stack {
       }
     );
     this.userPool.addTrigger(
-      cognito.UserPoolOperation.POST_CONFIRMATION,
+      cognito.UserPoolOperation.POST_AUTHENTICATION,
       AutoSignupLambda
     );
 
@@ -1308,7 +1310,7 @@ export class ApiGatewayStack extends cdk.Stack {
       timeout: Duration.seconds(30),
       vpc: vpcStack.vpc,
       environment: {
-        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+        SM_DB_CREDENTIALS: db.secretPathTableCreator.secretName,
         RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
       },
       functionName: `${id}-sqlRunner`,
@@ -1316,6 +1318,7 @@ export class ApiGatewayStack extends cdk.Stack {
       layers: [postgres],
       role: lambdaRole,
     });
+    db.secretPathTableCreator.grantRead(lambdaRole);
 
     if (glueJobName) {
       const glueStatusSyncFn = new lambda.Function(this, `${id}-glueStatusSync`, {

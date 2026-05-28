@@ -3,8 +3,9 @@ import { useSidebar } from "@/providers/sidebar";
 import { useNavigate } from "react-router";
 import { Separator } from "@/components/ui/separator";
 import { useView } from "@/providers/view";
-import { Plus, MessageSquare } from "lucide-react";
+import { Plus, MessageSquare, LogOut } from "lucide-react";
 import ChatSessionActionsMenu from "./ChatSessionActionsMenu";
+import { AuthService } from "@/functions/authService";
 
 type SidebarContentProps = {
   setMobileOpen: (open: boolean) => void;
@@ -21,6 +22,11 @@ function SidebarContent({
     createNewChatSession,
     removeChatSession,
   } = useView();
+
+  const handleSignOut = async () => {
+    await AuthService.signOut();
+    navigate("/login");
+  };
 
   const handleNewChat = async () => {
     const newSession = await createNewChatSession();
@@ -97,6 +103,14 @@ function SidebarContent({
         </div>
       </div>
       <Separator className="mb-4" />
+      <Button
+        variant="ghost"
+        className="w-full justify-start text-muted-foreground hover:text-foreground"
+        onClick={handleSignOut}
+      >
+        <LogOut className="h-4 w-4 mr-2" />
+        Sign out
+      </Button>
     </>
   );
 }

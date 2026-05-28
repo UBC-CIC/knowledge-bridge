@@ -33,13 +33,13 @@ exports.handler = async (event) => {
     console.log("Creating user:", { sub, email, displayName });
 
     const result = await sqlConnection`
-      INSERT INTO users (id, display_name, email, role, created_at, last_seen_at)
-      VALUES (${sub}::uuid, ${displayName}, ${email}, 'users', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO users (id, display_name, email, created_at, last_seen_at)
+      VALUES (${sub}::uuid, ${displayName}, ${email}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT (id) DO UPDATE
       SET email = EXCLUDED.email,
           display_name = EXCLUDED.display_name,
           last_seen_at = CURRENT_TIMESTAMP
-      RETURNING id, email, role
+      RETURNING id, email
     `;
 
     console.log("User created/updated:", result[0]);

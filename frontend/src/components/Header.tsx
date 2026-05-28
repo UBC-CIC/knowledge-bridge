@@ -66,7 +66,7 @@ export default function Header() {
               <SelectValue placeholder="Select mode" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="student">Mode: Student</SelectItem>
+              <SelectItem value="student">Mode: User</SelectItem>
               <SelectItem value="admin">Mode: Admin</SelectItem>
             </SelectContent>
           </Select>

@@ -73,50 +73,6 @@ exports.handler = async (event) => {
         response.body = JSON.stringify(data);
         break;
 
-      case "POST /user": {
-        const body = parseBody(event.body);
-
-        // Default role is student
-        const role = "student";
-        const userId = crypto.randomUUID();
-        const email = body.email || null;
-        const displayName = body.display_name || body.displayName || null;
-        const metadata = body.metadata || {};
-
-        const now = new Date();
-
-        // Create a new row (email can be null)
-        const result = await sqlConnection`
-          INSERT INTO users (
-            id, email, display_name, role,
-            created_at, last_seen_at,
-            metadata
-          )
-          VALUES (
-            ${userId}, ${email}, ${displayName}, ${role},
-            ${now}, ${now},
-            ${metadata}
-          )
-          RETURNING
-            id, email, display_name, role,
-            created_at, last_seen_at, metadata
-        `;
-
-        const row = result[0];
-
-        data = {
-          userId: row.id,
-          email: row.email,
-          display_name: row.display_name,
-          role: row.role,
-          created_at: row.created_at,
-          last_seen_at: row.last_seen_at,
-          metadata: row.metadata,
-        };
-
-        response.body = JSON.stringify(data);
-        break;
-      }
 
       case "GET /user/{user_id}": {
         const userId = event.pathParameters?.user_id;
@@ -128,7 +84,7 @@ exports.handler = async (event) => {
         }
 
         const user = await sqlConnection`
-          SELECT id, email, display_name, role, created_at, last_seen_at,
+          SELECT id, email, display_name, created_at, last_seen_at,
                 messages_sent, messages_window_started_at, metadata
           FROM users
           WHERE id = ${userId}
@@ -215,7 +171,6 @@ exports.handler = async (event) => {
               id,
               email,
               display_name,
-              role,
               created_at,
               last_seen_at,
               messages_sent,

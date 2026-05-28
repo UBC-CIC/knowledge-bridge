@@ -52,7 +52,7 @@ exports.handler = async (event) => {
       context: {
         userId: payload.sub,
         email: payload.email,
-        role: payload["cognito:groups"]?.[0] ?? "users",
+        role: payload["cognito:groups"]?.[0] ?? "user",
       },
     };
   } catch (err) {
