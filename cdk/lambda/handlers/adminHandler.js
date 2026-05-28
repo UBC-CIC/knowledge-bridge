@@ -16,7 +16,7 @@ const {
   SecretsManagerClient,
   GetSecretValueCommand,
 } = require("@aws-sdk/client-secrets-manager");
-const { GlueClient, StartJobRunCommand, GetJobRunCommand } = require("@aws-sdk/client-glue");
+const { GlueClient, StartJobRunCommand, GetJobRunCommand, BatchStopJobRunCommand } = require("@aws-sdk/client-glue");
 const { CloudWatchLogsClient, GetLogEventsCommand, DescribeLogStreamsCommand } = require("@aws-sdk/client-cloudwatch-logs");
 
 const glueClient = new GlueClient({});
@@ -1241,7 +1241,7 @@ exports.handler = async (event) => {
         // Block if a run is already in-flight (status check against DB)
         const inFlight = await sqlConnection`
           SELECT id FROM ingestion_runs
-          WHERE run_type = 'site' AND status = 'running'
+          WHERE run_type = 'site' AND status IN ('running', 'stopping')
           LIMIT 1
         `;
         if (inFlight.length > 0) {
@@ -1278,9 +1278,67 @@ exports.handler = async (event) => {
         break;
       }
 
+      // POST /admin/ingestion/stop — request cancellation of the active Glue job run
+      case "POST /admin/ingestion/stop": {
+        const jobName = process.env.GLUE_JOB_NAME;
+        if (!jobName) {
+          response.statusCode = 500;
+          response.body = JSON.stringify({ error: "GLUE_JOB_NAME not configured" });
+          break;
+        }
+
+        const activeRuns = await sqlConnection`
+          SELECT id, glue_run_id FROM ingestion_runs
+          WHERE run_type = 'site' AND status = 'running' AND glue_run_id IS NOT NULL
+          LIMIT 1
+        `;
+        if (activeRuns.length === 0) {
+          response.statusCode = 409;
+          response.body = JSON.stringify({ error: "No running ingestion job to stop." });
+          break;
+        }
+
+        const { id: runId, glue_run_id: glueRunId } = activeRuns[0];
+
+        await glueClient.send(new BatchStopJobRunCommand({
+          JobName: jobName,
+          JobRunIds: [glueRunId],
+        }));
+
+        await sqlConnection`
+          UPDATE ingestion_runs SET status = 'stopping' WHERE id = ${runId}
+        `;
+
+        response.body = JSON.stringify({ stopped: true });
+        break;
+      }
+
       // GET /admin/ingestion/runs — recent site-level run history from DB
       case "GET /admin/ingestion/runs": {
+        const jobName = process.env.GLUE_JOB_NAME;
         const limit = Math.min(parseInt(event.queryStringParameters?.limit || "10", 10), 50);
+
+        // Reconcile any 'stopping' rows: if Glue reports the run is no longer running, mark stopped
+        if (jobName) {
+          const stoppingRows = await sqlConnection`
+            SELECT id, glue_run_id FROM ingestion_runs
+            WHERE run_type = 'site' AND status = 'stopping' AND glue_run_id IS NOT NULL
+          `;
+          for (const row of stoppingRows) {
+            try {
+              const jr = await glueClient.send(new GetJobRunCommand({ JobName: jobName, RunId: row.glue_run_id }));
+              const glueState = jr.JobRun?.JobRunState;
+              if (glueState && !["RUNNING", "STARTING", "STOPPING"].includes(glueState)) {
+                await sqlConnection`
+                  UPDATE ingestion_runs
+                  SET status = 'stopped', finished_at = now()
+                  WHERE id = ${row.id}
+                `;
+              }
+            } catch (_) { /* best-effort */ }
+          }
+        }
+
         const runs = await sqlConnection`
           SELECT
             id, glue_run_id, run_type, triggered_by, status,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Play, Loader2, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { Play, Square, Loader2, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-type RunStatus = "running" | "completed" | "failed";
+type RunStatus = "running" | "stopping" | "stopped" | "completed" | "failed";
 
 type IngestionRun = {
   id: string;
@@ -35,11 +35,13 @@ type LogLine = { timestamp: number; message: string };
 
 const STATUS_BADGE: Record<string, string> = {
   running:   "bg-blue-100 text-blue-700",
+  stopping:  "bg-yellow-100 text-yellow-700",
+  stopped:   "bg-red-100 text-red-700",
   completed: "bg-green-100 text-green-700",
   failed:    "bg-red-100 text-red-700",
 };
 
-const TERMINAL = new Set(["completed", "failed"]);
+const TERMINAL = new Set(["completed", "failed", "stopped"]);
 
 function formatDuration(start: string, end: string | null) {
   const ms = (end ? new Date(end) : new Date()).getTime() - new Date(start).getTime();
@@ -57,6 +59,7 @@ export default function IngestionPanel() {
   const [runs, setRuns] = useState<IngestionRun[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(true);
   const [triggering, setTriggering] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [forceFull, setForceFull] = useState(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
 
@@ -122,6 +125,25 @@ export default function IngestionPanel() {
       setTriggerError(e instanceof Error ? e.message : "Failed to trigger job");
     } finally {
       setTriggering(false);
+    }
+  };
+
+  const stopJob = async () => {
+    try {
+      setStopping(true);
+      setTriggerError(null);
+      const token = await getToken();
+      const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/ingestion/stop`, {
+        method: "POST",
+        headers: { Authorization: token },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to stop job");
+      await fetchRuns();
+    } catch (e) {
+      setTriggerError(e instanceof Error ? e.message : "Failed to stop job");
+    } finally {
+      setStopping(false);
     }
   };
 
@@ -208,6 +230,20 @@ export default function IngestionPanel() {
             />
             Force full re-ingest
           </label>
+          {activeRun?.status === "running" && (
+            <Button
+              variant="outline"
+              className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+              onClick={stopJob}
+              disabled={stopping}
+            >
+              {stopping ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Stopping...</>
+              ) : (
+                <><Square className="mr-2 h-4 w-4" />Stop</>
+              )}
+            </Button>
+          )}
           <Button
             className="bg-primary text-white hover:bg-primary/90"
             onClick={triggerJob}
@@ -263,7 +299,9 @@ export default function IngestionPanel() {
                         <TableCell>
                           <Badge className={`${STATUS_BADGE[run.status] ?? "bg-gray-100 text-gray-700"} font-medium`}>
                             {run.status}
-                            {isActive && <RefreshCw className="ml-1.5 h-3 w-3 animate-spin inline" />}
+                            {(run.status === "running" || run.status === "stopping") && (
+                              <RefreshCw className="ml-1.5 h-3 w-3 animate-spin inline" />
+                            )}
                           </Badge>
                         </TableCell>
 
