@@ -128,7 +128,7 @@ export default function SideBar() {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex flex-col fixed left-0 h-screen w-64 flex-shrink-0 border bg-muted justify-between">
+      <aside className="hidden md:flex flex-col fixed left-0 top-[80px] h-[calc(100vh-80px)] w-64 flex-shrink-0 border bg-muted justify-between">
         <div className="flex-1 overflow-auto px-4 pt-[10px]">
           <SidebarContent setMobileOpen={setMobileOpen} />
         </div>
