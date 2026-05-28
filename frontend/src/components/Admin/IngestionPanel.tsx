@@ -289,7 +289,6 @@ export default function IngestionPanel() {
               <TableBody>
                 {runs.map((run, index) => {
                   const isViewing = viewingRunId === run.id;
-                  const isActive = !TERMINAL.has(run.status);
                   const hasStats = run.status === "completed" || run.ingested_documents > 0 || run.failed_documents > 0;
                   return (
                     <React.Fragment key={run.id}>
