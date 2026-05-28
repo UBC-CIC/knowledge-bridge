@@ -100,7 +100,7 @@ function SidebarContent({ setMobileOpen }: SidebarContentProps) {
 
 function LogoutButton({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogout: () => void }) {
   return (
-    <div className="border-t border-gray-100 py-2">
+    <div className="p-4 border-t border-gray-100">
       <Button
         variant="ghost"
         className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
@@ -128,8 +128,8 @@ export default function SideBar() {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex flex-col fixed left-0 p-[10px] h-screen w-64 flex-shrink-0 border bg-muted px-4">
-        <div className="flex-1 overflow-auto">
+      <aside className="hidden md:flex flex-col fixed left-0 h-screen w-64 flex-shrink-0 border bg-muted justify-between">
+        <div className="flex-1 overflow-auto px-4 pt-[10px]">
           <SidebarContent setMobileOpen={setMobileOpen} />
         </div>
         <LogoutButton isLoggingOut={isLoggingOut} onLogout={handleLogout} />
