@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router";
-import { signInWithRedirect } from "aws-amplify/auth";
+import { Navigate, useLocation } from "react-router";
 import { AuthService } from "@/functions/authService";
 
 interface ProtectedRouteProps {
@@ -9,14 +8,15 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
-  const [status, setStatus] = useState<"loading" | "allowed" | "forbidden">("loading");
+  const [status, setStatus] = useState<"loading" | "allowed" | "unauthenticated" | "forbidden">("loading");
+  const location = useLocation();
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
         const session = await AuthService.getAuthSession(true);
         if (!session?.tokens?.accessToken) {
-          signInWithRedirect({ provider: { custom: "EntraID" } });
+          setStatus("unauthenticated");
           return;
         }
 
@@ -30,7 +30,7 @@ export default function ProtectedRoute({ children, requireAdmin = false }: Prote
 
         setStatus("allowed");
       } catch {
-        signInWithRedirect({ provider: { custom: "EntraID" } });
+        setStatus("unauthenticated");
       }
     };
 
@@ -43,6 +43,10 @@ export default function ProtectedRoute({ children, requireAdmin = false }: Prote
         <div className="text-gray-600">Loading...</div>
       </div>
     );
+  }
+
+  if (status === "unauthenticated") {
+    return <Navigate to="/landing" replace state={{ from: location }} />;
   }
 
   if (status === "forbidden") {

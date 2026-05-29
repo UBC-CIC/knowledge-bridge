@@ -122,7 +122,7 @@ export default function SideBar() {
   const handleLogout = async () => {
     setIsLoggingOut(true);
     await AuthService.signOut();
-    navigate("/login");
+    navigate("/landing");
   };
 
   return (

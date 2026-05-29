@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router";
 import AppLayout from "./layouts/AppLayout";
 import AIChatPage from "./pages/ChatInterface/ChatInterface";
 import { UserProvider } from "./providers/UserContext";
+import LandingPage from "./pages/LandingPage";
 import HomePage from "./pages/HomePage";
 import AdminDashboard from "./pages/Admin/AdminDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -49,6 +50,9 @@ function App() {
     <BrowserRouter>
       <UserProvider>
         <Routes>
+          {/* Public landing page — outside AppLayout so it has no header */}
+          <Route path="/landing" element={<LandingPage />} />
+
           <Route element={<AppLayout />}>
             {/* Chat — any authenticated user */}
             <Route

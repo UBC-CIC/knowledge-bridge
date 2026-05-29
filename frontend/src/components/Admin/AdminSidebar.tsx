@@ -30,16 +30,14 @@ export default function AdminSidebar({
 
       if (result.success) {
         // Redirect to admin login page
-        navigate("/admin/login");
+        navigate("/landing");
       } else {
         console.error("Logout failed:", result.error);
-        // Still redirect even if there's an error
-        navigate("/admin/login");
+        navigate("/landing");
       }
     } catch (error) {
       console.error("Logout error:", error);
-      // Redirect anyway to ensure user is logged out from UI
-      navigate("/admin/login");
+      navigate("/landing");
     } finally {
       setIsLoggingOut(false);
     }
