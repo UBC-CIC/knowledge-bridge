@@ -3,7 +3,6 @@ import AppLayout from "./layouts/AppLayout";
 import AIChatPage from "./pages/ChatInterface/ChatInterface";
 import { UserProvider } from "./providers/UserContext";
 import HomePage from "./pages/HomePage";
-import AdminLogin from "./pages/Admin/AdminLogin";
 import AdminDashboard from "./pages/Admin/AdminDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { Amplify } from "aws-amplify";
@@ -51,9 +50,6 @@ function App() {
       <UserProvider>
         <Routes>
           <Route element={<AppLayout />}>
-            {/* Single login for all users */}
-            <Route path="/login" element={<AdminLogin />} />
-
             {/* Chat — any authenticated user */}
             <Route
               path="/"
@@ -67,7 +63,6 @@ function App() {
             </Route>
 
             {/* Admin dashboard — admin group only */}
-            <Route path="/admin/login" element={<AdminLogin />} />
             <Route
               path="/admin/dashboard"
               element={
