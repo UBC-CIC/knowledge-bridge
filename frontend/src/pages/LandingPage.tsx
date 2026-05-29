@@ -29,7 +29,7 @@ export default function LandingPage() {
         <div className="text-center max-w-md">
           <img src={logoImage} alt="KBA Logo" className="h-20 w-auto mx-auto mb-6" />
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Specialization Explorer
+            CUCCIO Knowledgebase Assistant
           </h1>
           <p className="text-gray-500 mb-8">
             Sign in with your UBC Microsoft account to continue.
