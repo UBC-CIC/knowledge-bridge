@@ -7,6 +7,7 @@ import AdminLogin from "./pages/Admin/AdminLogin";
 import AdminDashboard from "./pages/Admin/AdminDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { Amplify } from "aws-amplify";
+import { Hub } from "aws-amplify/utils";
 
 Amplify.configure({
   API: {
@@ -20,8 +21,28 @@ Amplify.configure({
     Cognito: {
       userPoolClientId: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
       userPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID,
+      loginWith: {
+        oauth: {
+          domain: "cic-kba.auth.ca-central-1.amazoncognito.com",
+          scopes: ["openid", "email", "profile"],
+          redirectSignIn: [
+            import.meta.env.VITE_APP_URL || "http://localhost:5173",
+          ],
+          redirectSignOut: [
+            import.meta.env.VITE_APP_URL || "http://localhost:5173",
+          ],
+          responseType: "code",
+        },
+      },
     },
   },
+});
+
+// Listen for OAuth redirect completion and reload session
+Hub.listen("auth", ({ payload }) => {
+  if (payload.event === "signInWithRedirect") {
+    window.location.href = "/";
+  }
 });
 
 function App() {

@@ -57,6 +57,12 @@ export class AmplifyStack extends cdk.Stack {
       "kba-owner-name"
     );
 
+    const branch = props.githubBranch ?? "main";
+
+    // TODO: fix cyclic dependency — VITE_APP_URL is hardcoded because amplifyApp.appId
+    // cannot be referenced inside its own constructor. appId is stable after first deploy.
+    const amplifyAppUrl = "https://main.d3oad47ldjyoe6.amplifyapp.com";
+
     const amplifyApp = new App(this, `${id}-amplifyApp`, {
       appName: `${id}-amplify`,
       sourceCodeProvider: new GitHubSourceCodeProvider({
@@ -77,6 +83,7 @@ export class AmplifyStack extends cdk.Stack {
         VITE_IDENTITY_POOL_ID: apiStack.getIdentityPoolId(),
         VITE_WEBSOCKET_URL: `${apiStack.getWebSocketUrl()}/${apiStack.getStageName() ?? ""
           }`,
+        VITE_APP_URL: amplifyAppUrl,
       },
       buildSpec: BuildSpec.fromObjectToYaml(amplifyYaml),
     });
@@ -91,7 +98,6 @@ export class AmplifyStack extends cdk.Stack {
     amplifyApp.addBranch("main");
 
     // Add feature branch if specified and not main
-    const branch = props.githubBranch ?? "main";
     if (branch !== "main") {
       amplifyApp.addBranch(branch);
     }

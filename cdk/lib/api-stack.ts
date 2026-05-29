@@ -233,7 +233,37 @@ export class ApiGatewayStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    // Create app client
+    // Cognito hosted UI domain — required for OIDC federation
+    // TODO: fix cyclic dependency between ApiStack and AmplifyStack so this URL
+    // can be derived dynamically instead of hardcoded. AmplifyStack deploys after
+    // ApiStack so the URL isn't known at synth time. Options: custom domain, SSM
+    // written by a pre-deploy step, or restructuring stack order.
+    const amplifyCallbackUrl = "https://main.d3oad47ldjyoe6.amplifyapp.com";
+    this.userPool.addDomain(`${id}-CognitoDomain`, {
+      cognitoDomain: { domainPrefix: "cic-kba" },
+    });
+
+    // Microsoft Entra ID OIDC identity provider
+    // Pass credentials at deploy time: cdk deploy -c entraClientId=xxx -c entraClientSecret=yyy -c entraTenantId=zzz
+    const entraClientId = this.node.tryGetContext("entraClientId");
+    const entraClientSecret = this.node.tryGetContext("entraClientSecret");
+    const entraTenantId = this.node.tryGetContext("entraTenantId");
+
+    const entraOidcProvider = new cognito.UserPoolIdentityProviderOidc(this, `${id}-EntraOIDC`, {
+      userPool: this.userPool,
+      name: "EntraID",
+      clientId: entraClientId,
+      clientSecret: entraClientSecret,
+      issuerUrl: `https://login.microsoftonline.com/${entraTenantId}/v2.0`,
+      scopes: ["openid", "email", "profile"],
+      attributeMapping: {
+        email: cognito.ProviderAttribute.other("email"),
+        givenName: cognito.ProviderAttribute.other("given_name"),
+        familyName: cognito.ProviderAttribute.other("family_name"),
+      },
+    });
+
+    // Create app client with OAuth for OIDC federation
     this.appClient = this.userPool.addClient(`${id}-pool`, {
       userPoolClientName: userPoolName,
       authFlows: {
@@ -241,7 +271,22 @@ export class ApiGatewayStack extends cdk.Stack {
         custom: true,
         userSrp: true,
       },
+      supportedIdentityProviders: [
+        cognito.UserPoolClientIdentityProvider.COGNITO,
+        cognito.UserPoolClientIdentityProvider.custom("EntraID"),
+      ],
+      oAuth: {
+        flows: { authorizationCodeGrant: true },
+        scopes: [
+          cognito.OAuthScope.OPENID,
+          cognito.OAuthScope.EMAIL,
+          cognito.OAuthScope.PROFILE,
+        ],
+        callbackUrls: [amplifyCallbackUrl, "http://localhost:5173"],
+        logoutUrls: [amplifyCallbackUrl, "http://localhost:5173"],
+      },
     });
+    this.appClient.node.addDependency(entraOidcProvider);
 
     this.identityPool = new cognito.CfnIdentityPool(
       this,
@@ -880,6 +925,10 @@ export class ApiGatewayStack extends cdk.Stack {
       resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${this.allowedOriginsParamName}`],
     }));
 
+    const sharepointSecret = secretsmanager.Secret.fromSecretNameV2(
+      this, `${id}-SharePointSecretRef`, "KBA-SharePoint-Credentials"
+    );
+
     const AutoSignupLambda = new lambda.Function(
       this,
       `${id}-addAdminOnSignUp`,
@@ -891,6 +940,7 @@ export class ApiGatewayStack extends cdk.Stack {
         environment: {
           SM_DB_CREDENTIALS: db.secretPathTableCreator.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
+          SHAREPOINT_SECRET_NAME: "KBA-SharePoint-Credentials",
         },
         vpc: vpcStack.vpc,
         functionName: `${id}-addMemberOnSignUp`,
@@ -899,6 +949,9 @@ export class ApiGatewayStack extends cdk.Stack {
         role: coglambdaRole,
       }
     );
+
+    sharepointSecret.grantRead(coglambdaRole);
+
     this.userPool.addTrigger(
       cognito.UserPoolOperation.POST_AUTHENTICATION,
       AutoSignupLambda

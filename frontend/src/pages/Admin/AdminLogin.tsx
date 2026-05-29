@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { confirmSignIn } from "aws-amplify/auth";
+import { confirmSignIn, signInWithRedirect } from "aws-amplify/auth";
 import { Eye, EyeOff } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import Footer from "@/components/Footer";
@@ -159,6 +159,20 @@ export default function AdminLogin() {
                 )}
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? "Signing in..." : "Sign In"}
+                </Button>
+                <div className="relative my-2">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t border-gray-200" />
+                  </div>
+                  <div className="relative flex justify-center text-xs text-gray-400 bg-white px-2 w-fit mx-auto">or</div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => signInWithRedirect({ provider: { custom: "EntraID" } })}
+                >
+                  Sign in with Microsoft
                 </Button>
               </form>
             ) : (
