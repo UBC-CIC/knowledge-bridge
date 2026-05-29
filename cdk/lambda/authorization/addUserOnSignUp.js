@@ -84,11 +84,18 @@ exports.handler = async (event) => {
 
   try {
     const userAttributes = request.userAttributes;
+    console.log("Raw event:", JSON.stringify({ userName, triggerSource: event.triggerSource, userAttributes }));
+
     const sub = userAttributes.sub;
-    const email = userAttributes.email;
+    const email = userAttributes.email || userAttributes.upn;
+
+    if (!email) {
+      throw new Error(`Login failed: no email or upn claim returned from identity provider for user ${userName}.`);
+    }
+
     const givenName = userAttributes.given_name || "";
     const familyName = userAttributes.family_name || "";
-    const displayName = `${givenName} ${familyName}`.trim() || email;
+    const displayName = `${givenName} ${familyName}`.trim() || userAttributes.name || email;
 
     console.log("Upserting user:", { sub, email, displayName });
 

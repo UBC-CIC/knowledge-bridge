@@ -257,7 +257,7 @@ export class ApiGatewayStack extends cdk.Stack {
       issuerUrl: `https://login.microsoftonline.com/${entraTenantId}/v2.0`,
       scopes: ["openid", "email", "profile"],
       attributeMapping: {
-        email: cognito.ProviderAttribute.other("email"),
+        email: cognito.ProviderAttribute.other("upn"),
         givenName: cognito.ProviderAttribute.other("given_name"),
         familyName: cognito.ProviderAttribute.other("family_name"),
       },
@@ -954,6 +954,10 @@ export class ApiGatewayStack extends cdk.Stack {
 
     this.userPool.addTrigger(
       cognito.UserPoolOperation.POST_AUTHENTICATION,
+      AutoSignupLambda
+    );
+    this.userPool.addTrigger(
+      cognito.UserPoolOperation.POST_CONFIRMATION,
       AutoSignupLambda
     );
 
