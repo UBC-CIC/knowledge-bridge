@@ -104,8 +104,7 @@ function UserProfile({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogo
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    AuthService.getUserProfile().then((result: any) => {
+    AuthService.getUserProfile().then((result) => {
       if (result.success) setProfile({ name: result.name, email: result.email });
     });
   }, []);

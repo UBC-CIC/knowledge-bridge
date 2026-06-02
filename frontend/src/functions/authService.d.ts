@@ -35,6 +35,7 @@ export class AuthService {
   static getAuthToken(useCache?: boolean): Promise<TokenResult>;
   static getIdToken(): Promise<string>;
   static getAuthSession(useCache?: boolean): Promise<any>;
+  static getUserProfile(): Promise<{ success: boolean; name: string; email: string; error?: string }>;
   static clearAuthCache(): void;
   static isTokenExpiringSoon(token: any): boolean;
 }
