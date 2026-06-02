@@ -5,6 +5,7 @@ import {
   signOut,
   getCurrentUser,
   fetchAuthSession,
+  fetchUserAttributes,
 } from "aws-amplify/auth";
 import { apiCache } from "./apiCache.js";
 
@@ -125,6 +126,19 @@ export class AuthService {
     } catch (error) {
       console.error("Auth session error:", error);
       throw error;
+    }
+  }
+
+  static async getUserProfile() {
+    try {
+      const attrs = await fetchUserAttributes();
+      return {
+        success: true,
+        name: [attrs.given_name, attrs.family_name].filter(Boolean).join(" ") || attrs.name || "",
+        email: attrs.email || "",
+      };
+    } catch (error) {
+      return { success: false, error: error.message };
     }
   }
 

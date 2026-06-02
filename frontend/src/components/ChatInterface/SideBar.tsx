@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useSidebar } from "@/providers/sidebar";
 import { useNavigate } from "react-router";
 import { Separator } from "@/components/ui/separator";
 import { useView } from "@/providers/view";
-import { Plus, MessageSquare, LogOut } from "lucide-react";
+import { Plus, MessageSquare, LogOut, UserRound } from "lucide-react";
 import ChatSessionActionsMenu from "./ChatSessionActionsMenu";
 import { AuthService } from "@/functions/authService";
 
@@ -98,18 +99,76 @@ function SidebarContent({ setMobileOpen }: SidebarContentProps) {
   );
 }
 
-function LogoutButton({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogout: () => void }) {
+function UserProfile({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogout: () => void }) {
+  const [profile, setProfile] = useState<{ name: string; email: string } | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    AuthService.getUserProfile().then((result) => {
+      if (result.success) setProfile({ name: result.name, email: result.email });
+    });
+  }, []);
+
+  const initials = profile?.name
+    ? profile.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
+    : profile?.email
+    ? profile.email[0].toUpperCase()
+    : null;
+
+  const handleSwitchAccount = () => {
+    setOpen(false);
+    AuthService.signOut().then(() => {
+      window.location.href = `https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=${encodeURIComponent(window.location.origin)}`;
+    });
+  };
+
   return (
-    <div className="p-4 border-t border-gray-100">
-      <Button
-        variant="ghost"
-        className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
-        onClick={onLogout}
-        disabled={isLoggingOut}
-      >
-        <LogOut className="mr-2 h-4 w-4" />
-        {isLoggingOut ? "Logging out..." : "Logout"}
-      </Button>
+    <div className="p-3 border-t border-gray-100">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button className="w-full flex items-center gap-3 rounded-md px-2 py-2 hover:bg-accent/40 transition-colors text-left">
+            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+              {initials ? (
+                <span className="text-xs font-semibold text-primary">{initials}</span>
+              ) : (
+                <UserRound className="h-4 w-4 text-muted-foreground" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">
+                {profile === null ? "Loading..." : profile.name || profile.email || "UBC User"}
+              </p>
+              <p className="text-xs text-muted-foreground truncate">{profile?.email || ""}</p>
+            </div>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent side="top" align="start" className="w-64 p-3">
+          <div className="mb-3">
+            <p className="text-sm font-semibold truncate">{profile?.name || profile?.email || "UBC User"}</p>
+            <p className="text-xs text-muted-foreground truncate">{profile?.email || ""}</p>
+          </div>
+          <Separator className="mb-2" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-sm"
+            onClick={handleSwitchAccount}
+          >
+            <UserRound className="mr-2 h-4 w-4" />
+            Sign in with a different account
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-sm text-red-600 hover:text-red-700 hover:bg-red-50"
+            onClick={() => { setOpen(false); onLogout(); }}
+            disabled={isLoggingOut}
+          >
+            <LogOut className="mr-2 h-4 w-4" />
+            {isLoggingOut ? "Logging out..." : "Logout"}
+          </Button>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -132,7 +191,7 @@ export default function SideBar() {
         <div className="flex-1 overflow-auto px-4 pt-[10px]">
           <SidebarContent setMobileOpen={setMobileOpen} />
         </div>
-        <LogoutButton isLoggingOut={isLoggingOut} onLogout={handleLogout} />
+        <UserProfile isLoggingOut={isLoggingOut} onLogout={handleLogout} />
       </aside>
 
       {/* Mobile sidebar */}
@@ -154,7 +213,7 @@ export default function SideBar() {
           <div className="flex-1 overflow-auto">
             <SidebarContent setMobileOpen={setMobileOpen} />
           </div>
-          <LogoutButton isLoggingOut={isLoggingOut} onLogout={handleLogout} />
+          <UserProfile isLoggingOut={isLoggingOut} onLogout={handleLogout} />
         </div>
       </div>
     </>

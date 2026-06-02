@@ -12,3 +12,5 @@ cdk.out
 
 # CDK context file contains sensitive account information
 cdk.context.json
+
+graphify-out/

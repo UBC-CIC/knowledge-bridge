@@ -61,7 +61,7 @@ export class AmplifyStack extends cdk.Stack {
 
     // TODO: fix cyclic dependency — VITE_APP_URL is hardcoded because amplifyApp.appId
     // cannot be referenced inside its own constructor. appId is stable after first deploy.
-    const amplifyAppUrl = "https://main.d3oad47ldjyoe6.amplifyapp.com";
+    const amplifyAppUrl = "https://main.d2ceee5eyalm6f.amplifyapp.com";
 
     const amplifyApp = new App(this, `${id}-amplifyApp`, {
       appName: `${id}-amplify`,

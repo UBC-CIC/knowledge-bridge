@@ -238,7 +238,7 @@ export class ApiGatewayStack extends cdk.Stack {
     // can be derived dynamically instead of hardcoded. AmplifyStack deploys after
     // ApiStack so the URL isn't known at synth time. Options: custom domain, SSM
     // written by a pre-deploy step, or restructuring stack order.
-    const amplifyCallbackUrl = "https://main.d3oad47ldjyoe6.amplifyapp.com";
+    const amplifyCallbackUrl = "https://main.d2ceee5eyalm6f.amplifyapp.com";
     this.userPool.addDomain(`${id}-CognitoDomain`, {
       cognitoDomain: { domainPrefix: "cic-kba" },
     });
@@ -256,6 +256,12 @@ export class ApiGatewayStack extends cdk.Stack {
       clientSecret: entraClientSecret,
       issuerUrl: `https://login.microsoftonline.com/${entraTenantId}/v2.0`,
       scopes: ["openid", "email", "profile"],
+      endpoints: {
+        authorization: `https://login.microsoftonline.com/${entraTenantId}/oauth2/v2.0/authorize`,
+        token: `https://login.microsoftonline.com/${entraTenantId}/oauth2/v2.0/token`,
+        jwksUri: `https://login.microsoftonline.com/${entraTenantId}/discovery/v2.0/keys`,
+        userInfo: "https://graph.microsoft.com/oidc/userinfo",
+      },
       attributeMapping: {
         email: cognito.ProviderAttribute.other("upn"),
         givenName: cognito.ProviderAttribute.other("given_name"),
