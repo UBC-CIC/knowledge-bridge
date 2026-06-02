@@ -104,7 +104,7 @@ function UserProfile({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogo
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    AuthService.getUserProfile().then((result) => {
+    AuthService.getUserProfile().then((result: { success: boolean; name: string; email: string; error?: string }) => {
       if (result.success) setProfile({ name: result.name, email: result.email });
     });
   }, []);
