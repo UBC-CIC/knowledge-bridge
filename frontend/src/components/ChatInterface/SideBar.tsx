@@ -113,8 +113,16 @@ function UserProfile({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogo
   const handleSwitchAccount = () => {
     setOpen(false);
     AuthService.signOut().then(() => {
-      const redirectUri = `${window.location.origin}/landing?switchAccount=true`;
-      window.location.href = `https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=${encodeURIComponent(redirectUri)}`;
+      const cognitoDomain = "https://cic-kba.auth.ca-central-1.amazoncognito.com";
+      const redirectUri = `${window.location.origin}/landing`;
+      const url = new URL(`${cognitoDomain}/oauth2/authorize`);
+      url.searchParams.set("response_type", "code");
+      url.searchParams.set("client_id", import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID);
+      url.searchParams.set("redirect_uri", redirectUri);
+      url.searchParams.set("identity_provider", "EntraID");
+      url.searchParams.set("prompt", "select_account");
+      url.searchParams.set("scope", "openid email profile");
+      window.location.href = url.toString();
     });
   };
 
