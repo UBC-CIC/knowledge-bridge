@@ -10,6 +10,12 @@ export default function LandingPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    const switchAccount = new URLSearchParams(window.location.search).get("switchAccount");
+    if (switchAccount === "true") {
+      signInWithRedirect({ provider: { custom: "EntraID" } });
+      return;
+    }
+
     const checkAuth = async () => {
       try {
         const session = await AuthService.getAuthSession(true);

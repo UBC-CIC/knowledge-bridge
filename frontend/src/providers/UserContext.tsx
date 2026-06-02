@@ -6,6 +6,7 @@ import { UserContext } from "./user";
 export function UserProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState<string | null>(null);
   const [role, setRole] = useState<"admin" | "users" | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -29,6 +30,19 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setUserId(sub);
         setEmail(userEmail);
         setRole(userRole);
+
+        try {
+          const token = idToken.toString();
+          const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/user/${sub}`, {
+            headers: { Authorization: token },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setDisplayName(data.display_name || userEmail);
+          }
+        } catch {
+          // non-fatal — fall back to email
+        }
       } catch (err) {
         setError(err instanceof Error ? err : new Error("Failed to load session"));
       } finally {
@@ -40,7 +54,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <UserContext.Provider value={{ userId, email, role, isLoading, error }}>
+    <UserContext.Provider value={{ userId, email, displayName, role, isLoading, error }}>
       {children}
     </UserContext.Provider>
   );

@@ -3,6 +3,7 @@ import { createContext, useContext } from "react";
 interface UserContextType {
   userId: string | null;
   email: string | null;
+  displayName: string | null;
   role: "admin" | "users" | null;
   isLoading: boolean;
   error: Error | null;

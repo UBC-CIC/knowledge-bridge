@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useSidebar } from "@/providers/sidebar";
@@ -8,6 +8,7 @@ import { useView } from "@/providers/view";
 import { Plus, MessageSquare, LogOut, UserRound } from "lucide-react";
 import ChatSessionActionsMenu from "./ChatSessionActionsMenu";
 import { AuthService } from "@/functions/authService";
+import { useUser } from "@/providers/user";
 
 type SidebarContentProps = {
   setMobileOpen: (open: boolean) => void;
@@ -100,25 +101,20 @@ function SidebarContent({ setMobileOpen }: SidebarContentProps) {
 }
 
 function UserProfile({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogout: () => void }) {
-  const [profile, setProfile] = useState<{ name: string; email: string } | null>(null);
+  const { displayName, email } = useUser();
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    AuthService.getUserProfile().then((result) => {
-      if (result.success) setProfile({ name: result.name, email: result.email });
-    });
-  }, []);
-
-  const initials = profile?.name
-    ? profile.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
-    : profile?.email
-    ? profile.email[0].toUpperCase()
+  const initials = displayName
+    ? displayName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
+    : email
+    ? email[0].toUpperCase()
     : null;
 
   const handleSwitchAccount = () => {
     setOpen(false);
     AuthService.signOut().then(() => {
-      window.location.href = `https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=${encodeURIComponent(window.location.origin)}`;
+      const redirectUri = `${window.location.origin}/landing?switchAccount=true`;
+      window.location.href = `https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=${encodeURIComponent(redirectUri)}`;
     });
   };
 
@@ -136,16 +132,16 @@ function UserProfile({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogo
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">
-                {profile === null ? "Loading..." : profile.name || profile.email || "UBC User"}
+                {displayName || email || "Loading..."}
               </p>
-              <p className="text-xs text-muted-foreground truncate">{profile?.email || ""}</p>
+              <p className="text-xs text-muted-foreground truncate">{email || ""}</p>
             </div>
           </button>
         </PopoverTrigger>
         <PopoverContent side="top" align="start" className="w-64 p-3">
           <div className="mb-3">
-            <p className="text-sm font-semibold truncate">{profile?.name || profile?.email || "UBC User"}</p>
-            <p className="text-xs text-muted-foreground truncate">{profile?.email || ""}</p>
+            <p className="text-sm font-semibold truncate">{displayName || email || ""}</p>
+            <p className="text-xs text-muted-foreground truncate">{email || ""}</p>
           </div>
           <Separator className="mb-2" />
           <Button
