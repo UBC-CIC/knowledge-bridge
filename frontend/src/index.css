@@ -1,4 +1,8 @@
 @import "tailwindcss";
+
+@theme {
+  --width-90: 22.5rem;
+}
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));

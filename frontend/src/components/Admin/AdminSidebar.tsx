@@ -44,7 +44,7 @@ export default function AdminSidebar({
   };
 
   return (
-    <aside className="w-72 bg-white border-r border-gray-200 flex flex-col justify-between hidden md:flex">
+    <aside className="w-90 bg-white border-r border-gray-200 flex flex-col justify-between hidden md:flex">
       <div className="p-4 space-y-1">
         <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
           Menu

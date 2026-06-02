@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Play, Square, Loader2, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { Play, Square, Loader2, RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -55,8 +55,12 @@ function formatDateTime(iso: string | null) {
   return new Date(iso).toLocaleString();
 }
 
+const PAGE_SIZE = 5;
+
 export default function IngestionPanel() {
   const [runs, setRuns] = useState<IngestionRun[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [loadingRuns, setLoadingRuns] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -77,29 +81,38 @@ export default function IngestionPanel() {
 
   const getToken = () => AuthService.getIdToken();
 
-  const fetchRuns = useCallback(async () => {
+  const fetchRuns = useCallback(async (pageIndex = page) => {
     try {
       const token = await getToken();
-      const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/ingestion/runs`, {
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(pageIndex * PAGE_SIZE) });
+      const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/ingestion/runs?${params}`, {
         headers: { Authorization: token },
       });
       if (!res.ok) return;
       const data = await res.json();
       setRuns(data.runs ?? []);
+      setTotal(data.total ?? 0);
     } catch {
       // silently ignore
     } finally {
       setLoadingRuns(false);
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => {
-    fetchRuns();
-  }, [fetchRuns]);
+    fetchRuns(page);
+  }, [page]);
+
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage);
+    setViewingRunId(null);
+  };
 
   useEffect(() => {
     if (isInFlight) {
-      pollRunsRef.current = setInterval(fetchRuns, 10_000);
+      pollRunsRef.current = setInterval(() => fetchRuns(0), 10_000);
     } else {
       if (pollRunsRef.current) clearInterval(pollRunsRef.current);
     }
@@ -120,7 +133,8 @@ export default function IngestionPanel() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to trigger job");
-      await fetchRuns();
+      setPage(0);
+      await fetchRuns(0);
     } catch (e) {
       setTriggerError(e instanceof Error ? e.message : "Failed to trigger job");
     } finally {
@@ -139,7 +153,7 @@ export default function IngestionPanel() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to stop job");
-      await fetchRuns();
+      await fetchRuns(0);
     } catch (e) {
       setTriggerError(e instanceof Error ? e.message : "Failed to stop job");
     } finally {
@@ -416,6 +430,29 @@ export default function IngestionPanel() {
           )}
         </CardContent>
       </Card>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-gray-500">
+          <span>{total} total runs</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handlePageChange(page - 1)}
+              disabled={page === 0}
+              className="p-1 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span>Page {page + 1} of {totalPages}</span>
+            <button
+              onClick={() => handlePageChange(page + 1)}
+              disabled={page >= totalPages - 1}
+              className="p-1 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

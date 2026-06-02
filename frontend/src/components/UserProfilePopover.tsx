@@ -40,7 +40,7 @@ export default function UserProfilePopover({ isLoggingOut, onLogout }: UserProfi
             </div>
           </button>
         </PopoverTrigger>
-        <PopoverContent side="top" align="start" className="w-72 p-3">
+        <PopoverContent side="top" align="start" className="w-80 p-3">
           <div className="mb-3">
             <p className="text-sm font-semibold truncate">{displayName || email || ""}</p>
             <p className="text-xs text-muted-foreground truncate">{email || ""}</p>

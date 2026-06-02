@@ -1318,7 +1318,8 @@ exports.handler = async (event) => {
       // GET /admin/ingestion/runs — recent site-level run history from DB
       case "GET /admin/ingestion/runs": {
         const jobName = process.env.GLUE_JOB_NAME;
-        const limit = Math.min(parseInt(event.queryStringParameters?.limit || "10", 10), 50);
+        const limit = Math.min(parseInt(event.queryStringParameters?.limit || "5", 10), 50);
+        const offset = Math.max(parseInt(event.queryStringParameters?.offset || "0", 10), 0);
 
         // Reconcile any 'stopping' rows: if Glue reports the run is no longer running, mark stopped
         if (jobName) {
@@ -1344,6 +1345,10 @@ exports.handler = async (event) => {
           }
         }
 
+        const [{ count: totalCount }] = await sqlConnection`
+          SELECT COUNT(*) FROM ingestion_runs WHERE run_type = 'site'
+        `;
+
         const runs = await sqlConnection`
           SELECT
             id, glue_run_id, run_type, triggered_by, status,
@@ -1353,9 +1358,9 @@ exports.handler = async (event) => {
           FROM ingestion_runs
           WHERE run_type = 'site'
           ORDER BY started_at DESC
-          LIMIT ${limit}
+          LIMIT ${limit} OFFSET ${offset}
         `;
-        response.body = JSON.stringify({ runs });
+        response.body = JSON.stringify({ runs, total: parseInt(totalCount, 10), limit, offset });
         break;
       }
 
