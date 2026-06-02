@@ -3,11 +3,11 @@ import { useNavigate } from "react-router";
 import {
   LayoutDashboard,
   BarChart3,
-  LogOut,
   Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
+import UserProfilePopover from "@/components/UserProfilePopover";
 
 type AdminSidebarProps = {
   activeView: "dashboard" | "analytics" | "system-settings" | "chat-history";
@@ -44,7 +44,7 @@ export default function AdminSidebar({
   };
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col justify-between hidden md:flex">
+    <aside className="w-72 bg-white border-r border-gray-200 flex flex-col justify-between hidden md:flex">
       <div className="p-4 space-y-1">
         <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
           Menu
@@ -95,17 +95,7 @@ export default function AdminSidebar({
         </Button>
       </div>
 
-      <div className="p-4 border-t border-gray-100">
-        <Button
-          variant="ghost"
-          className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
-          onClick={handleLogout}
-          disabled={isLoggingOut}
-        >
-          <LogOut className="mr-2 h-4 w-4" />
-          {isLoggingOut ? "Logging out..." : "Logout"}
-        </Button>
-      </div>
+      <UserProfilePopover isLoggingOut={isLoggingOut} onLogout={handleLogout} />
     </aside>
   );
 }

@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useSidebar } from "@/providers/sidebar";
 import { useNavigate } from "react-router";
 import { Separator } from "@/components/ui/separator";
 import { useView } from "@/providers/view";
-import { Plus, MessageSquare, LogOut, UserRound } from "lucide-react";
+import { Plus, MessageSquare } from "lucide-react";
 import ChatSessionActionsMenu from "./ChatSessionActionsMenu";
 import { AuthService } from "@/functions/authService";
-import { useUser } from "@/providers/user";
+import UserProfilePopover from "@/components/UserProfilePopover";
 
 type SidebarContentProps = {
   setMobileOpen: (open: boolean) => void;
@@ -100,57 +99,6 @@ function SidebarContent({ setMobileOpen }: SidebarContentProps) {
   );
 }
 
-function UserProfile({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogout: () => void }) {
-  const { displayName, email } = useUser();
-  const [open, setOpen] = useState(false);
-
-  const initials = displayName
-    ? displayName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
-    : email
-    ? email[0].toUpperCase()
-    : null;
-
-  return (
-    <div className="p-3 border-t border-gray-100">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <button className="w-full flex items-center gap-3 rounded-md px-2 py-2 hover:bg-accent/40 transition-colors text-left">
-            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-              {initials ? (
-                <span className="text-xs font-semibold text-primary">{initials}</span>
-              ) : (
-                <UserRound className="h-4 w-4 text-muted-foreground" />
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">
-                {displayName || email || "Loading..."}
-              </p>
-              <p className="text-xs text-muted-foreground truncate">{email || ""}</p>
-            </div>
-          </button>
-        </PopoverTrigger>
-        <PopoverContent side="top" align="start" className="w-64 p-3">
-          <div className="mb-3">
-            <p className="text-sm font-semibold truncate">{displayName || email || ""}</p>
-            <p className="text-xs text-muted-foreground truncate">{email || ""}</p>
-          </div>
-          <Separator className="mb-2" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start text-sm text-red-600 hover:text-red-700 hover:bg-red-50"
-            onClick={() => { setOpen(false); onLogout(); }}
-            disabled={isLoggingOut}
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            {isLoggingOut ? "Logging out..." : "Logout"}
-          </Button>
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
-}
 
 export default function SideBar() {
   const { mobileOpen, setMobileOpen } = useSidebar();
@@ -166,11 +114,11 @@ export default function SideBar() {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex flex-col fixed left-0 top-[80px] h-[calc(100vh-80px)] w-64 flex-shrink-0 border bg-muted justify-between">
+      <aside className="hidden md:flex flex-col fixed left-0 top-[80px] h-[calc(100vh-80px)] w-72 flex-shrink-0 border bg-muted justify-between">
         <div className="flex-1 overflow-auto px-4 pt-[10px]">
           <SidebarContent setMobileOpen={setMobileOpen} />
         </div>
-        <UserProfile isLoggingOut={isLoggingOut} onLogout={handleLogout} />
+        <UserProfilePopover isLoggingOut={isLoggingOut} onLogout={handleLogout} />
       </aside>
 
       {/* Mobile sidebar */}
@@ -185,14 +133,14 @@ export default function SideBar() {
           onClick={() => setMobileOpen(false)}
         />
         <div
-          className={`pt-[70px] absolute left-0 flex flex-col h-full w-64 bg-muted border-r p-4 transform transition-transform ${
+          className={`pt-[70px] absolute left-0 flex flex-col h-full w-72 bg-muted border-r p-4 transform transition-transform ${
             mobileOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           <div className="flex-1 overflow-auto">
             <SidebarContent setMobileOpen={setMobileOpen} />
           </div>
-          <UserProfile isLoggingOut={isLoggingOut} onLogout={handleLogout} />
+          <UserProfilePopover isLoggingOut={isLoggingOut} onLogout={handleLogout} />
         </div>
       </div>
     </>
