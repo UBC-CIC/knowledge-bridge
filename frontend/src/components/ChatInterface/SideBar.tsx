@@ -110,22 +110,6 @@ function UserProfile({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogo
     ? email[0].toUpperCase()
     : null;
 
-  const handleSwitchAccount = () => {
-    setOpen(false);
-    AuthService.signOut().then(() => {
-      const cognitoDomain = "https://cic-kba.auth.ca-central-1.amazoncognito.com";
-      const redirectUri = `${window.location.origin}/landing`;
-      const url = new URL(`${cognitoDomain}/oauth2/authorize`);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("client_id", import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID);
-      url.searchParams.set("redirect_uri", redirectUri);
-      url.searchParams.set("identity_provider", "EntraID");
-      url.searchParams.set("prompt", "select_account");
-      url.searchParams.set("scope", "openid email profile");
-      window.location.href = url.toString();
-    });
-  };
-
   return (
     <div className="p-3 border-t border-gray-100">
       <Popover open={open} onOpenChange={setOpen}>
@@ -152,15 +136,6 @@ function UserProfile({ isLoggingOut, onLogout }: { isLoggingOut: boolean; onLogo
             <p className="text-xs text-muted-foreground truncate">{email || ""}</p>
           </div>
           <Separator className="mb-2" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start text-sm"
-            onClick={handleSwitchAccount}
-          >
-            <UserRound className="mr-2 h-4 w-4" />
-            Sign in with a different account
-          </Button>
           <Button
             variant="ghost"
             size="sm"

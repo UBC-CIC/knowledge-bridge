@@ -288,8 +288,8 @@ export class ApiGatewayStack extends cdk.Stack {
           cognito.OAuthScope.EMAIL,
           cognito.OAuthScope.PROFILE,
         ],
-        callbackUrls: [amplifyCallbackUrl, `${amplifyCallbackUrl}/landing`, "http://localhost:5173", "http://localhost:5173/landing"],
-        logoutUrls: [amplifyCallbackUrl, `${amplifyCallbackUrl}/landing`, "http://localhost:5173", "http://localhost:5173/landing"],
+        callbackUrls: [amplifyCallbackUrl, "http://localhost:5173"],
+        logoutUrls: [amplifyCallbackUrl, "http://localhost:5173"],
       },
     });
     this.appClient.node.addDependency(entraOidcProvider);
