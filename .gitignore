@@ -38,4 +38,5 @@ venv/
 Thumbs.db
 
 # RDS CA bundle — downloaded at deploy time
-graphify-out/
+graphify-out/ 
+.claude/ 
