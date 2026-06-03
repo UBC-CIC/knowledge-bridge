@@ -32,7 +32,7 @@ export default function LandingPage() {
             CUCCIO Knowledgebase Assistant
           </h1>
           <p className="text-gray-500 mb-8">
-            Sign in with your UBC Microsoft account to continue.
+            Sign in with your Microsoft account to continue.
           </p>
           <Button
             size="lg"
