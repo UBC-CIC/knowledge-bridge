@@ -31,11 +31,9 @@ export type SystemMessageType =
   | "disclaimer"
   | "guardrails"
   | "system_role"
-  | "system_checklist"
   | "system_instructions"
+  | "output_format"
   | "initial_prompt"
-  | "detective_phase_prompt"
-  | "suggestion_phase_prompt"
   | "welcome_message"
   | "partial_hallucination_warning"
   | "full_hallucination_warning";
@@ -43,10 +41,8 @@ export type SystemMessageType =
 export type MessagePlacement =
   | "initial_prompt"
   | "role"
-  | "phase_detective"
-  | "phase_suggestion"
-  | "checklist"
   | "instructions"
+  | "output_format"
   | "guardrails"
   | "ui_only";
 
@@ -79,50 +75,15 @@ type Props = {
   onActivate: (type: SystemMessageType, versionId: string) => Promise<void>;
 };
 
-type PromptPhase = "DETECTIVE" | "SUGGESTION";
-
 const STACK_ROWS: Array<{
   key: string;
   title: string;
-  isActive: (placement: MessagePlacement, selectedPhase: PromptPhase) => boolean;
+  isActive: (placement: MessagePlacement) => boolean;
 }> = [
-  {
-    key: "initial_prompt",
-    title: "Initial Prompt",
-    isActive: (placement) => placement === "initial_prompt",
-  },
-  {
-    key: "role",
-    title: "System Role",
-    isActive: (placement) => placement === "role",
-  },
-  {
-    key: "phase",
-    title: "Phase Prompt",
-    isActive: (placement, selectedPhase) =>
-      (placement === "phase_detective" && selectedPhase === "DETECTIVE") ||
-      (placement === "phase_suggestion" && selectedPhase === "SUGGESTION"),
-  },
-  {
-    key: "checklist",
-    title: "System Checklist",
-    isActive: (placement) => placement === "checklist",
-  },
-  {
-    key: "instructions",
-    title: "System Instructions",
-    isActive: (placement) => placement === "instructions",
-  },
-  {
-    key: "allowed_specializations",
-    title: "Allowed Specializations",
-    isActive: () => false,
-  },
-  {
-    key: "guardrails",
-    title: "Guardrails",
-    isActive: (placement) => placement === "guardrails",
-  },
+  { key: "role", title: "System Role", isActive: (p) => p === "role" },
+  { key: "guardrails", title: "Guardrails", isActive: (p) => p === "guardrails" },
+  { key: "instructions", title: "System Instructions", isActive: (p) => p === "instructions" },
+  { key: "output_format", title: "Output Format", isActive: (p) => p === "output_format" },
 ];
 
 function formatDate(iso?: string) {
@@ -152,25 +113,11 @@ function truncatePreview(text?: string, max = 120) {
   return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
-function PlacementStack({
-  placement,
-  selectedPhase,
-}: {
-  placement: MessagePlacement;
-  selectedPhase: PromptPhase;
-}) {
+function PlacementStack({ placement }: { placement: MessagePlacement }) {
   return (
     <div className="space-y-2">
       {STACK_ROWS.map((row, index) => {
-        const isPhaseRow = row.key === "phase";
-        const title =
-          isPhaseRow
-            ? selectedPhase === "DETECTIVE"
-              ? "Detective Phase Prompt"
-              : "Suggestion Phase Prompt"
-            : row.title;
-
-        const active = row.isActive(placement, selectedPhase);
+        const active = row.isActive(placement);
 
         return (
           <div key={row.key}>
@@ -183,7 +130,7 @@ function PlacementStack({
               ].join(" ")}
             >
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-medium text-sm text-gray-900">{title}</span>
+                <span className="font-medium text-sm text-gray-900">{row.title}</span>
                 {active ? (
                   <span className="text-xs rounded-full bg-primary text-white px-2 py-1">
                     This message
@@ -246,9 +193,6 @@ export default function SystemMessageEditor({
   const [activating, setActivating] = useState(false);
 
   const [placementOpen, setPlacementOpen] = useState(false);
-  const [placementPhase, setPlacementPhase] = useState<PromptPhase>(
-    placement === "phase_suggestion" ? "SUGGESTION" : "DETECTIVE"
-  );
 
   // character limit
   const characterLimit = current?.character_limit ?? 700;
@@ -263,13 +207,6 @@ export default function SystemMessageEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, current?.id]);
 
-  useEffect(() => {
-    if (placement === "phase_suggestion") {
-      setPlacementPhase("SUGGESTION");
-    } else if (placement === "phase_detective") {
-      setPlacementPhase("DETECTIVE");
-    }
-  }, [placement]);
 
   const canPrev = idx > 0;
   const canNext = idx < sorted.length - 1;
@@ -629,54 +566,8 @@ export default function SystemMessageEditor({
           <div className="space-y-5">
             {placement !== "ui_only" && (
               <>
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium text-gray-800">
-                    Prompt position preview
-                  </div>
-
-                  <div className="inline-flex rounded-lg border border-gray-200 p-1 bg-gray-50 w-fit">
-                    <Button
-                      type="button"
-                      variant={placementPhase === "DETECTIVE" ? "default" : "ghost"}
-                      className={
-                        placementPhase === "DETECTIVE"
-                          ? "bg-primary hover:bg-primary/90"
-                          : ""
-                      }
-                      onClick={() => setPlacementPhase("DETECTIVE")}
-                    >
-                      Detective
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={placementPhase === "SUGGESTION" ? "default" : "ghost"}
-                      className={
-                        placementPhase === "SUGGESTION"
-                          ? "bg-primary hover:bg-primary/90"
-                          : ""
-                      }
-                      onClick={() => setPlacementPhase("SUGGESTION")}
-                    >
-                      Suggestion
-                    </Button>
-                  </div>
-                </div>
-
-                {((placement === "phase_detective" && placementPhase === "SUGGESTION") ||
-                  (placement === "phase_suggestion" && placementPhase === "DETECTIVE")) && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    This message is only used in the{" "}
-                    <span className="font-medium">
-                      {placement === "phase_detective" ? "Detective" : "Suggestion"}
-                    </span>{" "}
-                    phase.
-                  </div>
-                )}
-
-                <PlacementStack
-                  placement={placement}
-                  selectedPhase={placementPhase}
-                />
+                <div className="text-sm font-medium text-gray-800">Prompt position preview</div>
+                <PlacementStack placement={placement} />
               </>
             )}
 

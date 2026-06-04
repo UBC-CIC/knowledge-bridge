@@ -4,11 +4,11 @@ import re
 from typing import Dict, Any, Optional, List, Tuple
 
 from helpers.crud import (
-    fetch_recent_messages, ensure_session_exists, insert_message, update_last_active_session
+    fetch_recent_messages, ensure_session_exists, insert_message,
+    update_last_active_session, get_user_groups
 )
 from helpers.logic import get_current_prompt
 from helpers.bedrock import retrieve_documents, format_context_for_prompt
-from helpers.intervention import assess_response
 import helpers.config as config
 from helpers.message_limits import check_limit, record_message_sent
 from helpers.guardrail import invoke_guardrail, ACTION_ANONYMIZED, ACTION_BLOCKED
@@ -18,53 +18,44 @@ logger.setLevel(logging.INFO)
 
 logger.info(f"boto3 version: {boto3.__version__}")
 
+
 def _rewrite_query_for_retrieval(
     raw_query: str,
     chat_history: List[Dict[str, Any]],
     llm_region: str,
-    haiku_model_arn: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 ) -> str:
     """
-    Uses a fast, low-cost LLM call to rewrite a conversational user query into a
-    keyword-rich search query optimized for vector database retrieval.
-    Falls back to the raw query on any error.
+    Rewrites a conversational query into a keyword-rich search query
+    optimized for vector DB retrieval. Falls back to raw query on error.
     """
-    # Build a condensed history string (last few exchanges only)
     history_lines = []
     for msg in chat_history[-10:]:
         role = "User" if msg["sender"] == "user" else "Assistant"
         history_lines.append(f"{role}: {msg['content']}")
     history_block = "\n".join(history_lines) if history_lines else "(no prior conversation)"
 
-    rewrite_system_prompt = """
-<instructions>
-You are a search query optimizer for a university specialization database.
-Given the conversation history and the user's latest message, generate a short, keyword-rich search query to find relevant documents.
-Focus on academic subjects, degree requirements, career goals, and specific interests mentioned.
-Output ONLY the search query. Do not include explanations, preambles, or quotes.
-</instructions>
-"""
+    rewrite_system_prompt = """<instructions>
+You are a search query optimizer for a knowledge base containing Canadian university IT survey responses, meeting communications, subcommittee decisions, and best practices.
+Given the conversation history and the user's latest message, produce a short, keyword-rich search query optimized for vector similarity search.
+Focus on: topics, institutions, date ranges, decisions, technologies, or initiatives mentioned.
+Output ONLY the search query — no explanation, no quotes, no preamble.
+</instructions>"""
 
-    user_message = f"""
-<conversation_history>
+    user_message = f"""<conversation_history>
 {history_block}
 </conversation_history>
 
 <latest_user_message>
 {raw_query}
-</latest_user_message>
-"""
+</latest_user_message>"""
 
     try:
         bedrock_runtime = boto3.client("bedrock-runtime", region_name=llm_region)
         response = bedrock_runtime.converse(
-            modelId=haiku_model_arn,
+            modelId=config.HAIKU_ARN,
             messages=[{"role": "user", "content": [{"text": user_message}]}],
             system=[{"text": rewrite_system_prompt}],
-            inferenceConfig={
-                "maxTokens": 50,  
-                "temperature": 0.0
-            }
+            inferenceConfig={"maxTokens": 60, "temperature": 0.0}
         )
         rewritten = response["output"]["message"]["content"][0]["text"].strip()
         logger.info(f"Query rewrite: '{raw_query}' -> '{rewritten}'")
@@ -73,91 +64,66 @@ Output ONLY the search query. Do not include explanations, preambles, or quotes.
         logger.warning(f"Query rewrite failed, using raw query: {e}")
         return raw_query
 
+
 def _prepare_conversation(
     query: str,
-    region: str,
     llm_region: str,
     chat_session_id: str,
     user_id: Optional[str],
+    user_groups: List[str],
     db_connection,
-    search_type: Optional[str] = None,
-    save_user_message: bool = True
-) -> Tuple[List[Dict[str, Any]], str, List[Dict[str, Any]], str]:
+    save_user_message: bool = True,
+) -> Tuple[List[Dict[str, Any]], str, str, List[Dict[str, Any]]]:
     """
-    Handles validation, history fetching, user msg saving, retrieval, and prompt construction.
-    Returns: (bedrock_messages, full_system_prompt, sources, phase_name)
+    Fetches history, saves user message, rewrites query, retrieves context,
+    and builds the bedrock messages array and system prompt.
+    Returns: (bedrock_messages, static_system_prompt, dynamic_prompt, sources)
     """
-    # Resolve dynamic defaults
-    if search_type is None:
-        search_type = config.SEARCH_TYPE
-
-    # 1. Validation
     if not query or not query.strip():
         raise ValueError("Please provide a non-empty question.")
 
-    # 2. Retrieve History
+    # 1. Fetch history
     raw_history = fetch_recent_messages(db_connection, chat_session_id)
-    
-    # 3. Save User Message
+
+    # 2. Save user message
     try:
         if save_user_message:
             ensure_session_exists(db_connection, chat_session_id, user_id)
-            insert_message(
-                db_connection,
-                chat_session_id,
-                "user",
-                query,
-                sources=None,
-                warning=None
-            )
+            insert_message(db_connection, chat_session_id, "user", query, sources=None, warning=None)
             update_last_active_session(db_connection, chat_session_id)
             db_connection.commit()
     except Exception as e:
         db_connection.rollback()
-        logger.error(f"DB Error: {e}")
+        logger.error(f"DB error saving user message: {e}")
         raise
 
-    # 4. Determine Phase & Prompt
-    static_system_prompt, num_retrieval_results, phase_name, phase_instructions, model_arn= get_current_prompt(
-        chat_session_id,
-        db_connection
-    )
+    # 3. Build static system prompt
+    static_system_prompt = get_current_prompt()
 
-    # 5. Rewrite query for better retrieval
+    # 4. Rewrite query for retrieval
     search_query = _rewrite_query_for_retrieval(
         raw_query=query,
         chat_history=raw_history,
-        llm_region=llm_region
+        llm_region=llm_region,
     )
 
-    # 6. RAG Retrieval (pgvector — not yet implemented)
+    # 5. Retrieve context chunks
     sources = retrieve_documents(
-        search_query,
-        num_retrieval_results,
+        query=search_query,
+        num_results=config.MAX_CONTEXT_CHUNKS,
+        user_groups=user_groups,
+        db_connection=db_connection,
     )
-    
-    # 7. Build Context
+
+    # 6. Format context block
     context_block = format_context_for_prompt(sources)
-    
-    # 8. Construct Final System Prompt
-    dynamic_prompt = f"""{phase_instructions}
 
-<retrieved_context>
+    # 7. Build dynamic prompt — injects retrieved context
+    dynamic_prompt = f"""<retrieved_context record_count="{len(sources)}">
 {context_block}
-</retrieved_context>
+</retrieved_context>"""
 
-<response_instructions>
-1. Answer the user's question using the retrieved_context if relevant.
-2. If the user is just chatting (e.g. "hello", "thanks"), respond naturally.
-3. If the retrieved context does not clearly support the answer, say you do not have enough grounded information and ask a clarifying question.
-4. Do NOT invent course names, requirements, or specialization details that are not supported by the retrieved context.
-
-You MUST wrap your conversational response to the user in <answer> tags.
-After your answer, you MUST list the integer indices of the sources you actively used inside <cited_indices> tags as a JSON array (e.g., <cited_indices>[1, 3]</cited_indices>). If none, use <cited_indices>[]</cited_indices>.
-</response_instructions>
-"""
-
-    # 9. Build Messages
+    # 8. Build messages array from history + current query
     bedrock_messages = []
     for msg in raw_history:
         role = "user" if msg["sender"] == "user" else "assistant"
@@ -166,13 +132,14 @@ After your answer, you MUST list the integer indices of the sources you actively
                 "role": role,
                 "content": [{"text": msg["content"]}]
             })
-            
+
     bedrock_messages.append({
         "role": "user",
         "content": [{"text": query}]
     })
 
-    return bedrock_messages, static_system_prompt, dynamic_prompt, sources, phase_name, model_arn
+    return bedrock_messages, static_system_prompt, dynamic_prompt, sources
+
 
 def _save_ai_response(
     db_connection,
@@ -182,26 +149,13 @@ def _save_ai_response(
     warning_text: Optional[str] = None,
 ):
     try:
-        sources_for_db = []
-        for s in sources:
-            s_copy = s.copy()
-            if 'content' in s_copy and isinstance(s_copy['content'], str):
-                s_copy['content'] = s_copy['content']
-            sources_for_db.append(s_copy)
-
-        insert_message(
-            db_connection,
-            chat_session_id,
-            "AI",
-            answer_text,
-            sources_for_db,
-            warning_text
-        )
+        insert_message(db_connection, chat_session_id, "AI", answer_text, sources, warning_text)
         update_last_active_session(db_connection, chat_session_id)
         db_connection.commit()
     except Exception as e:
         db_connection.rollback()
         logger.error(f"Failed to save AI response: {e}")
+
 
 def get_response(
     query: str,
@@ -214,11 +168,11 @@ def get_response(
     stream_callback=None,
     is_intro_message: bool = False,
 ) -> Dict[str, Any]:
-    
+
     usage_info = {}
-    is_under_limit = True
 
     try:
+        # 1. Check message limit
         if user_id:
             is_under_limit, usage_info = check_limit(user_id, db_connection)
             if not is_under_limit:
@@ -226,13 +180,32 @@ def get_response(
                     "response": "Daily message limit exceeded. Please try again tomorrow.",
                     "sources_used": [],
                     "sessionId": chat_session_id,
-                    "is_first_message": False,
                     "message_limit_exceeded": True,
                     "message_usage": usage_info,
                     "warning": None,
-                    "intervention": None
                 }
 
+        # 2. Handle intro message — no retrieval, no guardrails, just return the greeting
+        if is_intro_message:
+            try:
+                ensure_session_exists(db_connection, chat_session_id, user_id)
+                insert_message(db_connection, chat_session_id, "AI", config.INITIAL_PROMPT, sources=[], warning=None)
+                update_last_active_session(db_connection, chat_session_id)
+                db_connection.commit()
+            except Exception as e:
+                db_connection.rollback()
+                logger.error(f"Failed to save intro message: {e}")
+            if stream_callback:
+                stream_callback(config.INITIAL_PROMPT)
+            return {
+                "response": config.INITIAL_PROMPT,
+                "sources_used": [],
+                "sessionId": chat_session_id,
+                "message_usage": {},
+                "warning": None,
+            }
+
+        # 3. Guardrail check
         if not is_intro_message:
             try:
                 guardrail_result = invoke_guardrail(query, config.REGION)
@@ -242,7 +215,6 @@ def get_response(
                     "response": "An error occurred processing your request.",
                     "sources_used": [],
                     "warning": None,
-                    "intervention": None,
                 }
 
             if guardrail_result['action'] == ACTION_BLOCKED:
@@ -254,7 +226,7 @@ def get_response(
                     db_connection.commit()
                 except Exception as db_err:
                     db_connection.rollback()
-                    logger.error(f"DB error saving user message on intervention: {db_err}")
+                    logger.error(f"DB error saving blocked message: {db_err}")
                 _save_ai_response(db_connection, chat_session_id, denial_text, sources=[], warning_text=None)
                 if stream_callback:
                     stream_callback(denial_text)
@@ -262,77 +234,61 @@ def get_response(
                     "response": denial_text,
                     "sources_used": [],
                     "sessionId": chat_session_id,
-                    "is_first_message": False,
                     "message_usage": {},
                     "warning": None,
-                    "intervention": None,
                 }
 
             if guardrail_result['action'] == ACTION_ANONYMIZED:
                 query = guardrail_result['text']
 
-        bedrock_messages, static_system_prompt, dynamic_prompt, sources, phase_name, model_arn = _prepare_conversation(
-            query,
-            region,
-            llm_region,
-            chat_session_id,
-            user_id,
-            db_connection,
-            save_user_message=save_user_message
+        # 3. Fetch user groups from DB
+        user_groups = get_user_groups(user_id, db_connection) if user_id else []
+        logger.info(f"User {user_id} groups for retrieval: {user_groups}")
+
+        # 4. Prepare conversation
+        bedrock_messages, static_system_prompt, dynamic_prompt, sources = _prepare_conversation(
+            query=query,
+            llm_region=llm_region,
+            chat_session_id=chat_session_id,
+            user_id=user_id,
+            user_groups=user_groups,
+            db_connection=db_connection,
+            save_user_message=save_user_message,
         )
 
         if user_id and save_user_message:
             usage_info = record_message_sent(user_id, db_connection)
 
     except ValueError as e:
-        return {
-            "response": str(e),
-            "sources_used": [],
-            "warning": None,
-            "intervention": None
-        }
+        return {"response": str(e), "sources_used": [], "warning": None}
     except Exception as e:
         logger.error(f"Prepare conversation failed: {e}")
-        return {
-            "response": "An error occurred.",
-            "sources_used": [],
-            "warning": None,
-            "intervention": None,
-        }
+        return {"response": "An error occurred.", "sources_used": [], "warning": None}
 
-    # Structure the system array with the cache point
+    # 5. Build request payload with prompt caching on static system prompt
     request_payload = {
-            "modelId": model_arn,
-            "messages": bedrock_messages,
-            "system": [
-                {"text": static_system_prompt},
-                {"cachePoint": 
-                    {
-                    "type":"default"
-                    }
-                },
-                {"text": dynamic_prompt}
-            ],
-            "inferenceConfig": {
-                "maxTokens": config.MAX_TOKENS,
-                "temperature": config.TEMPERATURE
-            }
+        "modelId": config.HAIKU_ARN,
+        "messages": bedrock_messages,
+        "system": [
+            {"text": static_system_prompt},
+            {"cachePoint": {"type": "default"}},
+            {"text": dynamic_prompt}
+        ],
+        "inferenceConfig": {
+            "maxTokens": config.MAX_TOKENS,
+            "temperature": config.TEMPERATURE
         }
-
-    if model_arn == config.SONNET_ARN:
-        request_payload["additionalModelRequestFields"] = {
-            "thinking" : {"type": "disabled"},
-            "output_config": {"effort": "low"}
-        }
+    }
 
     bedrock_runtime = boto3.client("bedrock-runtime", region_name=llm_region)
-    
+
     full_response_text = ""
     yielded_text = ""
     answer_started = False
     answer_text = ""
     cited_indices = []
 
+    # 6. Stream response
     try:
         response = bedrock_runtime.converse_stream(**request_payload)
         for event in response.get("stream", []):
@@ -341,52 +297,45 @@ def get_response(
                 if "text" in delta:
                     chunk = delta["text"]
                     full_response_text += chunk
-                    
-                    # 1. Wait for <answer> to start processing
+
                     if "<answer>" in full_response_text:
                         answer_started = True
                         target_text = full_response_text.split("<answer>", 1)[1]
                     elif not answer_started and len(full_response_text) > 300 and "<" not in full_response_text:
-                        # Extreme fallback: Only trigger if string is very long and NO tags are forming
                         target_text = full_response_text
                     else:
                         continue
-                        
-                    # 2. Stop extracting if we hit a closing tag
+
                     stop_found = False
                     for stop_tag in ["</answer>", "<cited"]:
                         stop_idx = target_text.find(stop_tag)
                         if stop_idx != -1:
                             target_text = target_text[:stop_idx]
                             stop_found = True
-                            
-                    # 3. Prevent partial tags at the end of the chunk from leaking
+
                     if not stop_found:
                         held_back = 0
                         for stop_tag in ["</answer>", "<cited_indices>", "</cited_indices>", "<cited"]:
                             for i in range(1, len(stop_tag)):
                                 if target_text.endswith(stop_tag[:i]):
                                     held_back = max(held_back, i)
-                        
                         safe_text = target_text[:-held_back] if held_back > 0 else target_text
                     else:
                         safe_text = target_text
-                        
-                    # 4. Stream only the newly added text
+
                     if len(safe_text) > len(yielded_text):
                         new_text = safe_text[len(yielded_text):]
                         yielded_text += new_text
                         if stream_callback and new_text:
                             stream_callback(new_text)
 
-        # Parse final answer text properly
+        # 7. Parse final answer and cited indices
         final_answer_match = re.search(r'<answer>(.*?)</answer>', full_response_text, re.DOTALL)
         if final_answer_match:
             answer_text = final_answer_match.group(1).strip()
         else:
             answer_text = full_response_text.split('<cited_indices>')[0].strip()
-            
-        # Parse cited_indices
+
         indices_match = re.search(r'<cited_indices>\s*\[(.*?)\]\s*</cited_indices>', full_response_text, re.DOTALL)
         if indices_match:
             indices_str = indices_match.group(1).strip()
@@ -397,49 +346,20 @@ def get_response(
                     pass
 
     except Exception as e:
-        logger.error(f"Generation Failed: {e}")
+        logger.error(f"Generation failed: {e}")
         answer_text = "I encountered an error generating the response."
         cited_indices = []
 
-    used_sources = []
-    for i, source in enumerate(sources, 1):
-        if i in cited_indices:
-            used_sources.append(source)
+    # 8. Resolve cited sources
+    used_sources = [source for i, source in enumerate(sources, 1) if i in cited_indices]
 
-    warning_text = None
-    intervention_result = None
-
-    if phase_name == "SUGGESTION" and answer_text and not answer_text.startswith("I encountered an error"):
-        try:
-            intervention_result = assess_response(
-                query=query,
-                answer_text=answer_text,
-                sources=used_sources,
-                llm_region=llm_region
-            )
-            warning_text = intervention_result.get("warning_text")
-        except Exception as e:
-            logger.error(f"Intervention Failed: {e}")
-            warning_text = None
-            intervention_result = None
-            
-    final_answer_text = answer_text
-
-    _save_ai_response(
-        db_connection,
-        chat_session_id,
-        final_answer_text,
-        used_sources,
-        warning_text
-    )
+    # 9. Save AI response
+    _save_ai_response(db_connection, chat_session_id, answer_text, used_sources)
 
     return {
-        "response": final_answer_text,
-        "raw_response": answer_text,
+        "response": answer_text,
         "sources_used": used_sources,
         "sessionId": chat_session_id,
-        "is_first_message": False,
         "message_usage": usage_info,
-        "warning": warning_text,
-        "intervention": intervention_result
+        "warning": None,
     }

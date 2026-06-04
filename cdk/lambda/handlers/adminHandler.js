@@ -224,11 +224,9 @@ exports.handler = async (event) => {
           "disclaimer",
           "guardrails",
           "system_role",
-          "system_checklist",
           "system_instructions",
+          "output_format",
           "initial_prompt",
-          "detective_phase_prompt",
-          "suggestion_phase_prompt",
           "welcome_message",
           "partial_hallucination_warning",
           "full_hallucination_warning",
@@ -403,11 +401,9 @@ exports.handler = async (event) => {
           "disclaimer",
           "guardrails",
           "system_role",
-          "system_checklist",
           "system_instructions",
+          "output_format",
           "initial_prompt",
-          "detective_phase_prompt",
-          "suggestion_phase_prompt",
           "welcome_message",
           "partial_hallucination_warning",
           "full_hallucination_warning",
@@ -543,11 +539,9 @@ exports.handler = async (event) => {
           "disclaimer",
           "guardrails",
           "system_role",
-          "system_checklist",
           "system_instructions",
+          "output_format",
           "initial_prompt",
-          "detective_phase_prompt",
-          "suggestion_phase_prompt",
           "welcome_message",
           "partial_hallucination_warning",
           "full_hallucination_warning",
@@ -879,7 +873,6 @@ exports.handler = async (event) => {
           SELECT
             latest.id,
             latest.max_messages_per_day,
-            latest.min_messages_before_suggest,
             latest.max_characters_per_user_message,
             latest.max_characters_per_ai_message,
             latest.temperature,
@@ -888,7 +881,8 @@ exports.handler = async (event) => {
             latest.scope_alignment_score_threshold,
             latest.grounded_threshold,
             latest.partially_grounded_threshold,
-            latest.specialization_list,
+            latest.max_context_chunks,
+            latest.max_history_messages,
             u.email AS updated_by_email,
             latest.updated_at
           FROM latest
@@ -898,7 +892,6 @@ exports.handler = async (event) => {
         // But keep a safe fallback to avoid crashing UI.
         const fallback = {
           max_messages_per_day: 45,
-          min_messages_before_suggest: 4,
           max_characters_per_user_message: 2000,
           max_characters_per_ai_message: 5000,
           temperature: 0.2,
@@ -907,6 +900,8 @@ exports.handler = async (event) => {
           scope_alignment_score_threshold: 0.25,
           grounded_threshold: 0.75,
           partially_grounded_threshold: 0.5,
+          max_context_chunks: 10,
+          max_history_messages: 20,
           updated_by: null,
           updated_at: null,
         };
@@ -1035,7 +1030,6 @@ exports.handler = async (event) => {
 
         const allowed = [
           "max_messages_per_day",
-          "min_messages_before_suggest",
           "max_characters_per_user_message",
           "max_characters_per_ai_message",
           "temperature",
@@ -1044,7 +1038,8 @@ exports.handler = async (event) => {
           "scope_alignment_score_threshold",
           "grounded_threshold",
           "partially_grounded_threshold",
-          "specialization_list",
+          "max_context_chunks",
+          "max_history_messages",
         ];
 
         const patch = {};
@@ -1080,14 +1075,27 @@ exports.handler = async (event) => {
         }
 
         if (
-          patch.min_messages_before_suggest !== undefined &&
-          (!isFiniteInt(patch.min_messages_before_suggest) ||
-            patch.min_messages_before_suggest < 0 ||
-            patch.min_messages_before_suggest > 500)
+          patch.max_context_chunks !== undefined &&
+          (!isFiniteInt(patch.max_context_chunks) ||
+            patch.max_context_chunks < 1 ||
+            patch.max_context_chunks > 50)
         ) {
           response.statusCode = 400;
           response.body = JSON.stringify({
-            error: "min_messages_before_suggest must be an integer between 0 and 500",
+            error: "max_context_chunks must be an integer between 1 and 50",
+          });
+          break;
+        }
+
+        if (
+          patch.max_history_messages !== undefined &&
+          (!isFiniteInt(patch.max_history_messages) ||
+            patch.max_history_messages < 1 ||
+            patch.max_history_messages > 100)
+        ) {
+          response.statusCode = 400;
+          response.body = JSON.stringify({
+            error: "max_history_messages must be an integer between 1 and 100",
           });
           break;
         }
@@ -1180,7 +1188,6 @@ exports.handler = async (event) => {
           UPDATE system_settings s
           SET
             max_messages_per_day = COALESCE(${patch.max_messages_per_day}, s.max_messages_per_day),
-            min_messages_before_suggest = COALESCE(${patch.min_messages_before_suggest}, s.min_messages_before_suggest),
             max_characters_per_user_message = COALESCE(${patch.max_characters_per_user_message}, s.max_characters_per_user_message),
             max_characters_per_ai_message = COALESCE(${patch.max_characters_per_ai_message}, s.max_characters_per_ai_message),
             temperature = COALESCE(${patch.temperature}, s.temperature),
@@ -1189,14 +1196,14 @@ exports.handler = async (event) => {
             scope_alignment_score_threshold = COALESCE(${patch.scope_alignment_score_threshold}, s.scope_alignment_score_threshold),
             grounded_threshold = COALESCE(${patch.grounded_threshold}, s.grounded_threshold),
             partially_grounded_threshold = COALESCE(${patch.partially_grounded_threshold}, s.partially_grounded_threshold),
-            specialization_list = COALESCE(${patch.specialization_list}, s.specialization_list),
+            max_context_chunks = COALESCE(${patch.max_context_chunks}, s.max_context_chunks),
+            max_history_messages = COALESCE(${patch.max_history_messages}, s.max_history_messages),
             updated_by = ${updatedByUserId},
             updated_at = NOW()
           WHERE s.id = (SELECT id FROM latest)
           RETURNING
             s.id,
             s.max_messages_per_day,
-            s.min_messages_before_suggest,
             s.max_characters_per_user_message,
             s.max_characters_per_ai_message,
             s.temperature,
@@ -1205,7 +1212,8 @@ exports.handler = async (event) => {
             s.scope_alignment_score_threshold,
             s.grounded_threshold,
             s.partially_grounded_threshold,
-            s.specialization_list,
+            s.max_context_chunks,
+            s.max_history_messages,
             s.updated_by,
             s.updated_at
         `;

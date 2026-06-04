@@ -80,12 +80,12 @@ exports.handler = async (event) => {
                     "disclaimer",
                     "guardrails",
                     "system_role",
-                    "system_checklist",
                     "system_instructions",
+                    "output_format",
                     "initial_prompt",
-                    "detective_phase_prompt",
-                    "suggestion_phase_prompt",
                     "welcome_message",
+                    "partial_hallucination_warning",
+                    "full_hallucination_warning",
                 ]);
 
                 if (!allowed.has(messageType)) {

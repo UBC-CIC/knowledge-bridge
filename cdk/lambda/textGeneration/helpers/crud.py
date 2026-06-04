@@ -3,6 +3,7 @@ import json
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
+import helpers.config as config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -43,7 +44,7 @@ def fetch_recent_messages(
             ORDER BY created_at ASC
             LIMIT %s
             """,
-            (chat_session_id, 20)
+            (chat_session_id, config.MAX_HISTORY_MESSAGES)
         )
         rows = cur.fetchall()
 
@@ -121,6 +122,26 @@ def update_last_active_session(db_connection, chat_session_id: str) -> None:
     except Exception as e:
         logger.error(f"update_last_active_session failed: {e}")
 
+def get_user_groups(user_id: str, db_connection) -> List[str]:
+    """Fetch Entra group IDs for a user from the DB."""
+    try:
+        with db_connection.cursor() as cur:
+            cur.execute(
+                "SELECT entra_group_ids FROM users WHERE id = %s",
+                (user_id,)
+            )
+            row = cur.fetchone()
+            if row and row[0]:
+                groups = [g.lower() for g in row[0] if g]
+                logger.info(f"User {user_id} groups: {groups}")
+                return groups
+            logger.warning(f"No Entra groups found for user {user_id}")
+            return []
+    except Exception as e:
+        logger.error(f"get_user_groups failed for {user_id}: {e}")
+        return []
+
+
 def fetch_system_config(db_connection) -> Dict[str, Any]:
     """
     Fetches system_messages (latest active version per type) and system_settings.
@@ -145,7 +166,6 @@ def fetch_system_config(db_connection) -> Dict[str, Any]:
         with db_connection.cursor() as cur:
             cur.execute("""
                 SELECT max_messages_per_day,
-                       min_messages_before_suggest,
                        max_characters_per_user_message,
                        max_characters_per_ai_message,
                        temperature,
@@ -154,7 +174,8 @@ def fetch_system_config(db_connection) -> Dict[str, Any]:
                        scope_alignment_score_threshold,
                        grounded_threshold,
                        partially_grounded_threshold,
-                       specialization_list
+                       max_context_chunks,
+                       max_history_messages
                 FROM system_settings
                 ORDER BY updated_at DESC
                 LIMIT 1
@@ -163,16 +184,16 @@ def fetch_system_config(db_connection) -> Dict[str, Any]:
             if row:
                 config['settings'] = {
                     'max_messages_per_day': row[0],
-                    'min_messages_before_suggest': row[1],
-                    'max_characters_per_user_message': row[2],
-                    'max_characters_per_ai_message': row[3],
-                    'temperature': float(row[4]) if row[4] is not None else 0.7,
-                    'top_p': float(row[5]) if row[5] is not None else 0.9,
-                    'support_score_threshold': float(row[6]) if row[6] is not None else 0.25,
-                    'scope_alignment_score_threshold': float(row[7]) if row[7] is not None else 0.25,
-                    'grounded_threshold': float(row[8]) if row[8] is not None else 0.75,
-                    'partially_grounded_threshold': float(row[9]) if row[9] is not None else 0.50,
-                    'specialization_list': row[10]
+                    'max_characters_per_user_message': row[1],
+                    'max_characters_per_ai_message': row[2],
+                    'temperature': row[3],
+                    'top_p': row[4],
+                    'support_score_threshold': row[5],
+                    'scope_alignment_score_threshold': row[6],
+                    'grounded_threshold': row[7],
+                    'partially_grounded_threshold': row[8],
+                    'max_context_chunks': row[9],
+                    'max_history_messages': row[10],
                 }
     except Exception as e:
         logger.error(f"fetch_system_config failed: {e}")

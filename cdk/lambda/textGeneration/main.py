@@ -49,6 +49,7 @@ def handler(event, context=None):
         chat_session_id = event['pathParameters'].get('chat_session_id') or event['pathParameters'].get('id')
 
     user_id = body.get('user_id')
+    logger.info(f"Request: user_id={user_id}, chat_session_id={chat_session_id}, is_intro={is_intro_message}")
     
     if not query or not chat_session_id:
         return {
