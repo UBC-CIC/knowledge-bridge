@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthService } from "@/functions/authService";
-import { getCurrentUser } from "aws-amplify/auth";
+import { fetchAuthSession } from "aws-amplify/auth";
 import SystemMessageEditor from "@/components/Admin/SystemMessageEditor";
 import type {
   SystemMessageType,
@@ -355,8 +355,9 @@ export default function SystemSettings() {
   const nonTextGenerationMessageTypes = useMemo(() => messageTypes.filter((t) => !MESSAGE_META[t].affectsTextGeneration), [messageTypes]);
 
   const fetchAdminCredentials = async () => {
-    const user = await getCurrentUser();
-    setAdminEmail(user?.signInDetails?.loginId ?? null);
+    const session = await fetchAuthSession();
+    const email = session.tokens?.idToken?.payload?.email as string | undefined;
+    setAdminEmail(email ?? null);
   };
 
   const fetchSystemSettings = async () => {
