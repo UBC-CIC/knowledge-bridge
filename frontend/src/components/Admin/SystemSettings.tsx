@@ -30,7 +30,6 @@ type SystemSettingsDTO = {
   max_characters_per_user_message: number;
   max_characters_per_ai_message: number;
   temperature: number;
-  top_p: number;
   support_score_threshold: number;
   scope_alignment_score_threshold: number;
   grounded_threshold: number;
@@ -48,7 +47,6 @@ const DEFAULT_SETTINGS: SystemSettingsDTO = {
   max_characters_per_user_message: 2000,
   max_characters_per_ai_message: 5000,
   temperature: 0.2,
-  top_p: 0.9,
   support_score_threshold: 0.25,
   scope_alignment_score_threshold: 0.25,
   grounded_threshold: 0.75,
@@ -375,7 +373,6 @@ export default function SystemSettings() {
         max_characters_per_user_message: data.max_characters_per_user_message ?? DEFAULT_SETTINGS.max_characters_per_user_message,
         max_characters_per_ai_message: data.max_characters_per_ai_message ?? DEFAULT_SETTINGS.max_characters_per_ai_message,
         temperature: data.temperature ?? DEFAULT_SETTINGS.temperature,
-        top_p: data.top_p ?? DEFAULT_SETTINGS.top_p,
         support_score_threshold: data.support_score_threshold ?? DEFAULT_SETTINGS.support_score_threshold,
         scope_alignment_score_threshold: data.scope_alignment_score_threshold ?? DEFAULT_SETTINGS.scope_alignment_score_threshold,
         grounded_threshold: data.grounded_threshold ?? DEFAULT_SETTINGS.grounded_threshold,
@@ -418,7 +415,6 @@ export default function SystemSettings() {
         max_characters_per_user_message: settings.max_characters_per_user_message,
         max_characters_per_ai_message: settings.max_characters_per_ai_message,
         temperature: settings.temperature,
-        top_p: settings.top_p,
         support_score_threshold: settings.support_score_threshold,
         scope_alignment_score_threshold: settings.scope_alignment_score_threshold,
         grounded_threshold: settings.grounded_threshold,
@@ -575,14 +571,6 @@ export default function SystemSettings() {
                     value={settings.temperature}
                     onChange={(e) => setSettings((s) => ({ ...s, temperature: Number(e.target.value) }))} />
                   <p className="text-xs text-gray-500">How creative vs consistent the assistant should be (0–1 typical range)</p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="top-p">Top P</Label>
-                  <Input id="top-p" type="number" step="0.01" min={0} max={1}
-                    value={settings.top_p}
-                    onChange={(e) => setSettings((s) => ({ ...s, top_p: Number(e.target.value) }))} />
-                  <p className="text-xs text-gray-500">Controls token sampling diversity (0.8–0.95 typical range)</p>
                 </div>
 
                 <div className="md:col-span-2 pt-2">

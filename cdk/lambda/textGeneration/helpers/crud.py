@@ -168,7 +168,6 @@ def fetch_system_config(db_connection) -> Dict[str, Any]:
                        max_characters_per_user_message,
                        max_characters_per_ai_message,
                        temperature,
-                       top_p,
                        support_score_threshold,
                        scope_alignment_score_threshold,
                        grounded_threshold,
@@ -186,13 +185,12 @@ def fetch_system_config(db_connection) -> Dict[str, Any]:
                     'max_characters_per_user_message': row[1],
                     'max_characters_per_ai_message': row[2],
                     'temperature': row[3],
-                    'top_p': row[4],
-                    'support_score_threshold': row[5],
-                    'scope_alignment_score_threshold': row[6],
-                    'grounded_threshold': row[7],
-                    'partially_grounded_threshold': row[8],
-                    'max_context_chunks': row[9],
-                    'max_history_messages': row[10],
+                    'support_score_threshold': row[4],
+                    'scope_alignment_score_threshold': row[5],
+                    'grounded_threshold': row[6],
+                    'partially_grounded_threshold': row[7],
+                    'max_context_chunks': row[8],
+                    'max_history_messages': row[9],
                 }
     except Exception as e:
         logger.error(f"fetch_system_config failed: {e}")

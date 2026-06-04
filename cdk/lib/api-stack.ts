@@ -987,7 +987,7 @@ export class ApiGatewayStack extends cdk.Stack {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
           REGION: this.region,
-          LLM_REGION: this.region,
+          LLM_REGION: "us-west-2",
           BEDROCK_MODEL_ID: `us.anthropic.claude-sonnet-4-6`,
         },
       }
@@ -1025,7 +1025,7 @@ export class ApiGatewayStack extends cdk.Stack {
     const guardrailConfig = {
       piiEntities: [
         // General
-        'ADDRESS', 'AGE', 'NAME', 'EMAIL', 'PHONE', 'USERNAME', 'PASSWORD',
+        'ADDRESS', 'AGE', 'EMAIL', 'PHONE', 'PASSWORD',
         'DRIVER_ID', 'LICENSE_PLATE', 'VEHICLE_IDENTIFICATION_NUMBER',
         // Finance
         'CREDIT_DEBIT_CARD_CVV', 'CREDIT_DEBIT_CARD_EXPIRY', 'CREDIT_DEBIT_CARD_NUMBER',
@@ -1038,22 +1038,20 @@ export class ApiGatewayStack extends cdk.Stack {
       piiInputAction: 'ANONYMIZE',
       piiInputEnabled: true,
       promptAttackStrength: 'HIGH',
-      blockedInputMessaging: "Sorry, I can't help with that. I'm the UBC Science Specialization Explorer — I'm here to help you find the right specialization for your academic journey.",
+      blockedInputMessaging: "Sorry, I can't help with that. I'm the CUCCIO Knowledgebase Assistant — I'm here to help you find information from CUCCIO's knowledge base.",
     };
 
     const inputGuardrail = new bedrock.CfnGuardrail(this, 'InputGuardrail', {
       name: `${id}-input-guardrail`,
-      blockedInputMessaging: "Sorry, I can't help with that. I'm the UBC Science Specialization Explorer — I'm here to help you find the right specialization for your academic journey.",
+      blockedInputMessaging: "Sorry, I can't help with that. I'm the CUCCIO Knowledgebase Assistant — I'm here to help you find information from CUCCIO's knowledge base.",
       blockedOutputsMessaging: 'Response blocked.',
       sensitiveInformationPolicyConfig: {
         piiEntitiesConfig: [
           // General
           { type: 'ADDRESS',                    action: 'ANONYMIZE', inputAction: 'ANONYMIZE', inputEnabled: true },
           { type: 'AGE',                        action: 'ANONYMIZE', inputAction: 'ANONYMIZE', inputEnabled: true },
-          { type: 'NAME',                       action: 'ANONYMIZE', inputAction: 'ANONYMIZE', inputEnabled: true },
           { type: 'EMAIL',                      action: 'ANONYMIZE', inputAction: 'ANONYMIZE', inputEnabled: true },
           { type: 'PHONE',                      action: 'ANONYMIZE', inputAction: 'ANONYMIZE', inputEnabled: true },
-          { type: 'USERNAME',                   action: 'ANONYMIZE', inputAction: 'ANONYMIZE', inputEnabled: true },
           { type: 'PASSWORD',                   action: 'ANONYMIZE', inputAction: 'ANONYMIZE', inputEnabled: true },
           { type: 'DRIVER_ID',                  action: 'ANONYMIZE', inputAction: 'ANONYMIZE', inputEnabled: true },
           { type: 'LICENSE_PLATE',              action: 'ANONYMIZE', inputAction: 'ANONYMIZE', inputEnabled: true },

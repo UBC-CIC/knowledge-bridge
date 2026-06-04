@@ -29,7 +29,6 @@ MAX_CHARACTERS_PER_AI_MESSAGE = 5000
 # Bedrock Configuration
 MAX_TOKENS = 1000
 TEMPERATURE = 0.2
-TOP_P = 0.5
 MAX_CONTEXT_CHUNKS = 10
 MAX_HISTORY_MESSAGES = 20
 
@@ -113,7 +112,7 @@ def load_config(db_connection):
     """
     global _CONFIG_LOADED
     global MAX_MESSAGES_PER_DAY, MAX_CHARACTERS_PER_USER_MESSAGE, MAX_CHARACTERS_PER_AI_MESSAGE
-    global TEMPERATURE, TOP_P, MAX_CONTEXT_CHUNKS, MAX_HISTORY_MESSAGES
+    global TEMPERATURE, MAX_CONTEXT_CHUNKS, MAX_HISTORY_MESSAGES
     global SUPPORT_SCORE_THRESHOLD, SCOPE_ALIGNMENT_SCORE_THRESHOLD
     global GROUNDED_THRESHOLD, PARTIALLY_GROUNDED_THRESHOLD
     global ROLE, GUARDRAILS, INSTRUCTIONS, OUTPUT_FORMAT, INITIAL_PROMPT
@@ -160,7 +159,6 @@ def load_config(db_connection):
         MAX_CHARACTERS_PER_USER_MESSAGE = settings.get('max_characters_per_user_message', MAX_CHARACTERS_PER_USER_MESSAGE)
         MAX_CHARACTERS_PER_AI_MESSAGE = settings.get('max_characters_per_ai_message', MAX_CHARACTERS_PER_AI_MESSAGE)
         TEMPERATURE = settings.get('temperature', TEMPERATURE)
-        TOP_P = settings.get('top_p', TOP_P)
         SUPPORT_SCORE_THRESHOLD = settings.get('support_score_threshold', SUPPORT_SCORE_THRESHOLD)
         SCOPE_ALIGNMENT_SCORE_THRESHOLD = settings.get('scope_alignment_score_threshold', SCOPE_ALIGNMENT_SCORE_THRESHOLD)
         GROUNDED_THRESHOLD = settings.get('grounded_threshold', GROUNDED_THRESHOLD)
