@@ -83,42 +83,29 @@ export default function AIChatMessage({
     }
 
     if (source && typeof source === "object") {
-      const { uri, url, content, type } = source;
-      const displayUrl = url || uri;
-      const displayContent = content || "";
-      const isWeb = type === "WEB" || (displayUrl && displayUrl.startsWith("http"));
+      const displayUrl = source.source_url || source.url || source.uri || "";
+      const displayTitle = source.title || "";
 
       return (
-        <div className="flex flex-col w-full gap-1.5">
-          {displayUrl && (
-            <div className="flex items-start gap-1.5">
-              {isWeb ? (
-                <ExternalLink className="h-3 w-3 mt-0.5 text-muted-foreground flex-shrink-0" />
-              ) : (
-                <BookOpen className="h-3 w-3 mt-0.5 text-muted-foreground flex-shrink-0" />
-              )}
-              {isWeb ? (
-                <a
-                  href={isSafeUrl(displayUrl) ? displayUrl : "#"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline hover:text-primary/80 transition-colors text-xs font-medium break-all"
-                  title={displayUrl}
-                >
-                  {displayUrl}
-                </a>
-              ) : (
-                <span className="font-medium text-xs break-all">
-                  {displayUrl}
-                </span>
-              )}
+        <div className="flex flex-col w-full gap-1">
+          {displayTitle && (
+            <div className="flex items-center gap-1.5">
+              <BookOpen className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <span className="font-semibold text-xs text-foreground">{displayTitle}</span>
             </div>
           )}
-          {displayContent && (
-            <div className="text-xs text-muted-foreground pl-4 border-l-2 border-muted/50 ml-[5px] mt-1">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                {displayContent}
-              </ReactMarkdown>
+          {displayUrl && (
+            <div className="flex items-center gap-1.5 pl-4">
+              <ExternalLink className="h-3 w-3 text-primary flex-shrink-0" />
+              <a
+                href={isSafeUrl(displayUrl) ? displayUrl : "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline hover:text-primary/80 transition-colors text-xs break-all"
+                title={displayUrl}
+              >
+                {displayUrl}
+              </a>
             </div>
           )}
         </div>
@@ -284,13 +271,16 @@ export default function AIChatMessage({
                     <p className="text-sm font-medium mb-2 text-foreground/80">
                       References:
                     </p>
-                    <ul className="space-y-4 list-none pl-0 w-full">
+                    <ul className="space-y-2 list-none pl-0 w-full">
                       {renderableSources.map((source, index) => (
                         <li
                           key={index}
-                          className="w-full bg-muted/30 p-2 rounded-md border border-muted"
+                          className="w-full bg-white p-3 rounded-lg border border-gray-200 shadow-sm"
                         >
-                          {formatSource(source)}
+                          <div className="flex items-start gap-2">
+                            <span className="text-xs font-bold text-primary mt-0.5 flex-shrink-0">{index + 1}</span>
+                            <div className="flex-1 min-w-0">{formatSource(source)}</div>
+                          </div>
                         </li>
                       ))}
                     </ul>
