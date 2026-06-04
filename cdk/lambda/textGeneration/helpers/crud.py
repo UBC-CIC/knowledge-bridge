@@ -3,7 +3,6 @@ import json
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
-import helpers.config as config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -26,6 +25,7 @@ def get_exchange_count(chat_session_id: str, db_connection) -> int:
 def fetch_recent_messages(
     db_connection,
     chat_session_id: str,
+    limit: int = 20,
 ) -> List[Dict[str, Any]]:    
     """
     Fetch recent messages for a chat session (oldest->newest).
@@ -44,7 +44,7 @@ def fetch_recent_messages(
             ORDER BY created_at ASC
             LIMIT %s
             """,
-            (chat_session_id, config.MAX_HISTORY_MESSAGES)
+            (chat_session_id, limit)
         )
         rows = cur.fetchall()
 
@@ -60,15 +60,14 @@ def fetch_recent_messages(
 def ensure_user_exists(db_connection, user_id: str) -> None:
     try:
         with db_connection.cursor() as cur:
-            # We use a dummy email for now as we don't have it from the token in all cases yet
-            dummy_email = f"user_{user_id[:8]}@example.com" 
+            dummy_email = f"user_{user_id[:8]}@example.com"
             cur.execute(
                 """
-                INSERT INTO users (id, email, display_name, role, created_at, last_seen_at, messages_sent, messages_window_started_at, metadata)
-                VALUES (%s, %s, %s, %s, NOW(), NOW(), 0, NOW(), '{}'::jsonb)
+                INSERT INTO users (id, email, display_name, created_at, last_seen_at, messages_sent, messages_window_started_at, metadata)
+                VALUES (%s, %s, %s, NOW(), NOW(), 0, NOW(), '{}'::jsonb)
                 ON CONFLICT (id) DO NOTHING
                 """,
-                (user_id, dummy_email, "Student", "student")
+                (user_id, dummy_email, "User")
             )
     except Exception as e:
         logger.error(f"ensure_user_exists failed: {e}")

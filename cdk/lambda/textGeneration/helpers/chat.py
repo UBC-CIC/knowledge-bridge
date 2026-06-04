@@ -83,7 +83,7 @@ def _prepare_conversation(
         raise ValueError("Please provide a non-empty question.")
 
     # 1. Fetch history
-    raw_history = fetch_recent_messages(db_connection, chat_session_id)
+    raw_history = fetch_recent_messages(db_connection, chat_session_id, limit=config.MAX_HISTORY_MESSAGES)
 
     # 2. Save user message
     try:

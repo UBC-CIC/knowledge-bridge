@@ -85,15 +85,14 @@ export default function AIChatMessage({
     if (source && typeof source === "object") {
       const displayUrl = source.source_url || source.url || source.uri || "";
       const displayTitle = source.title || "";
+      const displayContent = source.content || "";
 
       return (
-        <div className="flex flex-col w-full gap-1">
-          {displayTitle && (
-            <div className="flex items-center gap-1.5">
-              <BookOpen className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-              <span className="font-semibold text-xs text-foreground">{displayTitle}</span>
-            </div>
-          )}
+        <div className="flex flex-col w-full gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <BookOpen className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+            <span className="font-semibold text-xs text-foreground">{displayTitle || "Untitled"}</span>
+          </div>
           {displayUrl && (
             <div className="flex items-center gap-1.5 pl-4">
               <ExternalLink className="h-3 w-3 text-primary flex-shrink-0" />
@@ -106,6 +105,11 @@ export default function AIChatMessage({
               >
                 {displayUrl}
               </a>
+            </div>
+          )}
+          {displayContent && (
+            <div className="pl-4 mt-1 text-xs text-muted-foreground border-l-2 border-gray-200 ml-[5px]">
+              {displayContent}
             </div>
           )}
         </div>
