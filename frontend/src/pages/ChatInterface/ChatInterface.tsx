@@ -595,8 +595,8 @@ export default function AIChatPage() {
                     isTokenLimitReached
                       ? `Daily limit reached. Resets at ${tokenResetTime || "soon"}`
                       : isStreaming
-                      ? "Specialization Explorer is thinking..."
-                      : "Message Specialization Explorer..."
+                      ? "CUCCIO Assistant is thinking..."
+                      : "Message CUCCIO Assistant..."
                   }
                   onSend={sendMessage}
                   disabled={isTokenLimitReached || isStreaming}

@@ -231,6 +231,9 @@ export class ApiGatewayStack extends cdk.Stack {
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
+      customAttributes: {
+        upn: new cognito.StringAttribute({ mutable: true }),
+      },
     });
 
     // Cognito hosted UI domain — required for OIDC federation
@@ -263,9 +266,11 @@ export class ApiGatewayStack extends cdk.Stack {
         userInfo: "https://graph.microsoft.com/oidc/userinfo",
       },
       attributeMapping: {
-        email: cognito.ProviderAttribute.other("upn"),
         givenName: cognito.ProviderAttribute.other("given_name"),
         familyName: cognito.ProviderAttribute.other("family_name"),
+        custom: {
+          "custom:upn": cognito.ProviderAttribute.other("upn"),
+        },
       },
     });
 

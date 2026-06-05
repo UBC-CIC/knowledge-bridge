@@ -243,7 +243,7 @@ export default function HomePage() {
               {!activeChatSessionId ? (
                 <div className="w-full max-w-2xl text-center">
                   <h1 className="text-3xl md:text-4xl font-bold mb-4 leading-tight">
-                    Welcome to Cuccio KBA!
+                    Welcome to CUCCIO Assistant!
                   </h1>
                   <p className="text-base md:text-lg text-muted-foreground mb-8 whitespace-pre-line">
                     {isLoadingWelcome ? "Loading..." : welcomeMessage}

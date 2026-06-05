@@ -53,7 +53,7 @@ export default function Header() {
             className="flex items-center gap-2 hover:opacity-80 transition-opacity"
             aria-label="Navigate to home"
           >
-            <img src={logoImage} alt="Cuccio Logo" className="h-10 w-auto" />
+            {/* <img src={logoImage} alt="Cuccio Logo" className="h-10 w-auto" /> */}
             <h1 className="text-xl font-semibold text-white">
               Cuccio Knowledgebase Assistant
             </h1>

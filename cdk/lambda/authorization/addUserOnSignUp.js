@@ -18,7 +18,20 @@ async function getSharePointSecret() {
   return JSON.parse(resp.SecretString);
 }
 
-async function getEntraGroupIds(email, tenantId, clientId, clientSecret) {
+/**
+ * Parse a guest UPN into a human-readable email.
+ * Guest UPN format: localpart_domain.com#EXT#@resourcetenant.onmicrosoft.com
+ * e.g. hrishi.logani_ubc.ca#EXT#@CICPROTODEV.onmicrosoft.com → hrishi.logani@ubc.ca
+ */
+function parseGuestEmail(upn) {
+  if (!upn || !upn.includes('#EXT#')) return upn;
+  const base = upn.split('#EXT#')[0]; // e.g. hrishi.logani_ubc.ca
+  const lastUnderscore = base.lastIndexOf('_');
+  if (lastUnderscore === -1) return upn;
+  return base.slice(0, lastUnderscore) + '@' + base.slice(lastUnderscore + 1);
+}
+
+async function getEntraGroupIds(tenantUpn, tenantId, clientId, clientSecret) {
   const https = require("https");
 
   const tokenBody = new URLSearchParams({
@@ -50,7 +63,7 @@ async function getEntraGroupIds(email, tenantId, clientId, clientSecret) {
   const groups = await new Promise((resolve, reject) => {
     const req = https.request({
       hostname: "graph.microsoft.com",
-      path: `/v1.0/users/${encodeURIComponent(email)}/transitiveMemberOf/microsoft.graph.group?$select=id`,
+      path: `/v1.0/users/${encodeURIComponent(tenantUpn)}/transitiveMemberOf/microsoft.graph.group?$select=id`,
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}` },
     }, (res) => {
@@ -87,23 +100,29 @@ exports.handler = async (event) => {
     console.log("Raw event:", JSON.stringify({ userName, triggerSource: event.triggerSource, userAttributes }));
 
     const sub = userAttributes.sub;
-    const email = userAttributes.email || userAttributes.upn;
 
-    if (!email) {
-      throw new Error(`Login failed: no email or upn claim returned from identity provider for user ${userName}.`);
+    // custom:upn is mapped from Entra's upn claim — #EXT# format for guests, real UPN for natives
+    const tenantUpn = userAttributes['custom:upn'];
+
+    if (!tenantUpn) {
+      throw new Error(`Login failed: no upn claim returned from identity provider for user ${userName}.`);
     }
+
+    // Parse human-readable email from guest UPN, or use as-is for native users
+    const email = parseGuestEmail(tenantUpn);
 
     const givenName = userAttributes.given_name || "";
     const familyName = userAttributes.family_name || "";
-    const displayName = `${givenName} ${familyName}`.trim() || userAttributes.name || email;
+    const displayName = `${givenName} ${familyName}`.trim() || email;
 
-    console.log("Upserting user:", { sub, email, displayName });
+    console.log("Upserting user:", { sub, email, tenantUpn, displayName });
 
     await sqlConnection`
-      INSERT INTO users (id, display_name, email, created_at, last_seen_at)
-      VALUES (${sub}::uuid, ${displayName}, ${email}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO users (id, display_name, email, tenant_upn, created_at, last_seen_at)
+      VALUES (${sub}::uuid, ${displayName}, ${email}, ${tenantUpn}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT (id) DO UPDATE
       SET email = EXCLUDED.email,
+          tenant_upn = EXCLUDED.tenant_upn,
           display_name = EXCLUDED.display_name,
           last_seen_at = CURRENT_TIMESTAMP
     `;
@@ -119,16 +138,16 @@ exports.handler = async (event) => {
       console.warn("Could not add user to group (may already be a member):", groupErr.message);
     }
 
-    // Sync Entra group IDs — best effort, never blocks login
+    // Sync Entra group IDs using tenant_upn — best effort, never blocks login
     try {
       const spSecret = await getSharePointSecret();
       const groupIds = await getEntraGroupIds(
-        email,
+        tenantUpn,
         spSecret.tenant_id,
         spSecret.client_id,
         spSecret.client_secret,
       );
-      console.log(`Synced ${groupIds.length} Entra groups for ${email}`);
+      console.log(`Synced ${groupIds.length} Entra groups for ${tenantUpn}`);
       await sqlConnection`
         UPDATE users
         SET entra_group_ids = ${groupIds},
