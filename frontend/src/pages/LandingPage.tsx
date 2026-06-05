@@ -3,7 +3,6 @@ import { signInWithRedirect } from "aws-amplify/auth";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
-import logoImage from "@/assets/KBA-logo.png";
 import Footer from "@/components/Footer";
 
 export default function LandingPage() {
@@ -27,7 +26,6 @@ export default function LandingPage() {
     <div className="min-h-screen flex flex-col bg-gray-50">
       <div className="flex-1 flex items-center justify-center px-4">
         <div className="text-center max-w-md">
-          {/* <img src={logoImage} alt="KBA Logo" className="h-20 w-auto mx-auto mb-6" /> */}
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             CUCCIO Assistant!
           </h1>
