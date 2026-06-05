@@ -53,7 +53,7 @@ export default function Header() {
             aria-label="Navigate to home"
           >
             <h1 className="text-xl font-semibold text-white">
-              Cuccio Knowledgebase Assistant
+              CUCCIO Assistant
             </h1>
           </Link>
         </div>
