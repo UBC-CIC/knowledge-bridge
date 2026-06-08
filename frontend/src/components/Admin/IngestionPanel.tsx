@@ -311,7 +311,7 @@ export default function IngestionPanel() {
 
                         <TableCell>
                           <Badge className={`${STATUS_BADGE[run.status] ?? "bg-gray-100 text-gray-700"} font-medium`}>
-                            {run.status}
+                            {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
                             {(run.status === "running" || run.status === "stopping") && (
                               <RefreshCw className="ml-1.5 h-3 w-3 animate-spin inline" />
                             )}
