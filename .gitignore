@@ -40,3 +40,4 @@ Thumbs.db
 # RDS CA bundle — downloaded at deploy time
 graphify-out/ 
 .claude/ 
+CLAUDE.md
