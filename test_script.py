@@ -47,8 +47,8 @@ print("Got token")
 # resp = requests.get(url, headers={"Authorization": f"Bearer {access_token}"})
 # print(json.dumps(resp.json(), indent=2))
 
-SUB = "2c1d2518-a041-7028-208a-452b20cec051"
-url = f"https://graph.microsoft.com/v1.0/users/{SUB}"
-url += "?$select=id,mail,userPrincipalName,displayName,givenName,surname"
+UPN = "hrishi.logani_ubc.ca#EXT#@CICPROTODEV.onmicrosoft.com"
+url = f"https://graph.microsoft.com/v1.0/users/{UPN}/memberOf"
+url += "?$select=id,displayName,description"
 resp = requests.get(url, headers={"Authorization": f"Bearer {access_token}"})
-print(json.dumps(resp.json(), indent=2))
+print("Group memberships:", json.dumps(resp.json(), indent=2))

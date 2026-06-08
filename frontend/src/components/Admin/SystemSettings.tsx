@@ -350,7 +350,8 @@ export default function SystemSettings() {
 
   const messageTypes = useMemo(() => Object.keys(MESSAGE_META) as SystemMessageType[], []);
   const textGenerationMessageTypes = useMemo(() => messageTypes.filter((t) => MESSAGE_META[t].affectsTextGeneration), [messageTypes]);
-  const nonTextGenerationMessageTypes = useMemo(() => messageTypes.filter((t) => !MESSAGE_META[t].affectsTextGeneration), [messageTypes]);
+  // partial_hallucination_warning and full_hallucination_warning hidden from UI
+  const nonTextGenerationMessageTypes = useMemo(() => messageTypes.filter((t) => !MESSAGE_META[t].affectsTextGeneration && t !== "partial_hallucination_warning" && t !== "full_hallucination_warning"), [messageTypes]);
 
   const fetchAdminCredentials = async () => {
     const session = await fetchAuthSession();
@@ -573,6 +574,7 @@ export default function SystemSettings() {
                   <p className="text-xs text-gray-500">How creative vs consistent the assistant should be (0–1 typical range)</p>
                 </div>
 
+                {/* Hallucination check thresholds hidden from UI
                 <div className="md:col-span-2 pt-2">
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
                     <div className="font-semibold text-amber-900">Hallucination Checks</div>
@@ -613,6 +615,7 @@ export default function SystemSettings() {
                     onChange={(e) => setSettings((s) => ({ ...s, partially_grounded_threshold: Number(e.target.value) }))} />
                   <p className="text-xs text-gray-500">Score needed to treat answer as partially supported rather than unreliable</p>
                 </div>
+                */}
               </div>
 
               <div className="pt-6 border-t border-gray-100 mt-8">
