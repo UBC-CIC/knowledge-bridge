@@ -62,7 +62,7 @@ export default function ChatSessionActionsMenu({
 
     const transcript = exportableMessages
       .map((m) => {
-        const speaker = m.sender === "user" ? "[USER]" : "[Specialization Explorer]";
+        const speaker = m.sender === "user" ? "[USER]" : "[CUCCIO Assistant]";
         return `${speaker}: ${m.text.trim()}`;
       })
       .join("\r\n====================\r\n");
