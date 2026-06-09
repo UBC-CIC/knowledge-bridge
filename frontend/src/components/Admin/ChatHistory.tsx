@@ -386,7 +386,7 @@ export default function ChatHistory() {
                             </div>
                         ) : (
                             <div className="space-y-6">
-                                {messages.slice(1).map((msg, idx) => {
+                                {messages.map((msg, idx) => {
                                     const isUser = msg.sender.toLowerCase() === "user";
                                     return (
                                         <div
