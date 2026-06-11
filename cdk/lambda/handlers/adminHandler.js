@@ -1,4 +1,4 @@
-﻿/**
+/**
  * AWS Lambda Handler for Admin Operations
  *
  * This Lambda function handles HTTP requests for administrative operations including:
@@ -18,9 +18,11 @@ const {
 } = require("@aws-sdk/client-secrets-manager");
 const { GlueClient, StartJobRunCommand, GetJobRunCommand, BatchStopJobRunCommand } = require("@aws-sdk/client-glue");
 const { CloudWatchLogsClient, GetLogEventsCommand, DescribeLogStreamsCommand } = require("@aws-sdk/client-cloudwatch-logs");
+const { SchedulerClient, GetScheduleCommand, CreateScheduleCommand, UpdateScheduleCommand, DeleteScheduleCommand } = require("@aws-sdk/client-scheduler");
 
 const glueClient = new GlueClient({});
 const logsClient = new CloudWatchLogsClient({});
+const schedulerClient = new SchedulerClient({});
 
 let sqlConnection;
 const secretsManager = new SecretsManagerClient();
@@ -1411,6 +1413,116 @@ exports.handler = async (event) => {
         }
 
         response.body = JSON.stringify({ status, jobRunId, logLines, nextForwardToken, logType });
+        break;
+      }
+
+      // GET /admin/ingestion/schedule — fetch current EventBridge schedule config
+      case "GET /admin/ingestion/schedule": {
+        const scheduleName = process.env.SCHEDULE_NAME;
+        if (!scheduleName) {
+          response.statusCode = 500;
+          response.body = JSON.stringify({ error: "SCHEDULE_NAME not configured" });
+          break;
+        }
+        try {
+          const result = await schedulerClient.send(new GetScheduleCommand({ Name: scheduleName }));
+          const input = result.Target?.Input ? JSON.parse(result.Target.Input) : {};
+          // Strip "cron(" prefix and ")" suffix to get the bare expression
+          const rawExpr = result.ScheduleExpression || "";
+          const cron = rawExpr.replace(/^cron\(/, "").replace(/\)$/, "");
+          response.body = JSON.stringify({
+            exists: true,
+            cron,
+            timezone: result.ScheduleExpressionTimezone || "UTC",
+            enabled: result.State === "ENABLED",
+            force_full: input.force_full === true,
+            next_run_at: result.NextInvocationTime ? result.NextInvocationTime.toISOString() : null,
+          });
+        } catch (err) {
+          if (err.name === "ResourceNotFoundException") {
+            response.body = JSON.stringify({ exists: false });
+          } else {
+            throw err;
+          }
+        }
+        break;
+      }
+
+      // PUT /admin/ingestion/schedule — create or update the EventBridge schedule
+      case "PUT /admin/ingestion/schedule": {
+        const scheduleName = process.env.SCHEDULE_NAME;
+        const executionRoleArn = process.env.SCHEDULER_EXECUTION_ROLE_ARN;
+        const jobName = process.env.GLUE_JOB_NAME;
+        const glueJobArn = process.env.GLUE_JOB_ARN;
+        if (!scheduleName || !executionRoleArn || !jobName || !glueJobArn) {
+          response.statusCode = 500;
+          response.body = JSON.stringify({ error: "Scheduler env vars not configured" });
+          break;
+        }
+        let body = {};
+        try { body = parseBody(event.body); } catch (_) {}
+        const { cron, timezone, enabled, force_full } = body;
+        if (!cron || !timezone) {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: "cron and timezone are required" });
+          break;
+        }
+
+        const scheduleParams = {
+          Name: scheduleName,
+          ScheduleExpression: `cron(${cron})`,
+          ScheduleExpressionTimezone: timezone,
+          State: enabled === false ? "DISABLED" : "ENABLED",
+          FlexibleTimeWindow: { Mode: "OFF" },
+          Target: {
+            Arn: process.env.GLUE_JOB_ARN,
+            RoleArn: executionRoleArn,
+            Input: JSON.stringify({ force_full: force_full === true }),
+          },
+        };
+
+        // Try update first, fall back to create
+        let existed = true;
+        try {
+          await schedulerClient.send(new UpdateScheduleCommand(scheduleParams));
+        } catch (err) {
+          if (err.name === "ResourceNotFoundException") {
+            existed = false;
+            await schedulerClient.send(new CreateScheduleCommand(scheduleParams));
+          } else {
+            throw err;
+          }
+        }
+
+        // Fetch back to return next_run_at
+        const updated = await schedulerClient.send(new GetScheduleCommand({ Name: scheduleName }));
+        response.body = JSON.stringify({
+          created: !existed,
+          updated: existed,
+          next_run_at: updated.NextInvocationTime ? updated.NextInvocationTime.toISOString() : null,
+        });
+        break;
+      }
+
+      // DELETE /admin/ingestion/schedule — remove the EventBridge schedule
+      case "DELETE /admin/ingestion/schedule": {
+        const scheduleName = process.env.SCHEDULE_NAME;
+        if (!scheduleName) {
+          response.statusCode = 500;
+          response.body = JSON.stringify({ error: "SCHEDULE_NAME not configured" });
+          break;
+        }
+        try {
+          await schedulerClient.send(new DeleteScheduleCommand({ Name: scheduleName }));
+          response.body = JSON.stringify({ deleted: true });
+        } catch (err) {
+          if (err.name === "ResourceNotFoundException") {
+            response.statusCode = 404;
+            response.body = JSON.stringify({ error: "No schedule exists to delete" });
+          } else {
+            throw err;
+          }
+        }
         break;
       }
 

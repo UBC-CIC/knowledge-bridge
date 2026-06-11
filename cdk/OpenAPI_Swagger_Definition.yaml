@@ -178,6 +178,109 @@ paths:
         httpMethod: POST
         type: aws_proxy
 
+  /admin/ingestion/schedule:
+    options:
+      summary: CORS support
+      responses:
+        200:
+          $ref: "#/components/responses/Success"
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: |
+            {
+              "statusCode" : 200
+            }
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'*'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            responseTemplates:
+              application/json: |
+                {}
+    get:
+      tags: [Admin]
+      summary: Get the current EventBridge ingestion schedule
+      operationId: get_ingestion_schedule
+      security:
+        - adminAuthorizer: []
+      responses:
+        "200":
+          description: "Schedule config or { exists: false }"
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+    put:
+      tags: [Admin]
+      summary: Create or update the EventBridge ingestion schedule
+      operationId: put_ingestion_schedule
+      security:
+        - adminAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cron, timezone]
+              properties:
+                cron:
+                  type: string
+                timezone:
+                  type: string
+                enabled:
+                  type: boolean
+                  default: true
+                force_full:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Schedule created or updated
+        "400":
+          description: Missing required fields
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+    delete:
+      tags: [Admin]
+      summary: Delete the EventBridge ingestion schedule
+      operationId: delete_ingestion_schedule
+      security:
+        - adminAuthorizer: []
+      responses:
+        "200":
+          description: Schedule deleted
+        "401":
+          description: Unauthorized
+        "404":
+          description: Schedule not found
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
   /admin/promote_user:
     <<: *commonOptions
     post:

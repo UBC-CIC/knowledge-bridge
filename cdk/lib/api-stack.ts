@@ -1349,6 +1349,37 @@ export class ApiGatewayStack extends cdk.Stack {
           `arn:aws:logs:${this.region}:${this.account}:log-group:/aws-glue/python-jobs/error`,
         ],
       }));
+
+      // EventBridge Scheduler execution role — trusted by scheduler.amazonaws.com to start the Glue job
+      const schedulerExecutionRole = new iam.Role(this, `${id}-SchedulerExecRole`, {
+        roleName: `${id}-SchedulerExecRole`,
+        assumedBy: new iam.ServicePrincipal("scheduler.amazonaws.com"),
+      });
+      schedulerExecutionRole.addToPolicy(new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["glue:StartJobRun"],
+        resources: [`arn:aws:glue:${this.region}:${this.account}:job/${glueJobName}`],
+      }));
+
+      // Admin Lambda — manage schedules + pass the execution role to EventBridge
+      lambdaAdminFunction.addEnvironment("SCHEDULER_EXECUTION_ROLE_ARN", schedulerExecutionRole.roleArn);
+      lambdaAdminFunction.addEnvironment("SCHEDULE_NAME", "sharepoint-ingestion-schedule");
+      lambdaAdminFunction.addEnvironment("GLUE_JOB_ARN", `arn:aws:glue:${this.region}:${this.account}:job/${glueJobName}`);
+      lambdaAdminFunction.addToRolePolicy(new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "scheduler:GetSchedule",
+          "scheduler:CreateSchedule",
+          "scheduler:UpdateSchedule",
+          "scheduler:DeleteSchedule",
+        ],
+        resources: [`arn:aws:scheduler:${this.region}:${this.account}:schedule/default/sharepoint-ingestion-schedule`],
+      }));
+      lambdaAdminFunction.addToRolePolicy(new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["iam:PassRole"],
+        resources: [schedulerExecutionRole.roleArn],
+      }));
     }
 
     lambdaAdminFunction.addEnvironment('ALLOWED_ORIGIN_PARAM', this.allowedOriginsParamName);
