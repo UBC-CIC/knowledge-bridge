@@ -280,6 +280,7 @@ export default function AIChatPage() {
             text: m.content,
             sources_used: parsedSources,
             warning: (m as any).warning ?? null,
+            rating: (m as any).rating ?? null,
             time: new Date(m.created_at).getTime(),
           };
         });
