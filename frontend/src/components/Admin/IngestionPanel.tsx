@@ -320,7 +320,7 @@ function SchedulePanel() {
             <Clock className={`h-4 w-4 ${schedule?.exists ? "text-primary" : "text-gray-400"}`} />
           </div>
           <div className="text-left">
-            <p className="text-sm font-semibold text-gray-900">Scheduled Run</p>
+            <p className="text-base font-semibold text-gray-900">Automated Schedule</p>
             <p className="text-xs text-gray-500 mt-0.5">{headerStatus}</p>
           </div>
         </div>
@@ -440,7 +440,7 @@ function SchedulePanel() {
             <div>
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
                 Cron Expression
-                <span className="ml-1 normal-case font-normal text-gray-400">(6-field AWS format: min hr dom mon dow year)</span>
+                <span className="ml-1 normal-case font-normal text-gray-400">(format: min hr dom mon dow year)</span>
               </p>
               <input
                 type="text"
@@ -798,7 +798,10 @@ export default function IngestionPanel() {
         </div>
       )}
 
+      <SchedulePanel />
+
       {/* Runs table */}
+      <h4 className="text-base font-semibold text-gray-900">Run History</h4>
       <Card className="border-gray-200 shadow-sm py-0">
         <CardContent className="p-0">
           {loadingRuns ? (
@@ -958,7 +961,6 @@ export default function IngestionPanel() {
         </div>
       )}
 
-      <SchedulePanel />
     </div>
   );
 }
