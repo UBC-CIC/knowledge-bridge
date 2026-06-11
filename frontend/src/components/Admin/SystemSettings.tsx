@@ -365,7 +365,7 @@ export default function SystemSettings() {
       setError(null);
       const token = await AuthService.getIdToken();
       const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/system-settings`, {
-        headers: { Authorization: token, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       });
       if (!res.ok) throw new Error("Failed to fetch system settings");
       const data: SystemSettingsAPIResponse = await res.json();
@@ -395,7 +395,7 @@ export default function SystemSettings() {
     try {
       const token = await AuthService.getIdToken();
       const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/system-messages`, {
-        headers: { Authorization: token, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       });
       if (!res.ok) throw new Error("Failed to fetch system messages");
       setMessages(await res.json());
@@ -426,7 +426,7 @@ export default function SystemSettings() {
       };
       const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/system-settings`, {
         method: "PUT",
-        headers: { Authorization: token, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("Failed to save system settings");
@@ -451,7 +451,7 @@ export default function SystemSettings() {
     if (!adminEmail) throw new Error("Missing adminEmail");
     const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/system-messages/${type}`, {
       method: "POST",
-      headers: { Authorization: token, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ content, adminEmail }),
     });
     if (!res.ok) throw new Error(`Failed to save system message (${res.status}): ${await res.text().catch(() => "")}`);
@@ -467,7 +467,7 @@ export default function SystemSettings() {
     if (!adminEmail) throw new Error("Missing adminEmail");
     const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/system-messages/${type}/${versionId}`, {
       method: "DELETE",
-      headers: { Authorization: token, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ adminEmail }),
     });
     if (!res.ok) throw new Error(`Failed to delete system message (${res.status}): ${await res.text().catch(() => "")}`);
@@ -485,7 +485,7 @@ export default function SystemSettings() {
     if (!adminEmail) throw new Error("Missing adminEmail");
     const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/system-messages/${type}/${versionId}/activate`, {
       method: "POST",
-      headers: { Authorization: token, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ adminEmail }),
     });
     if (!res.ok) throw new Error(`Failed to activate system message (${res.status}): ${await res.text().catch(() => "")}`);

@@ -423,6 +423,26 @@ export class ApiGatewayStack extends cdk.Stack {
         metricName: "kba-firewall",
       },
       rules: [
+        // Rule 0: Exempt log-polling endpoint from all rate limits — Cognito-authenticated admin only
+        {
+          name: "AllowIngestionLogsPolling",
+          priority: 0,
+          action: { allow: {} },
+          statement: {
+            byteMatchStatement: {
+              searchString: "/admin/ingestion/logs",
+              fieldToMatch: { uriPath: {} },
+              textTransformations: [{ priority: 0, type: "NONE" }],
+              positionalConstraint: "CONTAINS",
+            },
+          },
+          visibilityConfig: {
+            sampledRequestsEnabled: true,
+            cloudWatchMetricsEnabled: true,
+            metricName: "AllowIngestionLogsPolling",
+          },
+        },
+
         // Rule 1: AWS Managed Common Rule Set (SQL injection, XSS, etc.)
         // SizeRestrictions_BODY is excluded for batch admin endpoints which send large JSON payloads
         {

@@ -200,9 +200,19 @@ def upsert_site(external_site_id: str, name: Optional[str], site_url: Optional[s
     return str(site_id)
 
 def upsert_site_source(site_id, source_type, external_source_id, name, source_url, total_documents, group_ids) -> str:
-    metadata = {"group_ids": sorted({g.lower() for g in group_ids if g}), "permission_scope": "source"}
+    new_group_ids = sorted({g.lower() for g in group_ids if g})
+    metadata = {"group_ids": new_group_ids, "permission_scope": "source"}
+
     with get_db_conn() as conn:
         with conn.cursor() as cur:
+            # Fetch existing group_ids before upsert so we can detect permission changes
+            cur.execute("""
+                SELECT id, metadata->'group_ids' FROM site_sources
+                WHERE site_id = %s AND external_source_id = %s
+            """, (site_id, external_source_id))
+            existing_row = cur.fetchone()
+            old_group_ids = sorted(existing_row[1] or []) if existing_row else None
+
             cur.execute("""
                 INSERT INTO site_sources (site_id, source_type, external_source_id, name, source_url, total_documents, status, metadata, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, 'active', %s::jsonb, now())
@@ -211,9 +221,27 @@ def upsert_site_source(site_id, source_type, external_source_id, name, source_ur
                     total_documents = EXCLUDED.total_documents, metadata = EXCLUDED.metadata, updated_at = now()
                 RETURNING id
             """, (site_id, source_type, external_source_id, name, source_url, total_documents, json.dumps(metadata)))
-            source_id = cur.fetchone()[0]
+            source_id = str(cur.fetchone()[0])
+
         conn.commit()
-    return str(source_id)
+
+    # If this is an existing source and group_ids changed, propagate to all chunks — no re-embed needed
+    if old_group_ids is not None and old_group_ids != new_group_ids:
+        log(f"[PERMISSIONS] group_ids changed for source {external_source_id}: {old_group_ids} → {new_group_ids}. Propagating to chunks.")
+        with get_db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE document_vectors
+                    SET metadata = jsonb_set(metadata, '{group_ids}', %s::jsonb)
+                    WHERE document_id IN (
+                        SELECT id FROM documents WHERE source_id = %s
+                    )
+                """, (json.dumps(new_group_ids), source_id))
+                updated = cur.rowcount
+            conn.commit()
+        log(f"[PERMISSIONS] Updated group_ids on {updated} chunks for source {external_source_id}.")
+
+    return source_id
 
 def content_hash(*parts) -> str:
     combined = json.dumps(parts, sort_keys=True, default=str)
@@ -224,7 +252,8 @@ def upsert_document_and_vectors(site_id, source_id, document_type, external_docu
                                  source_group_ids, extra_metadata=None) -> tuple:
     group_ids = sorted({g.lower() for g in source_group_ids if g})
     doc_metadata = extra_metadata or {}
-    h = content_hash(text_content, raw_content, group_ids, doc_metadata)
+    # group_ids intentionally excluded from hash — permission changes must not trigger re-embedding
+    h = content_hash(text_content, raw_content, doc_metadata)
 
     with get_db_conn() as conn:
         with conn.cursor() as cur:
@@ -557,8 +586,7 @@ async def get_column_mapping(site_id: str, list_id: str) -> dict:
     return {col.name: col.display_name for col in columns.value if col.name and col.display_name}
 
 def fetch_list_changes(site_id: str, list_id: str, existing_delta_link=None):
-    token = credential.get_token("https://graph.microsoft.com/.default")
-    headers = {"Authorization": f"Bearer {token.token}"}
+    headers = get_graph_headers()
     url = existing_delta_link or f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items/delta?expand=fields"
     all_changes, delta_link = [], None
     while url:

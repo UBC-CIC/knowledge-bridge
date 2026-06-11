@@ -96,7 +96,7 @@ export default function Analytics() {
 
       const res = await fetch(analyticsUrl, {
         headers: {
-          Authorization: token,
+          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
       });

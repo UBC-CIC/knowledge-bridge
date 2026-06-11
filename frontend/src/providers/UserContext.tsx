@@ -34,7 +34,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         try {
           const token = idToken.toString();
           const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/user/${sub}`, {
-            headers: { Authorization: token },
+            headers: { Authorization: `Bearer ${token}` },
           });
           if (res.ok) {
             const data = await res.json();

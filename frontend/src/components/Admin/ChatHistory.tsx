@@ -99,7 +99,7 @@ export default function ChatHistory() {
     const getAuthHeaders = async () => {
         const token = await AuthService.getIdToken();
         return {
-            Authorization: token,
+            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
         };
     };

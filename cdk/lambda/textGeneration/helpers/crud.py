@@ -122,16 +122,16 @@ def update_last_active_session(db_connection, chat_session_id: str) -> None:
         logger.error(f"update_last_active_session failed: {e}")
 
 def get_user_groups(user_id: str, db_connection) -> List[str]:
-    """Fetch Entra group IDs for a user from the DB."""
+    """Fetch Entra group IDs for a user from the junction table."""
     try:
         with db_connection.cursor() as cur:
             cur.execute(
-                "SELECT entra_group_ids FROM users WHERE id = %s",
+                "SELECT DISTINCT group_id FROM user_entra_groups WHERE user_id = %s",
                 (user_id,)
             )
-            row = cur.fetchone()
-            if row and row[0]:
-                groups = [g.lower() for g in row[0] if g]
+            rows = cur.fetchall()
+            if rows:
+                groups = [row[0].lower() for row in rows if row[0]]
                 logger.info(f"User {user_id} groups: {groups}")
                 return groups
             logger.warning(f"No Entra groups found for user {user_id}")
