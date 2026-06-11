@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { ChevronDown, ChevronUp, BookOpen, ExternalLink } from "lucide-react";
+import { ChevronDown, ChevronUp, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -17,11 +17,19 @@ const isSafeUrl = (url: string) => {
   }
 };
 
+const DISLIKE_CHIPS = ["Not helpful", "Inaccurate", "Off-topic", "Other"];
+
+type MessageRating = { is_positive: boolean; comment: string | null };
+
 type AIChatMessageProps = {
   text: string;
   sources?: any[];
   warning?: string | null;
   isTyping?: boolean;
+  messageId?: string;
+  isLastBotMessage?: boolean;
+  existingRating?: MessageRating | null;
+  onRate?: (messageId: string, is_positive: boolean, comment?: string) => Promise<void>;
 };
 
 export default function AIChatMessage({
@@ -29,8 +37,55 @@ export default function AIChatMessage({
   sources = [],
   warning = null,
   isTyping = false,
+  messageId,
+  isLastBotMessage = false,
+  existingRating = null,
+  onRate,
 }: AIChatMessageProps) {
   const [showSources, setShowSources] = useState(false);
+  const [ratingState, setRatingState] = useState<"idle" | "dislike-open" | "submitted">(
+    existingRating !== null ? "submitted" : "idle"
+  );
+  const [submittedRating, setSubmittedRating] = useState<boolean | null>(
+    existingRating?.is_positive ?? null
+  );
+  const [selectedChip, setSelectedChip] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const showRatingUI = isLastBotMessage && !isTyping && !!messageId && !!onRate;
+
+  const handleThumbsUp = async () => {
+    if (!messageId || !onRate) return;
+    setSubmitting(true);
+    await onRate(messageId, true);
+    setSubmittedRating(true);
+    setRatingState("submitted");
+    setSubmitting(false);
+  };
+
+  const handleThumbsDown = () => {
+    setRatingState("dislike-open");
+  };
+
+  const handleDislikeSubmit = async () => {
+    if (!messageId || !onRate) return;
+    setSubmitting(true);
+    const comment = [selectedChip, commentText.trim()].filter(Boolean).join(" — ") || undefined;
+    await onRate(messageId, false, comment);
+    setSubmittedRating(false);
+    setRatingState("submitted");
+    setSubmitting(false);
+  };
+
+  const handleDislikeSkip = async () => {
+    if (!messageId || !onRate) return;
+    setSubmitting(true);
+    await onRate(messageId, false);
+    setSubmittedRating(false);
+    setRatingState("submitted");
+    setSubmitting(false);
+  };
 
   const formatSource = (source: any) => {
     if (typeof source === "string") {
@@ -299,6 +354,100 @@ export default function AIChatMessage({
               <div className="rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-sm text-orange-800 dark:border-orange-900/50 dark:bg-orange-950/40 dark:text-orange-200">
                 {warning}
               </div>
+            </div>
+          )}
+
+          {/* Rating UI */}
+          {showRatingUI && (
+            <div className="mt-3">
+              {ratingState === "idle" && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleThumbsUp}
+                    disabled={submitting}
+                    className="p-1.5 rounded-md text-muted-foreground hover:text-green-600 hover:bg-green-50 transition-colors disabled:opacity-40"
+                    title="Good response"
+                  >
+                    <ThumbsUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleThumbsDown}
+                    disabled={submitting}
+                    className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
+                    title="Bad response"
+                  >
+                    <ThumbsDown className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {ratingState === "dislike-open" && (
+                <div className="mt-1 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+                  <p className="text-xs font-medium text-gray-700">What went wrong?</p>
+                  <div className="flex flex-wrap gap-2">
+                    {DISLIKE_CHIPS.map(chip => (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => setSelectedChip(c => c === chip ? null : chip)}
+                        className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                          selectedChip === chip
+                            ? "bg-primary text-white border-primary"
+                            : "bg-white text-gray-600 border-gray-200 hover:border-primary/50"
+                        }`}
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    value={commentText}
+                    onChange={e => setCommentText(e.target.value)}
+                    placeholder="Add more detail (optional)…"
+                    rows={2}
+                    className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  <div className="flex items-center gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={handleDislikeSkip}
+                      disabled={submitting}
+                      className="text-xs text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-40"
+                    >
+                      Skip
+                    </button>
+                    <Button
+                      size="sm"
+                      onClick={handleDislikeSubmit}
+                      disabled={submitting}
+                      className="h-7 text-xs bg-primary text-white hover:bg-primary/90"
+                    >
+                      <Send className="h-3 w-3 mr-1" />Submit
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {ratingState === "submitted" && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled
+                    className={`p-1.5 rounded-md transition-colors ${
+                      submittedRating === true
+                        ? "text-green-600 bg-green-50"
+                        : "text-red-500 bg-red-50"
+                    }`}
+                  >
+                    {submittedRating === true
+                      ? <ThumbsUp className="h-3.5 w-3.5" />
+                      : <ThumbsDown className="h-3.5 w-3.5" />}
+                  </button>
+                  <span className="text-xs text-muted-foreground">Thanks for the feedback</span>
+                </div>
+              )}
             </div>
           )}
 

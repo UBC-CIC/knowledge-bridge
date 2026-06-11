@@ -241,22 +241,31 @@ exports.handler = async (event) => {
 
         const rows = await sqlConnection`
           SELECT
-            id,
-            chat_session_id,
-            sender,
-            content,
-            sources,
-            warning,
-            created_at,
-            COUNT(*) OVER() as total_count
-          FROM chat_messages
-          WHERE chat_session_id = ${chatSessionId}
-          ORDER BY created_at ASC, id ASC
+            m.id,
+            m.chat_session_id,
+            m.sender,
+            m.content,
+            m.sources,
+            m.warning,
+            m.created_at,
+            r.is_positive AS rating_is_positive,
+            r.comment AS rating_comment,
+            COUNT(*) OVER() AS total_count
+          FROM chat_messages m
+          LEFT JOIN message_ratings r
+            ON r.message_id = m.id AND r.user_id = ${userId}
+          WHERE m.chat_session_id = ${chatSessionId}
+          ORDER BY m.created_at ASC, m.id ASC
           LIMIT ${limit} OFFSET ${offset}
         `;
 
         const total = rows.length > 0 ? parseInt(rows[0].total_count) : 0;
-        const messages = rows.map(({ total_count, ...msg }) => msg);
+        const messages = rows.map(({ total_count, rating_is_positive, rating_comment, ...msg }) => ({
+          ...msg,
+          rating: rating_is_positive !== null && rating_is_positive !== undefined
+            ? { is_positive: rating_is_positive, comment: rating_comment ?? null }
+            : null,
+        }));
 
         data = {
           chat_session_id: chatSessionId,
@@ -272,6 +281,76 @@ exports.handler = async (event) => {
 
         response.statusCode = 200;
         response.body = JSON.stringify(data);
+        break;
+      }
+
+      case "POST /user/{user_id}/chat_sessions/{chat_session_id}/messages/{message_id}/rating": {
+        const userId = event.pathParameters?.user_id;
+        const chatSessionId = event.pathParameters?.chat_session_id;
+        const messageId = event.pathParameters?.message_id;
+
+        const userIdValidation = validateUUID(userId, "user_id");
+        if (!userIdValidation.valid) {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: userIdValidation.error });
+          break;
+        }
+        const sessionIdValidation = validateUUID(chatSessionId, "chat_session_id");
+        if (!sessionIdValidation.valid) {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: sessionIdValidation.error });
+          break;
+        }
+        const messageIdValidation = validateUUID(messageId, "message_id");
+        if (!messageIdValidation.valid) {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: messageIdValidation.error });
+          break;
+        }
+
+        let parsedBody = {};
+        try {
+          parsedBody = parseBody(event.body);
+        } catch {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: "Invalid JSON body" });
+          break;
+        }
+
+        if (typeof parsedBody.is_positive !== "boolean") {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: "is_positive is required and must be a boolean" });
+          break;
+        }
+
+        const comment = parsedBody.comment && typeof parsedBody.comment === "string"
+          ? parsedBody.comment.trim().slice(0, 2000) || null
+          : null;
+
+        // Verify message belongs to this session and session belongs to this user
+        const msg = await sqlConnection`
+          SELECT m.id FROM chat_messages m
+          JOIN chat_sessions s ON s.id = m.chat_session_id
+          WHERE m.id = ${messageId}
+            AND m.chat_session_id = ${chatSessionId}
+            AND s.user_id = ${userId}
+            AND m.sender = 'AI'
+        `;
+        if (msg.length === 0) {
+          response.statusCode = 404;
+          response.body = JSON.stringify({ error: "Message not found or not ratable" });
+          break;
+        }
+
+        await sqlConnection`
+          INSERT INTO message_ratings (message_id, user_id, is_positive, comment)
+          VALUES (${messageId}, ${userId}, ${parsedBody.is_positive}, ${comment})
+          ON CONFLICT (message_id, user_id)
+          DO UPDATE SET is_positive = EXCLUDED.is_positive, comment = EXCLUDED.comment
+        `;
+
+        response.statusCode = 200;
+        response.body = JSON.stringify({ success: true });
         break;
       }
 

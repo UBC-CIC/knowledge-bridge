@@ -1022,15 +1022,31 @@ exports.handler = async (event) => {
           const offset = parseInt(qs.offset ?? "0", 10);
 
           const rows = await sqlConnection`
-             SELECT id, chat_session_id, sender, content, sources, created_at
-             FROM chat_messages
-             WHERE chat_session_id = ${sessionId}
-             ORDER BY created_at ASC
+             SELECT
+               m.id,
+               m.chat_session_id,
+               m.sender,
+               m.content,
+               m.sources,
+               m.created_at,
+               r.is_positive AS rating_is_positive,
+               r.comment AS rating_comment
+             FROM chat_messages m
+             LEFT JOIN message_ratings r ON r.message_id = m.id
+             WHERE m.chat_session_id = ${sessionId}
+             ORDER BY m.created_at ASC
              LIMIT ${limit} OFFSET ${offset}
           `;
 
+          const messages = rows.map(({ rating_is_positive, rating_comment, ...msg }) => ({
+            ...msg,
+            rating: rating_is_positive !== null && rating_is_positive !== undefined
+              ? { is_positive: rating_is_positive, comment: rating_comment ?? null }
+              : null,
+          }));
+
           response.statusCode = 200;
-          response.body = JSON.stringify(rows);
+          response.body = JSON.stringify(messages);
           break;
         } catch (err) {
           console.error("GET /admin/chat_sessions/{sessionId}/messages error:", err);

@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize from "rehype-sanitize";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Bot, User, MessageSquare, ChevronDown, ChevronRight, Clock, RefreshCw } from "lucide-react";
+import { Bot, User, MessageSquare, ChevronDown, ChevronRight, Clock, RefreshCw, ThumbsUp, ThumbsDown } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +76,7 @@ type ChatMessage = {
     content: string;
     created_at: string;
     sources?: any[];
+    rating?: { is_positive: boolean; comment: string | null } | null;
 };
 
 export default function ChatHistory() {
@@ -447,6 +448,27 @@ export default function ChatHistory() {
                                                     </ReactMarkdown>
                                                 )}
                                             </div>
+
+                                            {/* Rating badge */}
+                                            {msg.sender === "AI" && msg.rating && (
+                                                <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                                                    <span className="font-medium text-gray-400">User's Rating:</span>
+                                                    <div className={cn(
+                                                        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium border",
+                                                        msg.rating.is_positive
+                                                            ? "bg-green-50 text-green-700 border-green-200"
+                                                            : "bg-red-50 text-red-600 border-red-200"
+                                                    )}>
+                                                        {msg.rating.is_positive
+                                                            ? <ThumbsUp size={10} />
+                                                            : <ThumbsDown size={10} />}
+                                                        {msg.rating.is_positive ? "Helpful" : "Not helpful"}
+                                                    </div>
+                                                    {msg.rating.comment && (
+                                                        <span className="text-gray-500 italic">"{msg.rating.comment}"</span>
+                                                    )}
+                                                </div>
+                                            )}
 
                                             {/* Display Sources (if AI and sources exist) */}
                                             {msg.sender === "AI" && msg.sources && msg.sources.length > 0 && (

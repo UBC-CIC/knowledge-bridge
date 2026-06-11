@@ -1637,6 +1637,68 @@ paths:
         httpMethod: POST
         type: aws_proxy
 
+  /user/{user_id}/chat_sessions/{chat_session_id}/messages/{message_id}/rating:
+    <<: *commonOptions
+    post:
+      tags:
+        - User
+      summary: Rate an AI message (thumbs up or down)
+      operationId: rate_chat_message
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: chat_session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_positive]
+              properties:
+                is_positive:
+                  type: boolean
+                  description: "true for thumbs up, false for thumbs down"
+                comment:
+                  type: string
+                  nullable: true
+                  maxLength: 2000
+                  description: Optional feedback comment (typically provided on thumbs down)
+      responses:
+        "200":
+          description: Rating saved
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "404":
+          description: Message not found or not ratable
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
   /chat_sessions/user/{user_id}:
     <<: *commonOptions
     get:

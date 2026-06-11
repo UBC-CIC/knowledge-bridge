@@ -539,6 +539,30 @@ export default function AIChatPage() {
     }
   }
 
+  const lastBotMessageId = useMemo(() => {
+    if (isStreaming) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].sender === "bot") return messages[i].id;
+    }
+    return null;
+  }, [messages, isStreaming]);
+
+  const handleRate = async (messageId: string, is_positive: boolean, comment?: string) => {
+    try {
+      const token = await getToken();
+      await fetch(
+        `${import.meta.env.VITE_API_ENDPOINT}/user/${userId}/chat_sessions/${activeChatSessionId}/messages/${messageId}/rating`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ is_positive, comment: comment ?? null }),
+        }
+      );
+    } catch (error) {
+      console.error("Failed to submit rating:", error);
+    }
+  };
+
   function messageFormatter(message: Message) {
     if (message.sender === "user") {
       return (
@@ -552,6 +576,10 @@ export default function AIChatPage() {
           sources={message.sources_used}
           warning={message.warning}
           isTyping={message.isTyping}
+          messageId={message.id}
+          isLastBotMessage={message.id === lastBotMessageId}
+          existingRating={message.rating ?? null}
+          onRate={handleRate}
         />
       );
     }
