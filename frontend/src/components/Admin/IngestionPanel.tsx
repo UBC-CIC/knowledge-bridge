@@ -90,7 +90,7 @@ function validateAwsCron(cron: string): string | null {
   if (!cron.trim()) return "Cron expression is required";
   const parts = cron.trim().split(/\s+/);
   if (parts.length !== 6) return "Must have exactly 6 fields: min hr dom mon dow year";
-  const result = isValidCronExpression(`0 ${cron.trim()}`, { error: true });
+  const result = isValidCronExpression(`0 ${cron.trim()}`, { error: true }) as unknown;
   if (result === true) return null;
   if (typeof result === "object" && result !== null && "errorMessage" in result) {
     const msg = (result as { errorMessage: string | string[] }).errorMessage;
