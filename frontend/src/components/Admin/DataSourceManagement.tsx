@@ -28,7 +28,7 @@ export default function DataSourceManagement() {
         setError(null);
         const token = await AuthService.getIdToken();
         const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/analytics`, {
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          headers: { Authorization: token, "Content-Type": "application/json" },
         });
         if (!res.ok) throw new Error("Failed to fetch analytics");
         const data = (await res.json()) as { totals: AnalyticsTotals };

@@ -261,7 +261,7 @@ function SchedulePanel() {
       const token = await getToken();
       const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/ingestion/schedule`, {
         method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { Authorization: token, "Content-Type": "application/json" },
         body: JSON.stringify({ cron: effectiveCron.trim(), timezone, enabled, force_full: forceFull }),
       });
       const data = await res.json();
@@ -664,7 +664,7 @@ export default function IngestionPanel() {
       const token = await getToken();
       const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/ingestion/trigger`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { Authorization: token, "Content-Type": "application/json" },
         body: JSON.stringify({ force_full: forceFull }),
       });
       const data = await res.json();
