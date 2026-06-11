@@ -1467,6 +1467,15 @@ exports.handler = async (event) => {
           const input = result.Target?.Input ? JSON.parse(result.Target.Input) : {};
           const rawExpr = result.ScheduleExpression || "";
           const cron = rawExpr.replace(/^cron\(/, "").replace(/\)$/, "");
+
+          // Fetch last-updated metadata from DB
+          const [meta] = await sqlConnection`
+            SELECT u.email AS updated_by_email, s.updated_at
+            FROM ingestion_schedule s
+            LEFT JOIN users u ON u.id = s.updated_by
+            LIMIT 1
+          `;
+
           response.body = JSON.stringify({
             exists: true,
             cron,
@@ -1474,6 +1483,8 @@ exports.handler = async (event) => {
             enabled: result.State === "ENABLED",
             force_full: input.force_full === true,
             next_run_at: result.NextInvocationTime ? result.NextInvocationTime.toISOString() : null,
+            updated_by_email: meta?.updated_by_email ?? null,
+            updated_at: meta?.updated_at ?? null,
           });
         } catch (err) {
           if (err.name === "ResourceNotFoundException") {
@@ -1530,6 +1541,23 @@ exports.handler = async (event) => {
           }
         }
 
+        // Resolve caller's user ID from email
+        const adminEmail = event.requestContext?.authorizer?.email;
+        const userRows = adminEmail ? await sqlConnection`SELECT id FROM users WHERE email = ${adminEmail} LIMIT 1` : [];
+        const updatedByUserId = userRows[0]?.id ?? null;
+
+        // Upsert single row in ingestion_schedule
+        await sqlConnection`
+          INSERT INTO ingestion_schedule (cron, timezone, enabled, force_full, updated_by, updated_at)
+          VALUES (${cron}, ${timezone}, ${enabled !== false}, ${force_full === true}, ${updatedByUserId}, now())
+          ON CONFLICT DO NOTHING
+        `;
+        await sqlConnection`
+          UPDATE ingestion_schedule
+          SET cron = ${cron}, timezone = ${timezone}, enabled = ${enabled !== false},
+              force_full = ${force_full === true}, updated_by = ${updatedByUserId}, updated_at = now()
+        `;
+
         // Fetch back to return next_run_at
         const updated = await schedulerClient.send(new GetScheduleCommand({ Name: scheduleName }));
         response.body = JSON.stringify({
@@ -1550,6 +1578,7 @@ exports.handler = async (event) => {
         }
         try {
           await schedulerClient.send(new DeleteScheduleCommand({ Name: scheduleName }));
+          await sqlConnection`DELETE FROM ingestion_schedule`;
           response.body = JSON.stringify({ deleted: true });
         } catch (err) {
           if (err.name === "ResourceNotFoundException") {

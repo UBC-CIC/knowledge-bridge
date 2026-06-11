@@ -41,6 +41,8 @@ type ScheduleConfig = {
   enabled?: boolean;
   force_full?: boolean;
   next_run_at?: string | null;
+  updated_by_email?: string | null;
+  updated_at?: string | null;
 };
 
 const STATUS_BADGE: Record<string, string> = {
@@ -338,11 +340,27 @@ function SchedulePanel() {
       {open && (
         <div className="border-t border-gray-100 bg-gray-50/50 px-5 py-5 space-y-5">
 
-          {/* Next run banner */}
-          {schedule?.exists && schedule.next_run_at && (
-            <div className="flex items-center gap-2 text-xs text-gray-600 bg-white border border-gray-200 rounded-lg px-3 py-2.5">
-              <Calendar className="h-3.5 w-3.5 text-primary shrink-0" />
-              <span>Next run: <span className="font-medium text-gray-900">{formatDateTime(schedule.next_run_at)}</span></span>
+          {/* Next run + last updated banner */}
+          {schedule?.exists && (
+            <div className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 space-y-1.5">
+              {schedule.next_run_at && (
+                <div className="flex items-center gap-2 text-xs text-gray-600">
+                  <Calendar className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>Next run: <span className="font-medium text-gray-900">{formatDateTime(schedule.next_run_at)}</span></span>
+                </div>
+              )}
+              {schedule.updated_at && (
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <Clock className="h-3.5 w-3.5 shrink-0" />
+                  <span>Last updated: <span className="font-medium text-gray-700">{formatDateTime(schedule.updated_at)}</span></span>
+                </div>
+              )}
+              {schedule.updated_by_email && (
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  <span>Updated by: <span className="font-medium text-gray-700">{schedule.updated_by_email}</span></span>
+                </div>
+              )}
             </div>
           )}
 
