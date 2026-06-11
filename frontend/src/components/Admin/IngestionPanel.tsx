@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Play, Square, Loader2, RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Clock, Trash2, Save, Calendar, CheckCircle2, XCircle } from "lucide-react";
+import { isValidCronExpression } from "cron-expression-validator";
 import { AuthService } from "@/functions/authService";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -84,12 +85,21 @@ function describeCron(cron: string, tz: string): string {
   return timeStr ? `${when} at ${timeStr} (${tz})` : `${when} (${tz})`;
 }
 
-const PRESETS = [
-  { label: "Daily",   cron: "0 9 * * ? *",  desc: "Every day at 9:00 AM" },
-  { label: "Weekly",  cron: "0 9 ? * MON *", desc: "Every Monday at 9:00 AM" },
-  { label: "Monthly", cron: "0 9 1 * ? *",   desc: "1st of every month at 9:00 AM" },
-  { label: "Custom",  cron: "",              desc: "Enter your own cron expression" },
-];
+// Validate an AWS 6-field cron by prepending "0 " to make it Quartz 7-field
+function validateAwsCron(cron: string): string | null {
+  if (!cron.trim()) return "Cron expression is required";
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 6) return "Must have exactly 6 fields: min hr dom mon dow year";
+  const result = isValidCronExpression(`0 ${cron.trim()}`, { error: true });
+  if (result === true) return null;
+  if (typeof result === "object" && result !== null && "errorMessage" in result) {
+    const msg = (result as { errorMessage: string | string[] }).errorMessage;
+    return Array.isArray(msg) ? msg[0] : msg;
+  }
+  return "Invalid cron expression";
+}
+
+type PresetKey = "Daily" | "Weekly" | "Monthly" | "Custom";
 
 const TIMEZONES = [
   "America/Vancouver",
@@ -111,21 +121,78 @@ const TIMEZONES = [
   "Pacific/Auckland",
 ];
 
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+const DOM_OPTS = Array.from({ length: 28 }, (_, i) => i + 1); // 1-28 safe for all months
+const DOW_OPTS = [
+  { label: "Monday", value: "MON" },
+  { label: "Tuesday", value: "TUE" },
+  { label: "Wednesday", value: "WED" },
+  { label: "Thursday", value: "THU" },
+  { label: "Friday", value: "FRI" },
+  { label: "Saturday", value: "SAT" },
+  { label: "Sunday", value: "SUN" },
+];
+
+function buildCron(preset: PresetKey, hour: number, minute: number, dom: number, dow: string): string {
+  const h = String(hour);
+  const m = String(minute);
+  if (preset === "Daily")   return `${m} ${h} * * ? *`;
+  if (preset === "Weekly")  return `${m} ${h} ? * ${dow} *`;
+  if (preset === "Monthly") return `${m} ${h} ${dom} * ? *`;
+  return "";
+}
+
+function parseCronToFields(cron: string): { hour: number; minute: number; dom: number; dow: string } | null {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length < 6) return null;
+  const [min, hr, dom, , dow] = parts;
+  const h = parseInt(hr, 10);
+  const m = parseInt(min, 10);
+  const d = parseInt(dom, 10);
+  return {
+    hour: isNaN(h) ? 9 : h,
+    minute: isNaN(m) ? 0 : m,
+    dom: isNaN(d) || d < 1 || d > 28 ? 1 : d,
+    dow: DOW_OPTS.find(o => o.value === dow) ? dow : "MON",
+  };
+}
+
+function detectPreset(cron: string): PresetKey {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 6) return "Custom";
+  const [, , dom, , dow] = parts;
+  if (dom === "*" && dow === "?") return "Daily";
+  if (dom === "?" && dow !== "*") return "Weekly";
+  if (dom !== "*" && dom !== "?" && dow === "?") return "Monthly";
+  return "Custom";
+}
+
 const PAGE_SIZE = 5;
+
+// ─── Shared select style ───────────────────────────────────────────────────────
+
+const selectCls = "px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors";
 
 // ─── Schedule Panel ────────────────────────────────────────────────────────────
 
 function SchedulePanel() {
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // load on mount
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [schedule, setSchedule] = useState<ScheduleConfig | null>(null);
 
-  const [selectedPreset, setSelectedPreset] = useState("Daily");
-  const [cron, setCron] = useState("0 9 * * ? *");
+  const [preset, setPreset] = useState<PresetKey>("Daily");
+  const [hour, setHour] = useState(9);
+  const [minute, setMinute] = useState(0);
+  const [dom, setDom] = useState(1);
+  const [dow, setDow] = useState("MON");
+  const [customCron, setCustomCron] = useState("");
+  const [customError, setCustomError] = useState<string | null>(null);
+
   const [timezone, setTimezone] = useState("America/Vancouver");
   const [enabled, setEnabled] = useState(true);
   const [forceFull, setForceFull] = useState(false);
@@ -134,6 +201,21 @@ function SchedulePanel() {
   const tzRef = useRef<HTMLDivElement>(null);
 
   const getToken = () => AuthService.getIdToken();
+
+  const applyScheduleToForm = (data: ScheduleConfig) => {
+    if (!data.exists || !data.cron) return;
+    const p = detectPreset(data.cron);
+    setPreset(p);
+    if (p !== "Custom") {
+      const fields = parseCronToFields(data.cron);
+      if (fields) { setHour(fields.hour); setMinute(fields.minute); setDom(fields.dom); setDow(fields.dow); }
+    } else {
+      setCustomCron(data.cron);
+    }
+    setTimezone(data.timezone ?? "America/Vancouver");
+    setEnabled(data.enabled ?? true);
+    setForceFull(data.force_full ?? false);
+  };
 
   const fetchSchedule = useCallback(async () => {
     setLoading(true);
@@ -145,14 +227,7 @@ function SchedulePanel() {
       });
       const data: ScheduleConfig = await res.json();
       setSchedule(data);
-      if (data.exists) {
-        setCron(data.cron ?? "0 9 * * ? *");
-        setTimezone(data.timezone ?? "America/Vancouver");
-        setEnabled(data.enabled ?? true);
-        setForceFull(data.force_full ?? false);
-        const match = PRESETS.find(p => p.cron === data.cron);
-        setSelectedPreset(match?.label ?? "Custom");
-      }
+      applyScheduleToForm(data);
     } catch {
       setError("Failed to load schedule");
     } finally {
@@ -160,9 +235,8 @@ function SchedulePanel() {
     }
   }, []);
 
-  useEffect(() => {
-    if (open && schedule === null) fetchSchedule();
-  }, [open, schedule, fetchSchedule]);
+  // Fetch on mount — so status shows immediately without needing to expand
+  useEffect(() => { fetchSchedule(); }, [fetchSchedule]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -172,13 +246,12 @@ function SchedulePanel() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const handlePreset = (label: string, presetCron: string) => {
-    setSelectedPreset(label);
-    if (label !== "Custom") setCron(presetCron);
-  };
+  const effectiveCron = preset === "Custom" ? customCron : buildCron(preset, hour, minute, dom, dow);
 
   const handleSave = async () => {
-    if (!cron.trim()) { setError("Cron expression is required"); return; }
+    const cronErr = validateAwsCron(effectiveCron);
+    if (cronErr) { setCustomError(cronErr); return; }
+    setCustomError(null);
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -187,13 +260,11 @@ function SchedulePanel() {
       const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/ingestion/schedule`, {
         method: "PUT",
         headers: { Authorization: token, "Content-Type": "application/json" },
-        body: JSON.stringify({ cron: cron.trim(), timezone, enabled, force_full: forceFull }),
+        body: JSON.stringify({ cron: effectiveCron.trim(), timezone, enabled, force_full: forceFull }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
-      setSuccess(data.next_run_at
-        ? `Saved! Next run: ${formatDateTime(data.next_run_at)}`
-        : "Schedule saved.");
+      setSuccess(data.next_run_at ? `Saved! Next run: ${formatDateTime(data.next_run_at)}` : "Schedule saved.");
       await fetchSchedule();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -215,10 +286,8 @@ function SchedulePanel() {
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Delete failed"); }
       setSuccess("Schedule removed.");
       setSchedule({ exists: false });
-      setCron("0 9 * * ? *");
-      setSelectedPreset("Daily");
-      setEnabled(true);
-      setForceFull(false);
+      setPreset("Daily"); setHour(9); setMinute(0); setDom(1); setDow("MON");
+      setEnabled(true); setForceFull(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
@@ -226,11 +295,15 @@ function SchedulePanel() {
     }
   };
 
-  const filteredTz = tzSearch
-    ? TIMEZONES.filter(tz => tz.toLowerCase().includes(tzSearch.toLowerCase()))
-    : TIMEZONES;
+  const filteredTz = tzSearch ? TIMEZONES.filter(tz => tz.toLowerCase().includes(tzSearch.toLowerCase())) : TIMEZONES;
 
-  const cronPreview = describeCron(cron, timezone);
+  const headerStatus = loading
+    ? "Loading…"
+    : schedule?.exists
+      ? schedule.enabled
+        ? `Active — ${describeCron(schedule.cron ?? "", schedule.timezone ?? "UTC")}`
+        : "Paused — click to configure"
+      : "Not configured — click to set up";
 
   return (
     <div className="rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -246,29 +319,18 @@ function SchedulePanel() {
           </div>
           <div className="text-left">
             <p className="text-sm font-semibold text-gray-900">Scheduled Run</p>
-            <p className="text-xs text-gray-500 mt-0.5">
-              {loading ? "Loading…" :
-                schedule?.exists
-                  ? (schedule.enabled
-                      ? `Active — ${describeCron(schedule.cron ?? "", schedule.timezone ?? "UTC")}`
-                      : "Paused — click to configure")
-                  : "Not configured — click to set up"}
-            </p>
+            <p className="text-xs text-gray-500 mt-0.5">{headerStatus}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {schedule?.exists && (
+          {!loading && schedule?.exists && (
             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-              schedule.enabled
-                ? "bg-green-100 text-green-700"
-                : "bg-gray-100 text-gray-500"
+              schedule.enabled ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
             }`}>
               {schedule.enabled ? "Active" : "Paused"}
             </span>
           )}
-          {open
-            ? <ChevronUp className="h-4 w-4 text-gray-400" />
-            : <ChevronDown className="h-4 w-4 text-gray-400" />}
+          {open ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
         </div>
       </button>
 
@@ -288,41 +350,101 @@ function SchedulePanel() {
           <div>
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Frequency</p>
             <div className="flex flex-wrap gap-2">
-              {PRESETS.map(p => (
+              {(["Daily", "Weekly", "Monthly", "Custom"] as PresetKey[]).map(p => (
                 <button
-                  key={p.label}
+                  key={p}
                   type="button"
-                  onClick={() => handlePreset(p.label, p.cron)}
+                  onClick={() => { setPreset(p); setCustomError(null); }}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                    selectedPreset === p.label
+                    preset === p
                       ? "bg-primary text-white border-primary shadow-sm"
                       : "bg-white text-gray-600 border-gray-200 hover:border-primary/50 hover:text-primary"
                   }`}
                 >
-                  {p.label}
+                  {p}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Cron expression */}
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
-              Cron Expression
-              <span className="ml-1 normal-case font-normal text-gray-400">(AWS format: min hr dom mon dow year)</span>
-            </p>
-            <input
-              type="text"
-              value={cron}
-              onChange={e => { setCron(e.target.value); setSelectedPreset("Custom"); }}
-              placeholder="0 9 * * ? *"
-              className="w-full font-mono text-sm px-3 py-2 border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
-              spellCheck={false}
-            />
-            {cronPreview && (
-              <p className="mt-1.5 text-xs text-primary/80 font-medium">{cronPreview}</p>
-            )}
-          </div>
+          {/* Constrained dropdowns for Daily / Weekly / Monthly */}
+          {preset !== "Custom" && (
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Time</p>
+              <div className="flex flex-wrap gap-3 items-center">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-gray-400">Hour</label>
+                  <select value={hour} onChange={e => setHour(Number(e.target.value))} className={selectCls}>
+                    {HOURS.map(h => (
+                      <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-gray-400">Minute</label>
+                  <select value={minute} onChange={e => setMinute(Number(e.target.value))} className={selectCls}>
+                    {MINUTES.map(m => (
+                      <option key={m} value={m}>:{String(m).padStart(2, "0")}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {preset === "Weekly" && (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-gray-400">Day of week</label>
+                    <select value={dow} onChange={e => setDow(e.target.value)} className={selectCls}>
+                      {DOW_OPTS.map(d => (
+                        <option key={d.value} value={d.value}>{d.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {preset === "Monthly" && (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-gray-400">Day of month</label>
+                    <select value={dom} onChange={e => setDom(Number(e.target.value))} className={selectCls}>
+                      {DOM_OPTS.map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Preview */}
+              <p className="text-xs text-primary/80 font-medium">{describeCron(effectiveCron, timezone)}</p>
+            </div>
+          )}
+
+          {/* Custom cron text input */}
+          {preset === "Custom" && (
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                Cron Expression
+                <span className="ml-1 normal-case font-normal text-gray-400">(6-field AWS format: min hr dom mon dow year)</span>
+              </p>
+              <input
+                type="text"
+                value={customCron}
+                onChange={e => { setCustomCron(e.target.value); setCustomError(null); }}
+                onBlur={() => { if (customCron) setCustomError(validateAwsCron(customCron)); }}
+                placeholder="0 9 * * ? *"
+                className={`w-full font-mono text-sm px-3 py-2 border rounded-lg bg-white focus:outline-none focus:ring-2 transition-colors ${
+                  customError ? "border-red-300 focus:ring-red-200" : "border-gray-200 focus:ring-primary/30 focus:border-primary"
+                }`}
+                spellCheck={false}
+              />
+              {customError && (
+                <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
+                  <XCircle className="h-3 w-3 shrink-0" />{customError}
+                </p>
+              )}
+              {!customError && customCron && (
+                <p className="mt-1.5 text-xs text-primary/80 font-medium">{describeCron(customCron, timezone)}</p>
+              )}
+            </div>
+          )}
 
           {/* Timezone dropdown */}
           <div>
@@ -336,7 +458,6 @@ function SchedulePanel() {
                 <span className="font-medium text-gray-800">{timezone}</span>
                 <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${tzOpen ? "rotate-180" : ""}`} />
               </button>
-
               {tzOpen && (
                 <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
                   <div className="p-2 border-b border-gray-100">
@@ -371,7 +492,7 @@ function SchedulePanel() {
             </div>
           </div>
 
-          {/* Toggle switches */}
+          {/* Toggles */}
           <div className="flex flex-col sm:flex-row gap-5">
             <label className="flex items-center gap-3 cursor-pointer select-none">
               <div
@@ -404,21 +525,19 @@ function SchedulePanel() {
             </label>
           </div>
 
-          {/* Feedback messages */}
+          {/* Feedback */}
           {error && (
             <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              <XCircle className="h-4 w-4 shrink-0" />
-              {error}
+              <XCircle className="h-4 w-4 shrink-0" />{error}
             </div>
           )}
           {success && (
             <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              {success}
+              <CheckCircle2 className="h-4 w-4 shrink-0" />{success}
             </div>
           )}
 
-          {/* Action buttons */}
+          {/* Actions */}
           <div className="flex items-center justify-between pt-1 border-t border-gray-100">
             <div>
               {schedule?.exists && (
@@ -497,9 +616,7 @@ export default function IngestionPanel() {
     }
   }, [page]);
 
-  useEffect(() => {
-    fetchRuns(page);
-  }, [page]);
+  useEffect(() => { fetchRuns(page); }, [page]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -508,26 +625,18 @@ export default function IngestionPanel() {
     setViewingRunId(null);
   };
 
-  // Fast poll while a run is in-flight
   useEffect(() => {
     if (isInFlight) {
       pollRunsRef.current = setInterval(() => fetchRuns(0), 10_000);
     } else {
       if (pollRunsRef.current) clearInterval(pollRunsRef.current);
     }
-    return () => {
-      if (pollRunsRef.current) clearInterval(pollRunsRef.current);
-    };
+    return () => { if (pollRunsRef.current) clearInterval(pollRunsRef.current); };
   }, [isInFlight, fetchRuns]);
 
-  // Heartbeat — slow always-on poll to catch scheduler-triggered runs while page is open
   useEffect(() => {
-    heartbeatRef.current = setInterval(() => {
-      if (!isInFlight) fetchRuns(0);
-    }, 60_000);
-    return () => {
-      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-    };
+    heartbeatRef.current = setInterval(() => { if (!isInFlight) fetchRuns(0); }, 60_000);
+    return () => { if (heartbeatRef.current) clearInterval(heartbeatRef.current); };
   }, [isInFlight, fetchRuns]);
 
   const triggerJob = async () => {
@@ -576,19 +685,14 @@ export default function IngestionPanel() {
       const token = await getToken();
       const params = new URLSearchParams({ jobRunId: glueRunId, logType: type });
       if (append && nextTokenRef.current) params.set("nextToken", nextTokenRef.current);
-
       const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/ingestion/logs?${params}`, {
         headers: { Authorization: token },
       });
       const data = await res.json();
-
       if (data.nextForwardToken) nextTokenRef.current = data.nextForwardToken;
       if (data.logLines?.length) {
-        if (append) {
-          setLogs((prev) => [...prev, ...data.logLines]);
-        } else {
-          setLogs(data.logLines);
-        }
+        if (append) setLogs((prev) => [...prev, ...data.logLines]);
+        else setLogs(data.logLines);
       }
     } catch {
       // silently ignore
@@ -600,28 +704,21 @@ export default function IngestionPanel() {
   useEffect(() => {
     if (pollLogsRef.current) clearInterval(pollLogsRef.current);
     if (!viewingRunId) return;
-
     const run = runs.find((r) => r.id === viewingRunId);
     if (!run?.glue_run_id) return;
-
     setLogs([]);
     nextTokenRef.current = undefined;
     fetchLogs(run.glue_run_id, logType, false);
-
     if (!TERMINAL.has(run.status)) {
       pollLogsRef.current = setInterval(() => fetchLogs(run.glue_run_id!, logType, true), 5_000);
     }
-    return () => {
-      if (pollLogsRef.current) clearInterval(pollLogsRef.current);
-    };
+    return () => { if (pollLogsRef.current) clearInterval(pollLogsRef.current); };
   }, [viewingRunId, logType, fetchLogs]);
 
   useEffect(() => {
     if (!viewingRunId) return;
     const run = runs.find((r) => r.id === viewingRunId);
-    if (run && TERMINAL.has(run.status) && pollLogsRef.current) {
-      clearInterval(pollLogsRef.current);
-    }
+    if (run && TERMINAL.has(run.status) && pollLogsRef.current) clearInterval(pollLogsRef.current);
   }, [runs, viewingRunId]);
 
   useEffect(() => {
@@ -629,12 +726,8 @@ export default function IngestionPanel() {
   }, [logs]);
 
   const toggleLogs = (run: IngestionRun) => {
-    if (viewingRunId === run.id) {
-      setViewingRunId(null);
-    } else {
-      setViewingRunId(run.id);
-      setLogType("output");
-    }
+    if (viewingRunId === run.id) setViewingRunId(null);
+    else { setViewingRunId(run.id); setLogType("output"); }
   };
 
   return (
@@ -717,7 +810,6 @@ export default function IngestionPanel() {
                     <React.Fragment key={run.id}>
                       <TableRow className={isViewing ? "bg-gray-50/50" : ""}>
                         <TableCell className="text-sm text-gray-500 font-medium">{index + 1}</TableCell>
-
                         <TableCell>
                           <Badge className={`${STATUS_BADGE[run.status] ?? "bg-gray-100 text-gray-700"} font-medium`}>
                             {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
@@ -726,7 +818,6 @@ export default function IngestionPanel() {
                             )}
                           </Badge>
                         </TableCell>
-
                         <TableCell className="text-sm text-gray-700">
                           {formatDateTime(run.started_at)}
                           {!!run.metadata?.force_full && (
@@ -735,27 +826,20 @@ export default function IngestionPanel() {
                             </span>
                           )}
                         </TableCell>
-
                         <TableCell className="text-sm text-gray-600">
                           {formatDuration(run.started_at, run.finished_at)}
                         </TableCell>
-
                         <TableCell className="text-sm">
                           {hasStats ? (
                             <div className="flex gap-3">
                               <span className="text-green-600">{run.ingested_documents} ingested</span>
-                              {run.skipped_documents > 0 && (
-                                <span className="text-gray-400">{run.skipped_documents} skipped</span>
-                              )}
-                              {run.failed_documents > 0 && (
-                                <span className="text-red-500">{run.failed_documents} failed</span>
-                              )}
+                              {run.skipped_documents > 0 && <span className="text-gray-400">{run.skipped_documents} skipped</span>}
+                              {run.failed_documents > 0 && <span className="text-red-500">{run.failed_documents} failed</span>}
                             </div>
                           ) : (
                             <span className="text-gray-400">—</span>
                           )}
                         </TableCell>
-
                         <TableCell>
                           {run.glue_run_id ? (
                             <button
@@ -763,11 +847,9 @@ export default function IngestionPanel() {
                               onClick={() => toggleLogs(run)}
                               className="text-xs text-primary hover:text-primary/80 flex items-center gap-1 font-medium"
                             >
-                              {isViewing ? (
-                                <><ChevronUp className="h-3.5 w-3.5" />Hide logs</>
-                              ) : (
-                                <><ChevronDown className="h-3.5 w-3.5" />View logs</>
-                              )}
+                              {isViewing
+                                ? <><ChevronUp className="h-3.5 w-3.5" />Hide logs</>
+                                : <><ChevronDown className="h-3.5 w-3.5" />View logs</>}
                             </button>
                           ) : (
                             <span className="text-xs text-gray-400">—</span>
@@ -795,8 +877,7 @@ export default function IngestionPanel() {
                               ))}
                               {logsLoading && (
                                 <div className="ml-auto flex items-center px-3 text-xs text-gray-400 gap-1">
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                  loading
+                                  <Loader2 className="h-3 w-3 animate-spin" />loading
                                 </div>
                               )}
                             </div>
@@ -809,24 +890,20 @@ export default function IngestionPanel() {
                                 <span style={{ color: "rgba(245,245,245,0.4)" }}>
                                   {logsLoading ? "Fetching logs..." : "No logs available."}
                                 </span>
-                              ) : (
-                                logs.map((line, i) => {
-                                  const isError = line.message.includes("ERROR") || line.message.includes("Traceback");
-                                  const isWarn = line.message.includes("WARNING");
-                                  return (
-                                    <div key={i} className="whitespace-pre-wrap break-all">
-                                      <span style={{ color: "rgba(245,245,245,0.35)", marginRight: 8 }}>
-                                        {new Date(line.timestamp).toLocaleTimeString()}
-                                      </span>
-                                      <span style={{
-                                        color: isError ? "rgb(252,165,165)" : isWarn ? "rgb(253,224,71)" : "rgb(245,245,245)",
-                                      }}>
-                                        {line.message}
-                                      </span>
-                                    </div>
-                                  );
-                                })
-                              )}
+                              ) : logs.map((line, i) => {
+                                const isError = line.message.includes("ERROR") || line.message.includes("Traceback");
+                                const isWarn = line.message.includes("WARNING");
+                                return (
+                                  <div key={i} className="whitespace-pre-wrap break-all">
+                                    <span style={{ color: "rgba(245,245,245,0.35)", marginRight: 8 }}>
+                                      {new Date(line.timestamp).toLocaleTimeString()}
+                                    </span>
+                                    <span style={{ color: isError ? "rgb(252,165,165)" : isWarn ? "rgb(253,224,71)" : "rgb(245,245,245)" }}>
+                                      {line.message}
+                                    </span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -863,7 +940,6 @@ export default function IngestionPanel() {
         </div>
       )}
 
-      {/* Schedule panel — collapsible */}
       <SchedulePanel />
     </div>
   );

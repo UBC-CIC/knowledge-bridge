@@ -81,6 +81,46 @@ const handleError = (error, response) => {
  * @returns {Object} HTTP response object with statusCode, headers, and body
  */
 exports.handler = async (event) => {
+  // EventBridge Scheduler invocations have no httpMethod — run trigger logic directly
+  if (!event.httpMethod) {
+    await initConnection();
+    const forceFull = event.force_full === true ? "true" : "false";
+    const jobName = process.env.GLUE_JOB_NAME;
+    if (!jobName) {
+      console.error("GLUE_JOB_NAME not configured for scheduled invocation");
+      return;
+    }
+    const inFlight = await sqlConnection`
+      SELECT id FROM ingestion_runs
+      WHERE run_type = 'site' AND status IN ('running', 'stopping')
+      LIMIT 1
+    `;
+    if (inFlight.length > 0) {
+      console.log("Scheduled trigger skipped — a job is already in-flight");
+      return;
+    }
+    const metadataJson = { force_full: forceFull === "true", job_name: jobName, triggered_by: "scheduler" };
+    const inserted = await sqlConnection`
+      INSERT INTO ingestion_runs (run_type, triggered_by, status, started_at, metadata)
+      VALUES ('site', 'scheduler', 'running', now(), ${JSON.stringify(metadataJson)}::jsonb)
+      RETURNING id
+    `;
+    const ingestionRunId = inserted[0].id;
+    const glueResp = await glueClient.send(new StartJobRunCommand({
+      JobName: jobName,
+      Arguments: {
+        "--FORCE_FULL": forceFull,
+        "--TRIGGERED_BY": "scheduler",
+        "--INGESTION_RUN_ID": ingestionRunId,
+      },
+    }));
+    await sqlConnection`
+      UPDATE ingestion_runs SET glue_run_id = ${glueResp.JobRunId} WHERE id = ${ingestionRunId}
+    `;
+    console.log(`Scheduled ingestion started: runId=${ingestionRunId} glueRunId=${glueResp.JobRunId}`);
+    return;
+  }
+
   const response = await createResponse(event);
 
   const callerRole = event.requestContext?.authorizer?.role;
@@ -96,8 +136,6 @@ exports.handler = async (event) => {
   let data; // Variable to store response data
   try {
     // Route requests based on HTTP method and URL path
-    // event.httpMethod: GET, POST, PUT, DELETE
-    // event.resource: URL pattern like /admin/users or /admin/exampleEndpoint
     const pathData = event.httpMethod + " " + event.resource;
 
     // Handle different API endpoints using switch statement
@@ -1427,7 +1465,6 @@ exports.handler = async (event) => {
         try {
           const result = await schedulerClient.send(new GetScheduleCommand({ Name: scheduleName }));
           const input = result.Target?.Input ? JSON.parse(result.Target.Input) : {};
-          // Strip "cron(" prefix and ")" suffix to get the bare expression
           const rawExpr = result.ScheduleExpression || "";
           const cron = rawExpr.replace(/^cron\(/, "").replace(/\)$/, "");
           response.body = JSON.stringify({
@@ -1452,9 +1489,8 @@ exports.handler = async (event) => {
       case "PUT /admin/ingestion/schedule": {
         const scheduleName = process.env.SCHEDULE_NAME;
         const executionRoleArn = process.env.SCHEDULER_EXECUTION_ROLE_ARN;
-        const jobName = process.env.GLUE_JOB_NAME;
-        const glueJobArn = process.env.GLUE_JOB_ARN;
-        if (!scheduleName || !executionRoleArn || !jobName || !glueJobArn) {
+        const lambdaArn = process.env.ADMIN_LAMBDA_ARN;
+        if (!scheduleName || !executionRoleArn || !lambdaArn) {
           response.statusCode = 500;
           response.body = JSON.stringify({ error: "Scheduler env vars not configured" });
           break;
@@ -1475,7 +1511,7 @@ exports.handler = async (event) => {
           State: enabled === false ? "DISABLED" : "ENABLED",
           FlexibleTimeWindow: { Mode: "OFF" },
           Target: {
-            Arn: process.env.GLUE_JOB_ARN,
+            Arn: lambdaArn,
             RoleArn: executionRoleArn,
             Input: JSON.stringify({ force_full: force_full === true }),
           },

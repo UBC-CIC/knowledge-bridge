@@ -1350,21 +1350,32 @@ export class ApiGatewayStack extends cdk.Stack {
         ],
       }));
 
-      // EventBridge Scheduler execution role — trusted by scheduler.amazonaws.com to start the Glue job
+      // Build the admin Lambda ARN as a plain string to avoid a circular CDK dependency
+      // (SchedulerExecRole policy → Lambda ARN, Lambda env → role ARN would form a cycle)
+      const adminLambdaArn = `arn:aws:lambda:${this.region}:${this.account}:function:${id}-adminFunction`;
+
+      // EventBridge Scheduler execution role — invokes the admin Lambda directly
       const schedulerExecutionRole = new iam.Role(this, `${id}-SchedulerExecRole`, {
         roleName: `${id}-SchedulerExecRole`,
         assumedBy: new iam.ServicePrincipal("scheduler.amazonaws.com"),
       });
       schedulerExecutionRole.addToPolicy(new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        actions: ["glue:StartJobRun"],
-        resources: [`arn:aws:glue:${this.region}:${this.account}:job/${glueJobName}`],
+        actions: ["lambda:InvokeFunction"],
+        resources: [adminLambdaArn],
       }));
+
+      // Allow EventBridge Scheduler to invoke the admin Lambda (scoped to this account's schedules)
+      lambdaAdminFunction.addPermission("AllowSchedulerInvoke", {
+        principal: new iam.ServicePrincipal("scheduler.amazonaws.com"),
+        action: "lambda:InvokeFunction",
+        sourceArn: `arn:aws:scheduler:${this.region}:${this.account}:schedule/default/sharepoint-ingestion-schedule`,
+      });
 
       // Admin Lambda — manage schedules + pass the execution role to EventBridge
       lambdaAdminFunction.addEnvironment("SCHEDULER_EXECUTION_ROLE_ARN", schedulerExecutionRole.roleArn);
       lambdaAdminFunction.addEnvironment("SCHEDULE_NAME", "sharepoint-ingestion-schedule");
-      lambdaAdminFunction.addEnvironment("GLUE_JOB_ARN", `arn:aws:glue:${this.region}:${this.account}:job/${glueJobName}`);
+      lambdaAdminFunction.addEnvironment("ADMIN_LAMBDA_ARN", adminLambdaArn);
       lambdaAdminFunction.addToRolePolicy(new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: [
