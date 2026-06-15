@@ -949,6 +949,84 @@ exports.handler = async (event) => {
         break;
       }
 
+      // GET /admin/entra_groups — paginated list of Glue-known groups with member counts
+      case "GET /admin/entra_groups": {
+        try {
+          const qs = event.queryStringParameters ?? {};
+          const limit = Math.min(parseInt(qs.limit ?? "20", 10), 50);
+          const offset = Math.max(parseInt(qs.offset ?? "0", 10), 0);
+
+          const rows = await sqlConnection`
+            SELECT
+              eg.id,
+              eg.display_name,
+              COUNT(um.user_id)::int AS member_count
+            FROM entra_groups eg
+            LEFT JOIN user_memberships um ON um.entra_group_id = eg.id
+            GROUP BY eg.id, eg.display_name
+            ORDER BY eg.display_name ASC
+            LIMIT ${limit} OFFSET ${offset}
+          `;
+
+          const [{ total }] = await sqlConnection`
+            SELECT COUNT(*)::int AS total FROM entra_groups
+          `;
+
+          response.statusCode = 200;
+          response.body = JSON.stringify({ groups: rows, total, limit, offset });
+          break;
+        } catch (err) {
+          console.error("GET /admin/entra_groups error:", err);
+          response.statusCode = 500;
+          response.body = JSON.stringify({ error: "Internal Server Error" });
+          break;
+        }
+      }
+
+      // GET /admin/entra_groups/{groupId}/users — paginated users within a group
+      case "GET /admin/entra_groups/{groupId}/users": {
+        try {
+          const groupId = event.pathParameters?.groupId;
+          if (!groupId) {
+            response.statusCode = 400;
+            response.body = JSON.stringify({ error: "groupId is required" });
+            break;
+          }
+
+          const qs = event.queryStringParameters ?? {};
+          const limit = Math.min(parseInt(qs.limit ?? "10", 10), 50);
+          const offset = Math.max(parseInt(qs.offset ?? "0", 10), 0);
+
+          const rows = await sqlConnection`
+            SELECT
+              u.id,
+              u.email,
+              u.display_name,
+              u.last_seen_at
+            FROM user_memberships um
+            JOIN users u ON u.id = um.user_id
+            WHERE um.entra_group_id = ${groupId}
+            ORDER BY u.email ASC
+            LIMIT ${limit} OFFSET ${offset}
+          `;
+
+          const [{ total }] = await sqlConnection`
+            SELECT COUNT(*)::int AS total
+            FROM user_memberships
+            WHERE entra_group_id = ${groupId}
+          `;
+
+          response.statusCode = 200;
+          response.body = JSON.stringify({ users: rows, total, limit, offset });
+          break;
+        } catch (err) {
+          console.error("GET /admin/entra_groups/{groupId}/users error:", err);
+          response.statusCode = 500;
+          response.body = JSON.stringify({ error: "Internal Server Error" });
+          break;
+        }
+      }
+
       // fetches the list of users for admin to view
       case "GET /admin/users": {
         try {
