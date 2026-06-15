@@ -428,7 +428,7 @@ export default function AIChatMessage({
                     <Button
                       size="sm"
                       onClick={handleDislikeSubmit}
-                      disabled={submitting}
+                      disabled={submitting || !selectedChip}
                       className="h-7 text-xs bg-primary text-white hover:bg-primary/90"
                     >
                       <Send className="h-3 w-3 mr-1" />Submit
