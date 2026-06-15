@@ -1027,6 +1027,42 @@ exports.handler = async (event) => {
         }
       }
 
+      // GET /admin/entra_groups/unassigned/users — users with no group memberships
+      case "GET /admin/entra_groups/unassigned/users": {
+        try {
+          const qs = event.queryStringParameters ?? {};
+          const limit = Math.min(parseInt(qs.limit ?? "10", 10), 50);
+          const offset = Math.max(parseInt(qs.offset ?? "0", 10), 0);
+
+          const rows = await sqlConnection`
+            SELECT u.id, u.email, u.display_name, u.last_seen_at
+            FROM users u
+            WHERE NOT EXISTS (
+              SELECT 1 FROM user_memberships um WHERE um.user_id = u.id
+            )
+            ORDER BY u.email ASC
+            LIMIT ${limit} OFFSET ${offset}
+          `;
+
+          const [{ total }] = await sqlConnection`
+            SELECT COUNT(*)::int AS total
+            FROM users u
+            WHERE NOT EXISTS (
+              SELECT 1 FROM user_memberships um WHERE um.user_id = u.id
+            )
+          `;
+
+          response.statusCode = 200;
+          response.body = JSON.stringify({ users: rows, total, limit, offset });
+          break;
+        } catch (err) {
+          console.error("GET /admin/entra_groups/unassigned/users error:", err);
+          response.statusCode = 500;
+          response.body = JSON.stringify({ error: "Internal Server Error" });
+          break;
+        }
+      }
+
       // fetches the list of users for admin to view
       case "GET /admin/users": {
         try {

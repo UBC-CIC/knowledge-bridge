@@ -86,6 +86,8 @@ type ChatMessage = {
 
 type PaginationState = { offset: number; total: number; hasMore: boolean };
 
+const UNASSIGNED_ID = "__unassigned__";
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -177,13 +179,14 @@ export default function ChatHistory() {
             }
         }
 
+        const url = groupId === UNASSIGNED_ID
+            ? `${import.meta.env.VITE_API_ENDPOINT}/admin/entra_groups/unassigned/users?limit=${USER_LIMIT}&offset=${offset}`
+            : `${import.meta.env.VITE_API_ENDPOINT}/admin/entra_groups/${groupId}/users?limit=${USER_LIMIT}&offset=${offset}`;
+
         setLoadingGroupUsers(prev => ({ ...prev, [groupId]: true }));
         try {
             const headers = await getAuthHeaders();
-            const res = await fetch(
-                `${import.meta.env.VITE_API_ENDPOINT}/admin/entra_groups/${groupId}/users?limit=${USER_LIMIT}&offset=${offset}`,
-                { headers }
-            );
+            const res = await fetch(url, { headers });
             if (!res.ok) throw new Error("Failed to fetch group users");
             const data = await res.json();
             const pagination: PaginationState = {
@@ -424,6 +427,34 @@ export default function ChatHistory() {
                                         {loadingMoreGroups ? "Loading…" : `Load more groups (${groups.length} / ${groupsPagination.total})`}
                                     </button>
                                 )}
+
+                                {/* Unassigned virtual group — always shown at the bottom */}
+                                <GroupRow
+                                    key={UNASSIGNED_ID}
+                                    group={{ id: UNASSIGNED_ID, display_name: "Unassigned", member_count: groupUsersPagination[UNASSIGNED_ID]?.total ?? 0 }}
+                                    expanded={expandedGroupIds.has(UNASSIGNED_ID)}
+                                    onToggle={() => toggleGroup(UNASSIGNED_ID)}
+                                    users={groupUsers[UNASSIGNED_ID] ?? []}
+                                    usersPagination={groupUsersPagination[UNASSIGNED_ID]}
+                                    loadingUsers={!!loadingGroupUsers[UNASSIGNED_ID]}
+                                    onLoadMoreUsers={() => {
+                                        const p = groupUsersPagination[UNASSIGNED_ID];
+                                        if (p) fetchGroupUsers(UNASSIGNED_ID, p.offset + USER_LIMIT, true);
+                                    }}
+                                    expandedUserKeys={expandedUserKeys}
+                                    onToggleUser={(userId) => toggleUser(UNASSIGNED_ID, userId)}
+                                    userSessions={userSessions}
+                                    userSessionsPagination={userSessionsPagination}
+                                    loadingUserSessions={loadingUserSessions}
+                                    onLoadMoreSessions={(userId) => {
+                                        const p = userSessionsPagination[userId];
+                                        if (p) fetchUserSessions(userId, p.offset + SESSION_LIMIT, true);
+                                    }}
+                                    selectedSessionId={selectedSessionId}
+                                    onSelectSession={handleSessionSelect}
+                                    formatDate={formatDate}
+                                    isVirtual
+                                />
                             </div>
                         )}
                     </CardContent>
@@ -569,6 +600,7 @@ type GroupRowProps = {
     selectedSessionId: string | null;
     onSelectSession: (sessionId: string) => void;
     formatDate: (d?: string) => string;
+    isVirtual?: boolean;
 };
 
 function GroupRow({
@@ -576,7 +608,7 @@ function GroupRow({
     users, usersPagination, loadingUsers, onLoadMoreUsers,
     expandedUserKeys, onToggleUser,
     userSessions, userSessionsPagination, loadingUserSessions, onLoadMoreSessions,
-    selectedSessionId, onSelectSession, formatDate,
+    selectedSessionId, onSelectSession, formatDate, isVirtual,
 }: GroupRowProps) {
     const [showId, setShowId] = useState(false);
     const tooltipRef = useRef<HTMLDivElement>(null);
@@ -590,22 +622,24 @@ function GroupRow({
                     <span className="font-semibold text-sm text-gray-900 truncate">{group.display_name}</span>
                     <span className="text-xs text-gray-400 flex-shrink-0">({group.member_count})</span>
                 </button>
-                {/* (i) tooltip for group ID */}
-                <div className="relative flex-shrink-0 ml-2" ref={tooltipRef}>
-                    <button
-                        onMouseEnter={() => setShowId(true)}
-                        onMouseLeave={() => setShowId(false)}
-                        className="p-1 text-gray-300 hover:text-gray-500 transition-colors"
-                        aria-label="Show group ID"
-                    >
-                        <Info size={14} />
-                    </button>
-                    {showId && (
-                        <div className="absolute right-0 top-6 z-50 bg-gray-900 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap shadow-lg">
-                            {group.id}
-                        </div>
-                    )}
-                </div>
+                {/* (i) tooltip for group ID — hidden for virtual groups */}
+                {!isVirtual && (
+                    <div className="relative flex-shrink-0 ml-2" ref={tooltipRef}>
+                        <button
+                            onMouseEnter={() => setShowId(true)}
+                            onMouseLeave={() => setShowId(false)}
+                            className="p-1 text-gray-300 hover:text-gray-500 transition-colors"
+                            aria-label="Show group ID"
+                        >
+                            <Info size={14} />
+                        </button>
+                        {showId && (
+                            <div className="absolute right-0 top-6 z-50 bg-gray-900 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap shadow-lg">
+                                {group.id}
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Users list */}
