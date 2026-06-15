@@ -287,9 +287,9 @@ export default function AIChatPage() {
 
         chatMessages.sort((a, b) => a.time - b.time);
         setMessages(chatMessages);
+        setIsLoadingHistory(false);
       } catch (error) {
         console.error("Failed to load chat history:", error);
-      } finally {
         setIsLoadingHistory(false);
       }
     };
