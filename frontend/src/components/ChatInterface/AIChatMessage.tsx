@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChevronDown, ChevronUp, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,13 @@ export default function AIChatMessage({
   const [submittedRating, setSubmittedRating] = useState<boolean | null>(
     existingRating?.is_positive ?? null
   );
+
+  useEffect(() => {
+    if (existingRating !== null) {
+      setRatingState("submitted");
+      setSubmittedRating(existingRating.is_positive);
+    }
+  }, [existingRating]);
   const [selectedChip, setSelectedChip] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);

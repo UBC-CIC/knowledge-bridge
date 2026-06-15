@@ -70,14 +70,14 @@ function parseGuestEmail(upn) {
   return base.slice(0, lastUnderscore) + '@' + base.slice(lastUnderscore + 1);
 }
 
-async function getEntraGroups(tenantUpn, tenantId, clientId, clientSecret) {
+async function getUserGroupIds(tenantUpn, tenantId, clientId, clientSecret) {
   const https = require("https");
   const accessToken = await getGraphToken(tenantId, clientId, clientSecret);
 
   const groups = await new Promise((resolve, reject) => {
     const req = https.request({
       hostname: "graph.microsoft.com",
-      path: `/v1.0/users/${encodeURIComponent(tenantUpn)}/transitiveMemberOf/microsoft.graph.group?$select=id,displayName`,
+      path: `/v1.0/users/${encodeURIComponent(tenantUpn)}/transitiveMemberOf/microsoft.graph.group?$select=id`,
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}` },
     }, (res) => {
@@ -89,11 +89,7 @@ async function getEntraGroups(tenantUpn, tenantId, clientId, clientSecret) {
     req.end();
   });
 
-  // Deduplicate by id (lowercased)
-  const seen = new Set();
-  return groups
-    .filter((g) => { const k = g.id.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
-    .map((g) => ({ id: g.id.toLowerCase(), displayName: g.displayName || g.id }));
+  return [...new Set(groups.map((g) => g.id.toLowerCase()))];
 }
 
 exports.handler = async (event) => {
@@ -153,31 +149,23 @@ exports.handler = async (event) => {
       console.warn("Could not add user to group (may already be a member):", groupErr.message);
     }
 
-    // Sync Entra groups using tenant_upn — best effort, never blocks login
+    // Sync user's Entra group memberships — best effort, never blocks login
     try {
       const spSecret = await getSharePointSecret();
-      const groups = await getEntraGroups(
+      const groupIds = await getUserGroupIds(
         tenantUpn,
         spSecret.tenant_id,
         spSecret.client_id,
         spSecret.client_secret,
       );
-      console.log(`Synced ${groups.length} Entra groups for ${tenantUpn}`);
-
-      if (groups.length > 0) {
-        // Upsert group reference rows (id + display_name)
-        await sqlConnection`
-          INSERT INTO entra_groups ${sqlConnection(groups.map((g) => ({ id: g.id, display_name: g.displayName })))}
-          ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name
-        `;
-      }
+      console.log(`Synced ${groupIds.length} Entra group memberships for ${tenantUpn}`);
 
       // Replace this user's memberships atomically
       await sqlConnection.begin(async (tx) => {
-        await tx`DELETE FROM user_entra_groups WHERE user_id = ${sub}::uuid`;
-        if (groups.length > 0) {
+        await tx`DELETE FROM user_memberships WHERE user_id = ${sub}::uuid`;
+        if (groupIds.length > 0) {
           await tx`
-            INSERT INTO user_entra_groups ${tx(groups.map((g) => ({ user_id: sub, group_id: g.id })))}
+            INSERT INTO user_memberships ${tx(groupIds.map((gid) => ({ user_id: sub, entra_group_id: gid })))}
           `;
         }
         await tx`

@@ -696,6 +696,44 @@ async def get_list_authorized_groups(site_id: str, list_id: str) -> list:
         logger.error(f"[AUTH] get_list_authorized_groups failed: {e}", exc_info=True)
         return []
 
+async def upsert_entra_groups(group_ids: list) -> None:
+    """Fetch display names for group_ids from Graph and upsert into entra_groups.
+    Glue is the sole writer of this table — sign-up never touches it."""
+    if not group_ids:
+        return
+    headers = get_graph_headers()
+    rows = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        for gid in group_ids:
+            try:
+                resp = await client.get(
+                    f"https://graph.microsoft.com/v1.0/groups/{gid}?$select=id,displayName",
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                rows.append((gid, data.get("displayName") or gid))
+            except Exception as e:
+                logger.warning(f"[AUTH] Could not fetch display name for group {gid}: {e}")
+                rows.append((gid, gid))
+    if not rows:
+        return
+    try:
+        with get_db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO entra_groups (id, display_name)
+                    VALUES (%s, %s)
+                    ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name
+                    """,
+                    rows,
+                )
+            conn.commit()
+        log(f"[AUTH] Upserted {len(rows)} groups into entra_groups")
+    except Exception as e:
+        logger.error(f"[AUTH] upsert_entra_groups DB write failed: {e}")
+
 # ---------------------------------------------------------------------------
 # Core ingestion
 # ---------------------------------------------------------------------------
@@ -707,6 +745,7 @@ async def run_sharepoint_list_ingestion(site_row_id, external_site_id, sp_list, 
     log(f"--- Processing list: {sp_list.display_name} ---")
 
     auth_groups = await get_list_authorized_groups(external_site_id, sp_list.id)
+    await upsert_entra_groups(auth_groups)
 
     source_row_id = upsert_site_source(
         site_id=site_row_id,

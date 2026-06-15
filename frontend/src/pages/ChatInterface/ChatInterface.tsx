@@ -559,6 +559,13 @@ export default function AIChatPage() {
           body: JSON.stringify({ is_positive, comment: comment ?? null }),
         }
       );
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? { ...m, rating: { is_positive, comment: comment ?? null } }
+            : m
+        )
+      );
     } catch (error) {
       console.error("Failed to submit rating:", error);
     }

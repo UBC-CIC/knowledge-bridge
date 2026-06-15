@@ -126,7 +126,7 @@ def get_user_groups(user_id: str, db_connection) -> List[str]:
     try:
         with db_connection.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT group_id FROM user_entra_groups WHERE user_id = %s",
+                "SELECT DISTINCT entra_group_id FROM user_memberships WHERE user_id = %s",
                 (user_id,)
             )
             rows = cur.fetchall()
