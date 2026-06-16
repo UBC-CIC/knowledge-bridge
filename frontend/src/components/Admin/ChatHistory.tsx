@@ -5,7 +5,6 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize from "rehype-sanitize";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Bot, User, MessageSquare, ChevronDown, ChevronRight, Clock, RefreshCw, ThumbsUp, ThumbsDown, Info, Download } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
 import { cn } from "@/lib/utils";
 
@@ -119,15 +118,12 @@ export default function ChatHistory() {
 
     // Export
     const [triggeringExport, setTriggeringExport] = useState<string | null>(null);
-    const [exportToast, setExportToast] = useState(false);
-    const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const GROUP_LIMIT = 20;
     const USER_LIMIT = 10;
     const SESSION_LIMIT = 20;
 
     useEffect(() => { fetchGroups(0, false); }, []);
-    useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
 
     const getAuthHeaders = async () => ({
         Authorization: await AuthService.getIdToken(),
@@ -349,9 +345,6 @@ export default function ChatHistory() {
                 }
             );
             if (!res.ok) throw new Error("Failed to trigger export");
-            setExportToast(true);
-            if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-            toastTimerRef.current = setTimeout(() => setExportToast(false), 6000);
         } catch (e) {
             console.error(e);
         } finally {
