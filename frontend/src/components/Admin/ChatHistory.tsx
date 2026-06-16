@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize from "rehype-sanitize";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Bot, User, MessageSquare, ChevronDown, ChevronRight, Clock, RefreshCw, ThumbsUp, ThumbsDown, Info, Download } from "lucide-react";
+import { Bot, User, MessageSquare, ChevronDown, ChevronRight, Clock, RefreshCw, ThumbsUp, ThumbsDown, Info, Download, X } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import { cn } from "@/lib/utils";
 
@@ -118,12 +118,15 @@ export default function ChatHistory() {
 
     // Export
     const [triggeringExport, setTriggeringExport] = useState<string | null>(null);
+    const [exportStartedToast, setExportStartedToast] = useState(false);
+    const exportToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const GROUP_LIMIT = 20;
     const USER_LIMIT = 10;
     const SESSION_LIMIT = 20;
 
     useEffect(() => { fetchGroups(0, false); }, []);
+    useEffect(() => () => { if (exportToastTimer.current) clearTimeout(exportToastTimer.current); }, []);
 
     const getAuthHeaders = async () => ({
         Authorization: await AuthService.getIdToken(),
@@ -345,6 +348,9 @@ export default function ChatHistory() {
                 }
             );
             if (!res.ok) throw new Error("Failed to trigger export");
+            if (exportToastTimer.current) clearTimeout(exportToastTimer.current);
+            setExportStartedToast(true);
+            exportToastTimer.current = setTimeout(() => setExportStartedToast(false), 6000);
         } catch (e) {
             console.error(e);
         } finally {
@@ -620,6 +626,24 @@ export default function ChatHistory() {
             </div>
 
         </div>
+
+        {/* Export started toast */}
+        {exportStartedToast && (
+            <div className="fixed bottom-6 right-6 z-50 flex items-start gap-3 bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-3 max-w-sm animate-in slide-in-from-bottom-4 duration-300">
+                <div className="flex-shrink-0 mt-0.5 bg-blue-100 rounded-full p-1">
+                    <Download size={14} className="text-blue-600" />
+                </div>
+                <div className="flex-1 text-sm">
+                    <p className="font-medium text-gray-900">Export started</p>
+                    <p className="text-gray-500 text-xs mt-0.5">
+                        You'll be notified here once the export is ready to download.
+                    </p>
+                </div>
+                <button onClick={() => setExportStartedToast(false)} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
+                    <X size={14} />
+                </button>
+            </div>
+        )}
     );
 }
 
