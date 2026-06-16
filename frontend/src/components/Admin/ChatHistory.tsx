@@ -388,6 +388,7 @@ export default function ChatHistory() {
     // Render
     // ---------------------------------------------------------------------------
     return (
+        <>
         <div className="space-y-8 max-w-7xl mx-auto animate-in fade-in duration-500 flex flex-col h-[calc(100vh-8rem)]">
             <div className="flex-shrink-0 flex items-center justify-between">
                 <div>
@@ -644,6 +645,7 @@ export default function ChatHistory() {
                 </button>
             </div>
         )}
+        </>
     );
 }
 
