@@ -19,10 +19,12 @@ const {
 const { GlueClient, StartJobRunCommand, GetJobRunCommand, BatchStopJobRunCommand } = require("@aws-sdk/client-glue");
 const { CloudWatchLogsClient, GetLogEventsCommand, DescribeLogStreamsCommand } = require("@aws-sdk/client-cloudwatch-logs");
 const { SchedulerClient, GetScheduleCommand, CreateScheduleCommand, UpdateScheduleCommand, DeleteScheduleCommand } = require("@aws-sdk/client-scheduler");
+const { SQSClient, SendMessageCommand } = require("@aws-sdk/client-sqs");
 
 const glueClient = new GlueClient({});
 const logsClient = new CloudWatchLogsClient({});
 const schedulerClient = new SchedulerClient({});
+const sqsClient = new SQSClient({});
 
 let sqlConnection;
 const secretsManager = new SecretsManagerClient();
@@ -1718,6 +1720,118 @@ exports.handler = async (event) => {
             throw err;
           }
         }
+        break;
+      }
+
+      // POST /admin/export/trigger — enqueue a new export job
+      case "POST /admin/export/trigger": {
+        let body = {};
+        try { body = parseBody(event.body); } catch (_) {}
+
+        const scope = body?.scope;
+        if (!['all', 'group', 'user'].includes(scope)) {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: "scope must be 'all', 'group', or 'user'" });
+          break;
+        }
+        if ((scope === 'group' || scope === 'user') && !body?.scope_id) {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: "scope_id is required when scope is 'group' or 'user'" });
+          break;
+        }
+
+        const adminEmail = event.requestContext?.authorizer?.email;
+        if (!adminEmail) {
+          response.statusCode = 401;
+          response.body = JSON.stringify({ error: "Unauthorized" });
+          break;
+        }
+
+        const adminRows = await sqlConnection`
+          SELECT id FROM users WHERE email = ${adminEmail} LIMIT 1
+        `;
+        if (adminRows.length === 0) {
+          response.statusCode = 404;
+          response.body = JSON.stringify({ error: "Admin user not found" });
+          break;
+        }
+        const adminUserId = adminRows[0].id;
+
+        const inserted = await sqlConnection`
+          INSERT INTO export_runs (requested_by, status, scope, scope_id)
+          VALUES (${adminUserId}, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null})
+          RETURNING id
+        `;
+        const exportRunId = inserted[0].id;
+
+        await sqsClient.send(new SendMessageCommand({
+          QueueUrl: process.env.EXPORT_QUEUE_URL,
+          MessageBody: JSON.stringify({ exportRunId }),
+        }));
+
+        await sqlConnection`
+          UPDATE export_runs SET status = 'processing' WHERE id = ${exportRunId}
+        `;
+
+        response.statusCode = 202;
+        response.body = JSON.stringify({ exportRunId });
+        break;
+      }
+
+      // GET /admin/export/runs — list export jobs for the current admin
+      case "GET /admin/export/runs": {
+        const adminEmail = event.requestContext?.authorizer?.email;
+        if (!adminEmail) {
+          response.statusCode = 401;
+          response.body = JSON.stringify({ error: "Unauthorized" });
+          break;
+        }
+
+        const adminRows = await sqlConnection`
+          SELECT id FROM users WHERE email = ${adminEmail} LIMIT 1
+        `;
+        if (adminRows.length === 0) {
+          response.statusCode = 404;
+          response.body = JSON.stringify({ error: "Admin user not found" });
+          break;
+        }
+        const adminUserId = adminRows[0].id;
+
+        const qs = event.queryStringParameters ?? {};
+        const limit = Math.min(parseInt(qs.limit ?? '20', 10), 50);
+        const offset = Math.max(parseInt(qs.offset ?? '0', 10), 0);
+
+        const runs = await sqlConnection`
+          SELECT
+            er.id,
+            er.status,
+            er.scope,
+            er.scope_id,
+            er.presigned_url,
+            er.url_expires_at,
+            er.error_message,
+            er.row_count,
+            er.requested_at,
+            er.completed_at,
+            CASE
+              WHEN er.scope = 'group' THEN eg.display_name
+              WHEN er.scope = 'user'  THEN u2.email
+              ELSE 'All Chats'
+            END AS scope_label
+          FROM export_runs er
+          LEFT JOIN entra_groups eg ON eg.id = er.scope_id AND er.scope = 'group'
+          LEFT JOIN users u2        ON u2.id = er.scope_id AND er.scope = 'user'
+          WHERE er.requested_by = ${adminUserId}
+          ORDER BY er.requested_at DESC
+          LIMIT ${limit} OFFSET ${offset}
+        `;
+
+        const [{ total }] = await sqlConnection`
+          SELECT COUNT(*)::int AS total FROM export_runs WHERE requested_by = ${adminUserId}
+        `;
+
+        response.statusCode = 200;
+        response.body = JSON.stringify({ runs, total, limit, offset });
         break;
       }
 

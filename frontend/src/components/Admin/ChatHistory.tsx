@@ -4,7 +4,8 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize from "rehype-sanitize";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Bot, User, MessageSquare, ChevronDown, ChevronRight, Clock, RefreshCw, ThumbsUp, ThumbsDown, Info } from "lucide-react";
+import { Bot, User, MessageSquare, ChevronDown, ChevronRight, Clock, RefreshCw, ThumbsUp, ThumbsDown, Info, Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +87,7 @@ type ChatMessage = {
 
 type PaginationState = { offset: number; total: number; hasMore: boolean };
 
+
 const UNASSIGNED_ID = "__unassigned__";
 
 // ---------------------------------------------------------------------------
@@ -114,6 +116,9 @@ export default function ChatHistory() {
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [loadingMessages, setLoadingMessages] = useState(false);
+
+    // Export
+    const [triggeringExport, setTriggeringExport] = useState<string | null>(null);
 
     const GROUP_LIMIT = 20;
     const USER_LIMIT = 10;
@@ -325,6 +330,30 @@ export default function ChatHistory() {
     };
 
     // ---------------------------------------------------------------------------
+    // Export
+    // ---------------------------------------------------------------------------
+    const triggerExport = async (scope: 'all' | 'group' | 'user', scopeId?: string) => {
+        const key = scope + (scopeId ?? '');
+        setTriggeringExport(key);
+        try {
+            const headers = await getAuthHeaders();
+            const res = await fetch(
+                `${import.meta.env.VITE_API_ENDPOINT}/admin/export/trigger`,
+                {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ scope, ...(scopeId ? { scope_id: scopeId } : {}) }),
+                }
+            );
+            if (!res.ok) throw new Error("Failed to trigger export");
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setTriggeringExport(null);
+        }
+    };
+
+    // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
     const formatDate = (d?: string) => {
@@ -360,13 +389,25 @@ export default function ChatHistory() {
                     <h2 className="text-3xl font-bold text-gray-900">Chat History</h2>
                     <p className="text-gray-500 mt-1">Browse conversations by Entra group.</p>
                 </div>
-                <button
-                    onClick={handleRefresh}
-                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm"
-                >
-                    <RefreshCw size={16} className={loadingGroups ? "animate-spin text-primary" : ""} />
-                    Refresh Data
-                </button>
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => triggerExport('all')}
+                        disabled={triggeringExport === 'all'}
+                        className="flex items-center gap-1.5"
+                    >
+                        <Download size={14} className={triggeringExport === 'all' ? "animate-pulse" : ""} />
+                        Export All
+                    </Button>
+                    <button
+                        onClick={handleRefresh}
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm"
+                    >
+                        <RefreshCw size={16} className={loadingGroups ? "animate-spin text-primary" : ""} />
+                        Refresh Data
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1 min-h-0">
@@ -414,6 +455,9 @@ export default function ChatHistory() {
                                         selectedSessionId={selectedSessionId}
                                         onSelectSession={handleSessionSelect}
                                         formatDate={formatDate}
+                                        onExportGroup={(groupId) => triggerExport('group', groupId)}
+                                        onExportUser={(userId) => triggerExport('user', userId)}
+                                        exportingKey={triggeringExport}
                                     />
                                 ))}
 
@@ -453,6 +497,7 @@ export default function ChatHistory() {
                                     selectedSessionId={selectedSessionId}
                                     onSelectSession={handleSessionSelect}
                                     formatDate={formatDate}
+                                    exportingKey={triggeringExport}
                                     isVirtual
                                 />
                             </div>
@@ -576,6 +621,7 @@ export default function ChatHistory() {
                     </CardContent>
                 </Card>
             </div>
+
         </div>
     );
 }
@@ -601,6 +647,9 @@ type GroupRowProps = {
     onSelectSession: (sessionId: string) => void;
     formatDate: (d?: string) => string;
     isVirtual?: boolean;
+    onExportGroup?: (groupId: string) => void;
+    onExportUser?: (userId: string) => void;
+    exportingKey?: string | null;
 };
 
 function GroupRow({
@@ -608,7 +657,7 @@ function GroupRow({
     users, usersPagination, loadingUsers, onLoadMoreUsers,
     expandedUserKeys, onToggleUser,
     userSessions, userSessionsPagination, loadingUserSessions, onLoadMoreSessions,
-    selectedSessionId, onSelectSession, formatDate, isVirtual,
+    selectedSessionId, onSelectSession, formatDate, isVirtual, onExportGroup, onExportUser, exportingKey,
 }: GroupRowProps) {
     const [showId, setShowId] = useState(false);
     const tooltipRef = useRef<HTMLDivElement>(null);
@@ -622,22 +671,35 @@ function GroupRow({
                     <span className="font-semibold text-sm text-gray-900 truncate">{group.display_name}</span>
                     <span className="text-xs text-gray-400 flex-shrink-0">({group.member_count})</span>
                 </button>
-                {/* (i) tooltip for group ID — hidden for virtual groups */}
+                {/* Export + (i) tooltip — hidden for virtual groups */}
                 {!isVirtual && (
-                    <div className="relative flex-shrink-0 ml-2" ref={tooltipRef}>
-                        <button
-                            onMouseEnter={() => setShowId(true)}
-                            onMouseLeave={() => setShowId(false)}
-                            className="p-1 text-gray-300 hover:text-gray-500 transition-colors"
-                            aria-label="Show group ID"
-                        >
-                            <Info size={14} />
-                        </button>
-                        {showId && (
-                            <div className="absolute right-0 top-6 z-50 bg-gray-900 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap shadow-lg">
-                                {group.id}
-                            </div>
+                    <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                        {onExportGroup && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onExportGroup(group.id); }}
+                                disabled={exportingKey === 'group' + group.id}
+                                className="p-1 text-gray-300 hover:text-primary transition-colors disabled:opacity-40"
+                                aria-label="Export group chats"
+                                title="Export group chats"
+                            >
+                                <Download size={14} className={exportingKey === 'group' + group.id ? "animate-pulse" : ""} />
+                            </button>
                         )}
+                        <div className="relative" ref={tooltipRef}>
+                            <button
+                                onMouseEnter={() => setShowId(true)}
+                                onMouseLeave={() => setShowId(false)}
+                                className="p-1 text-gray-300 hover:text-gray-500 transition-colors"
+                                aria-label="Show group ID"
+                            >
+                                <Info size={14} />
+                            </button>
+                            {showId && (
+                                <div className="absolute right-0 top-6 z-50 bg-gray-900 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap shadow-lg">
+                                    {group.id}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>
@@ -665,6 +727,8 @@ function GroupRow({
                                     selectedSessionId={selectedSessionId}
                                     onSelectSession={onSelectSession}
                                     formatDate={formatDate}
+                                    onExport={onExportUser}
+                                    exportingKey={exportingKey}
                                 />
                             ))}
                             {usersPagination?.hasMore && (
@@ -699,23 +763,38 @@ type UserRowProps = {
     selectedSessionId: string | null;
     onSelectSession: (sessionId: string) => void;
     formatDate: (d?: string) => string;
+    onExport?: (userId: string) => void;
+    exportingKey?: string | null;
 };
 
 function UserRow({
     user, expanded, onToggle,
     sessions, sessionsPagination, loadingSessions, onLoadMoreSessions,
-    selectedSessionId, onSelectSession, formatDate,
+    selectedSessionId, onSelectSession, formatDate, onExport, exportingKey,
 }: UserRowProps) {
     return (
         <div className="rounded-lg border border-gray-100 bg-white overflow-hidden">
-            <button
-                onClick={onToggle}
-                className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left"
-            >
-                {expanded ? <ChevronDown size={13} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={13} className="text-gray-400 flex-shrink-0" />}
-                <User size={13} className="text-gray-400 flex-shrink-0" />
-                <span className="text-xs font-medium text-gray-700 truncate">{user.email}</span>
-            </button>
+            <div className="flex items-center">
+                <button
+                    onClick={onToggle}
+                    className="flex-1 flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left min-w-0"
+                >
+                    {expanded ? <ChevronDown size={13} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={13} className="text-gray-400 flex-shrink-0" />}
+                    <User size={13} className="text-gray-400 flex-shrink-0" />
+                    <span className="text-xs font-medium text-gray-700 truncate">{user.email}</span>
+                </button>
+                {onExport && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onExport(user.id); }}
+                        disabled={exportingKey === 'user' + user.id}
+                        className="flex-shrink-0 px-2 py-2.5 text-gray-300 hover:text-primary transition-colors disabled:opacity-40"
+                        aria-label="Export user chats"
+                        title="Export user chats"
+                    >
+                        <Download size={12} className={exportingKey === 'user' + user.id ? "animate-pulse" : ""} />
+                    </button>
+                )}
+            </div>
 
             {expanded && (
                 <div className="border-t border-gray-100 bg-gray-50/50 px-3 py-2 space-y-1">

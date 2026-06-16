@@ -4,15 +4,16 @@ import {
   LayoutDashboard,
   BarChart3,
   Bot,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
 import UserProfilePopover from "@/components/UserProfilePopover";
 
 type AdminSidebarProps = {
-  activeView: "dashboard" | "analytics" | "system-settings" | "chat-history";
+  activeView: "dashboard" | "analytics" | "system-settings" | "chat-history" | "export-jobs";
   onViewChange: (
-    view: "dashboard" | "analytics" | "system-settings" | "chat-history"
+    view: "dashboard" | "analytics" | "system-settings" | "chat-history" | "export-jobs"
   ) => void;
 };
 
@@ -92,6 +93,17 @@ export default function AdminSidebar({
         >
           <Bot className="mr-2 h-4 w-4" />
           Chat History
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start ${activeView === "export-jobs"
+            ? "bg-primary/10 text-primary hover:bg-primary/20 font-medium"
+            : "text-gray-600 hover:text-gray-900"
+            }`}
+          onClick={() => onViewChange("export-jobs")}
+        >
+          <Download className="mr-2 h-4 w-4" />
+          Export Jobs
         </Button>
       </div>
 

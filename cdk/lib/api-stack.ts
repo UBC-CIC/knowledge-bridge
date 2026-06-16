@@ -22,6 +22,9 @@ import * as cr from "aws-cdk-lib/custom-resources";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as events from "aws-cdk-lib/aws-events";
 import * as eventTargets from "aws-cdk-lib/aws-events-targets";
+import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as s3 from "aws-cdk-lib/aws-s3";
+import * as lambdaEventSources from "aws-cdk-lib/aws-lambda-event-sources";
 import * as crypto from 'crypto';
 
 function computeConfigHash(config: object): string {
@@ -1479,6 +1482,96 @@ export class ApiGatewayStack extends cdk.Stack {
         description: "Poll Glue job status and sync to ingestion_runs table",
       });
     }
+
+    // --- Export Jobs ---
+
+    const exportBucket = new s3.Bucket(this, `${id}-ExportBucket`, {
+      bucketName: `${id.toLowerCase()}-chat-exports`,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      lifecycleRules: [{ expiration: Duration.days(30), id: "expire-exports-30d" }],
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+    });
+
+    const exportDlq = new sqs.Queue(this, `${id}-ExportDLQ`, {
+      queueName: `${id}-export-jobs-dlq`,
+      retentionPeriod: Duration.days(7),
+    });
+
+    const exportQueue = new sqs.Queue(this, `${id}-ExportQueue`, {
+      queueName: `${id}-export-jobs`,
+      visibilityTimeout: Duration.seconds(960), // 900s lambda timeout + 60s buffer
+      retentionPeriod: Duration.days(1),
+      deadLetterQueue: { queue: exportDlq, maxReceiveCount: 2 },
+    });
+
+    const exportProcessorRole = new iam.Role(this, `${id}-ExportProcessorRole`, {
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
+    exportProcessorRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        "ec2:CreateNetworkInterface",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DeleteNetworkInterface",
+        "ec2:AssignPrivateIpAddresses",
+        "ec2:UnassignPrivateIpAddresses",
+      ],
+      resources: ["*"],
+    }));
+    exportProcessorRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      resources: ["arn:aws:logs:*:*:*"],
+    }));
+    exportProcessorRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
+      resources: [exportQueue.queueArn],
+    }));
+    exportBucket.grantReadWrite(exportProcessorRole);
+    db.secretPathUser.grantRead(exportProcessorRole);
+
+    const exportProcessorLambda = new lambda.Function(this, `${id}-exportProcessor`, {
+      functionName: `${id}-exportProcessor`,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      code: lambda.Code.fromAsset("lambda"),
+      handler: "handlers/exportProcessorHandler.handler",
+      timeout: Duration.seconds(900),
+      vpc: vpcStack.vpc,
+      memorySize: 1024,
+      layers: [postgres],
+      role: exportProcessorRole,
+      tracing: lambda.Tracing.ACTIVE,
+      environment: {
+        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+        RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
+        EXPORT_BUCKET_NAME: exportBucket.bucketName,
+      },
+    });
+    const cfnExportProcessor = exportProcessorLambda.node.defaultChild as lambda.CfnFunction;
+    cfnExportProcessor.overrideLogicalId("exportProcessor");
+
+    exportProcessorLambda.addEventSource(
+      new lambdaEventSources.SqsEventSource(exportQueue, {
+        batchSize: 1,
+        reportBatchItemFailures: true,
+      })
+    );
+
+    // Grant admin Lambda: send to queue + generate presigned URLs
+    lambdaAdminFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["sqs:SendMessage"],
+      resources: [exportQueue.queueArn],
+    }));
+    exportBucket.grantRead(lambdaAdminFunction);
+
+    lambdaAdminFunction.addEnvironment("EXPORT_QUEUE_URL", exportQueue.queueUrl);
+    lambdaAdminFunction.addEnvironment("EXPORT_BUCKET_NAME", exportBucket.bucketName);
+
+    // --- End Export Jobs ---
 
     // Define WebSocket API and related resources directly in ApiGatewayStack
     this.webSocketApi = new apigatewayv2.WebSocketApi(

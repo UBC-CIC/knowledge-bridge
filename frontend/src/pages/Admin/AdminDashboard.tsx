@@ -4,12 +4,11 @@ import DataSourceManagement from "@/components/Admin/DataSourceManagement";
 import Analytics from "@/components/Admin/Analytics";
 import SystemSettings from "@/components/Admin/SystemSettings";
 import ChatHistory from "@/components/Admin/ChatHistory";
-
-// --- Components ---
+import ExportJobs from "@/components/Admin/ExportJobs";
 
 export default function AdminDashboard() {
   const [activeView, setActiveView] = useState<
-    "dashboard" | "analytics" | "system-settings" | "chat-history"
+    "dashboard" | "analytics" | "system-settings" | "chat-history" | "export-jobs"
   >("dashboard");
 
   return (
@@ -23,6 +22,7 @@ export default function AdminDashboard() {
           {activeView === "analytics" && <Analytics />}
           {activeView === "system-settings" && <SystemSettings />}
           {activeView === "chat-history" && <ChatHistory />}
+          {activeView === "export-jobs" && <ExportJobs />}
         </main>
       </div>
     </div>
