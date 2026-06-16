@@ -26,7 +26,7 @@ const STATUS_STYLES: Record<ExportStatus, string> = {
     failed:     "bg-red-50 text-red-600 border-red-200",
 };
 
-const LIMIT = 20;
+const LIMIT = 10;
 
 export default function ExportJobs() {
     const [runs, setRuns] = useState<ExportRun[]>([]);
@@ -94,18 +94,18 @@ export default function ExportJobs() {
                         <Download className="h-5 w-5 text-primary" />
                         Export History
                     </CardTitle>
-                    <CardDescription className="text-xs">
+                    <CardDescription className="text-sm">
                         Exports are triggered from Chat History. Each export is scoped to all chats, a group, or a specific user.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
                     {loading && runs.length === 0 ? (
-                        <div className="text-center text-gray-400 py-16 text-sm">Loading…</div>
+                        <div className="text-center text-gray-400 py-16 text-base">Loading…</div>
                     ) : runs.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
                             <Download className="h-10 w-10 text-gray-200" />
-                            <p className="text-sm">No export jobs yet.</p>
-                            <p className="text-xs text-gray-400">
+                            <p className="text-base">No export jobs yet.</p>
+                            <p className="text-sm text-gray-400">
                                 Trigger one from <span className="font-medium text-gray-600">Chat History</span> using the Export buttons.
                             </p>
                         </div>
@@ -113,7 +113,7 @@ export default function ExportJobs() {
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm text-left">
                                 <thead>
-                                    <tr className="border-b bg-gray-50/60 text-xs text-gray-500 uppercase tracking-wide">
+                                    <tr className="border-b bg-gray-50/60 text-sm text-gray-500 uppercase tracking-wide">
                                         <th className="px-6 py-3">Requested</th>
                                         <th className="px-6 py-3">Scope</th>
                                         <th className="px-6 py-3">Status</th>
@@ -129,32 +129,32 @@ export default function ExportJobs() {
                                             : false;
                                         return (
                                             <tr key={run.id} className="hover:bg-gray-50/50 transition-colors">
-                                                <td className="px-6 py-4 text-gray-500 whitespace-nowrap text-xs">
+                                                <td className="px-6 py-4 text-gray-500 whitespace-nowrap text-sm">
                                                     {formatDate(run.requested_at)}
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <span className="font-medium text-gray-800 text-xs">
+                                                    <span className="font-medium text-gray-800 text-sm">
                                                         {run.scope_label}
                                                     </span>
-                                                    <span className="ml-2 text-[10px] text-gray-400 uppercase">
+                                                    <span className="ml-2 text-xs text-gray-400 uppercase">
                                                         {run.scope}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <span className={cn(
-                                                        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium border text-[11px]",
+                                                        "inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-medium border text-xs",
                                                         STATUS_STYLES[run.status]
                                                     )}>
                                                         {(run.status === "processing" || run.status === "pending") && (
-                                                            <RefreshCw size={10} className="animate-spin" />
+                                                            <RefreshCw size={11} className="animate-spin" />
                                                         )}
                                                         {run.status}
                                                     </span>
                                                 </td>
-                                                <td className="px-6 py-4 text-gray-500 whitespace-nowrap text-xs">
+                                                <td className="px-6 py-4 text-gray-500 whitespace-nowrap text-sm">
                                                     {formatDate(run.completed_at)}
                                                 </td>
-                                                <td className="px-6 py-4 text-gray-500 text-xs">
+                                                <td className="px-6 py-4 text-gray-500 text-sm">
                                                     {run.row_count != null ? run.row_count.toLocaleString() : "—"}
                                                 </td>
                                                 <td className="px-6 py-4">
@@ -162,16 +162,16 @@ export default function ExportJobs() {
                                                         <a
                                                             href={run.presigned_url}
                                                             download
-                                                            className="inline-flex items-center gap-1.5 text-primary hover:underline font-medium text-xs"
+                                                            className="inline-flex items-center gap-1.5 text-primary hover:underline font-medium text-sm"
                                                         >
-                                                            <Download size={12} />
+                                                            <Download size={14} />
                                                             Download JSON
                                                         </a>
                                                     ) : run.status === "completed" && expired ? (
-                                                        <span className="text-gray-400 italic text-xs">Link expired</span>
+                                                        <span className="text-gray-400 italic text-sm">Link expired</span>
                                                     ) : run.status === "failed" ? (
                                                         <span
-                                                            className="text-red-500 text-[11px] cursor-help"
+                                                            className="text-red-500 text-xs cursor-help"
                                                             title={run.error_message ?? "Unknown error"}
                                                         >
                                                             {run.error_message
@@ -179,7 +179,7 @@ export default function ExportJobs() {
                                                                 : "Failed"}
                                                         </span>
                                                     ) : (
-                                                        <span className="text-gray-400 text-xs">—</span>
+                                                        <span className="text-gray-400 text-sm">—</span>
                                                     )}
                                                 </td>
                                             </tr>
@@ -190,20 +190,20 @@ export default function ExportJobs() {
 
                             {/* Pagination */}
                             {total > LIMIT && (
-                                <div className="flex items-center justify-between px-6 py-4 border-t text-xs text-gray-500">
+                                <div className="flex items-center justify-between px-6 py-4 border-t text-sm text-gray-500">
                                     <span>{offset + 1}–{Math.min(offset + LIMIT, total)} of {total}</span>
                                     <div className="flex gap-2">
                                         <button
                                             onClick={() => fetchRuns(offset - LIMIT)}
                                             disabled={offset === 0 || loading}
-                                            className="px-3 py-1.5 border rounded text-xs font-medium disabled:opacity-40 hover:bg-gray-50"
+                                            className="px-3 py-1.5 border rounded text-sm font-medium disabled:opacity-40 hover:bg-gray-50"
                                         >
                                             Previous
                                         </button>
                                         <button
                                             onClick={() => fetchRuns(offset + LIMIT)}
                                             disabled={offset + LIMIT >= total || loading}
-                                            className="px-3 py-1.5 border rounded text-xs font-medium disabled:opacity-40 hover:bg-gray-50"
+                                            className="px-3 py-1.5 border rounded text-sm font-medium disabled:opacity-40 hover:bg-gray-50"
                                         >
                                             Next
                                         </button>

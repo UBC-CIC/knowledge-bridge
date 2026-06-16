@@ -1759,8 +1759,8 @@ exports.handler = async (event) => {
 
         const inserted = await sqlConnection`
           INSERT INTO export_runs (requested_by, status, scope, scope_id)
-          VALUES (${adminUserId}, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null})
-          RETURNING id
+          VALUES (${adminUserId}::uuid, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null}::uuid)
+          RETURNING id::text
         `;
         const exportRunId = inserted[0].id;
 
@@ -1798,7 +1798,7 @@ exports.handler = async (event) => {
         const adminUserId = adminRows[0].id;
 
         const qs = event.queryStringParameters ?? {};
-        const limit = Math.min(parseInt(qs.limit ?? '20', 10), 50);
+        const limit = 10;
         const offset = Math.max(parseInt(qs.offset ?? '0', 10), 0);
 
         const runs = await sqlConnection`
@@ -1814,13 +1814,13 @@ exports.handler = async (event) => {
             er.requested_at,
             er.completed_at,
             CASE
-              WHEN er.scope = 'group' THEN eg.display_name
-              WHEN er.scope = 'user'  THEN u2.email
+              WHEN er.scope::text = 'group' THEN eg.display_name
+              WHEN er.scope::text = 'user'  THEN u2.email
               ELSE 'All Chats'
             END AS scope_label
           FROM export_runs er
-          LEFT JOIN entra_groups eg ON eg.id = er.scope_id AND er.scope = 'group'
-          LEFT JOIN users u2        ON u2.id = er.scope_id AND er.scope = 'user'
+          LEFT JOIN entra_groups eg ON eg.id = er.scope_id::text AND er.scope::text = 'group'
+          LEFT JOIN users u2        ON u2.id = er.scope_id AND er.scope::text = 'user'
           WHERE er.requested_by = ${adminUserId}
           ORDER BY er.requested_at DESC
           LIMIT ${limit} OFFSET ${offset}

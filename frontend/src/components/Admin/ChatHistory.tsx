@@ -119,12 +119,15 @@ export default function ChatHistory() {
 
     // Export
     const [triggeringExport, setTriggeringExport] = useState<string | null>(null);
+    const [exportToast, setExportToast] = useState(false);
+    const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const GROUP_LIMIT = 20;
     const USER_LIMIT = 10;
     const SESSION_LIMIT = 20;
 
     useEffect(() => { fetchGroups(0, false); }, []);
+    useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
 
     const getAuthHeaders = async () => ({
         Authorization: await AuthService.getIdToken(),
@@ -346,6 +349,9 @@ export default function ChatHistory() {
                 }
             );
             if (!res.ok) throw new Error("Failed to trigger export");
+            setExportToast(true);
+            if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+            toastTimerRef.current = setTimeout(() => setExportToast(false), 6000);
         } catch (e) {
             console.error(e);
         } finally {
@@ -390,16 +396,14 @@ export default function ChatHistory() {
                     <p className="text-gray-500 mt-1">Browse conversations by Entra group.</p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Button
-                        variant="outline"
-                        size="sm"
+                    <button
                         onClick={() => triggerExport('all')}
                         disabled={triggeringExport === 'all'}
-                        className="flex items-center gap-1.5"
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm disabled:opacity-50"
                     >
-                        <Download size={14} className={triggeringExport === 'all' ? "animate-pulse" : ""} />
+                        <Download size={16} className={triggeringExport === 'all' ? "animate-pulse text-primary" : ""} />
                         Export All
-                    </Button>
+                    </button>
                     <button
                         onClick={handleRefresh}
                         className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm"
