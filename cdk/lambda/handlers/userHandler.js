@@ -364,13 +364,6 @@ exports.handler = async (event) => {
           break;
         }
 
-        const callerId = event.requestContext?.authorizer?.claims?.sub;
-        if (callerId !== userId) {
-          response.statusCode = 403;
-          response.body = JSON.stringify({ error: "Forbidden" });
-          break;
-        }
-
         const sources = await sqlConnection`
           SELECT DISTINCT ss.id, ss.name, ss.source_url
           FROM user_memberships um

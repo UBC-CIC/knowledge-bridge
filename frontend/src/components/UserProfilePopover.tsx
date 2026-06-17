@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { LogOut, UserRound } from "lucide-react";
+import { ExternalLink, FolderOpen, LogOut, UserRound } from "lucide-react";
 import { useUser } from "@/providers/user";
 import { fetchAuthSession } from "aws-amplify/auth";
 
@@ -85,40 +85,48 @@ export default function UserProfilePopover({ isLoggingOut, onLogout }: UserProfi
             </div>
           </button>
         </PopoverTrigger>
-        <PopoverContent side="top" align="start" className="w-80 p-3">
+        <PopoverContent side="top" align="start" className="w-80 p-4">
           <div className="mb-3">
             <p className="text-sm font-semibold truncate">{displayName || email || ""}</p>
             <p className="text-xs text-muted-foreground truncate">{email || ""}</p>
           </div>
-          <Separator className="mb-2" />
+          <Separator className="mb-3" />
           <div className="mb-3">
-            <p className="text-xs font-medium text-muted-foreground mb-1">Accessible knowledge bases</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+              Accessible SharePoint Lists
+            </p>
             {loadingSources ? (
-              <p className="text-xs text-muted-foreground">Loading...</p>
+              <p className="text-sm text-muted-foreground">Loading...</p>
             ) : sources.length === 0 ? (
-              <p className="text-xs text-muted-foreground">None assigned</p>
+              <p className="text-sm text-muted-foreground">None assigned</p>
             ) : (
-              <ul className="space-y-1">
+              <ul className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                 {sources.map((s) => (
-                  <li key={s.id} className="text-xs truncate text-foreground">
+                  <li key={s.id}>
                     {s.source_url ? (
                       <a
                         href={s.source_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="hover:underline text-primary"
+                        title={s.name}
+                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent/50 transition-colors group"
                       >
-                        {s.name}
+                        <FolderOpen className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                        <span className="flex-1 truncate">{s.name}</span>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 flex-shrink-0 transition-opacity" />
                       </a>
                     ) : (
-                      s.name
+                      <div title={s.name} className="flex items-center gap-2 px-2 py-1.5 text-sm">
+                        <FolderOpen className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                        <span className="truncate">{s.name}</span>
+                      </div>
                     )}
                   </li>
                 ))}
               </ul>
             )}
           </div>
-          <Separator className="mb-2" />
+          <Separator className="mb-3" />
           <Button
             variant="ghost"
             size="sm"
