@@ -148,7 +148,7 @@ export default function ExportJobs() {
                                                         {(run.status === "processing" || run.status === "pending") && (
                                                             <RefreshCw size={11} className="animate-spin" />
                                                         )}
-                                                        {run.status}
+                                                        {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 text-gray-500 whitespace-nowrap text-sm">
