@@ -149,12 +149,14 @@ def _save_ai_response(
     warning_text: Optional[str] = None,
 ):
     try:
-        insert_message(db_connection, chat_session_id, "AI", answer_text, sources, warning_text)
+        message_id = insert_message(db_connection, chat_session_id, "AI", answer_text, sources, warning_text)
         update_last_active_session(db_connection, chat_session_id)
         db_connection.commit()
+        return message_id
     except Exception as e:
         db_connection.rollback()
         logger.error(f"Failed to save AI response: {e}")
+        return None
 
 
 def get_response(
@@ -187,9 +189,10 @@ def get_response(
 
         # 2. Handle intro message — no retrieval, no guardrails, just return the greeting
         if is_intro_message:
+            intro_message_id = None
             try:
                 ensure_session_exists(db_connection, chat_session_id, user_id)
-                insert_message(db_connection, chat_session_id, "AI", config.INITIAL_PROMPT, sources=[], warning=None)
+                intro_message_id = insert_message(db_connection, chat_session_id, "AI", config.INITIAL_PROMPT, sources=[], warning=None)
                 update_last_active_session(db_connection, chat_session_id)
                 db_connection.commit()
             except Exception as e:
@@ -201,6 +204,7 @@ def get_response(
                 "response": config.INITIAL_PROMPT,
                 "sources_used": [],
                 "sessionId": chat_session_id,
+                "message_id": intro_message_id,
                 "message_usage": {},
                 "warning": None,
             }
@@ -219,6 +223,7 @@ def get_response(
 
             if guardrail_result['action'] == ACTION_BLOCKED:
                 denial_text = guardrail_result['text']
+                ai_message_id = None
                 try:
                     ensure_session_exists(db_connection, chat_session_id, user_id)
                     insert_message(db_connection, chat_session_id, 'user', query, sources=None, warning=None)
@@ -227,13 +232,14 @@ def get_response(
                 except Exception as db_err:
                     db_connection.rollback()
                     logger.error(f"DB error saving blocked message: {db_err}")
-                _save_ai_response(db_connection, chat_session_id, denial_text, sources=[], warning_text=None)
+                ai_message_id = _save_ai_response(db_connection, chat_session_id, denial_text, sources=[], warning_text=None)
                 if stream_callback:
                     stream_callback(denial_text)
                 return {
                     "response": denial_text,
                     "sources_used": [],
                     "sessionId": chat_session_id,
+                    "message_id": ai_message_id,
                     "message_usage": {},
                     "warning": None,
                 }
@@ -354,12 +360,13 @@ def get_response(
     used_sources = [source for i, source in enumerate(sources, 1) if i in cited_indices]
 
     # 9. Save AI response
-    _save_ai_response(db_connection, chat_session_id, answer_text, used_sources)
+    ai_message_id = _save_ai_response(db_connection, chat_session_id, answer_text, used_sources)
 
     return {
         "response": answer_text,
         "sources_used": used_sources,
         "sessionId": chat_session_id,
+        "message_id": ai_message_id,
         "message_usage": usage_info,
         "warning": None,
     }

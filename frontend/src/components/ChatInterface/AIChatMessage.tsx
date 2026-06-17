@@ -59,16 +59,23 @@ export default function AIChatMessage({
   const [selectedChip, setSelectedChip] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [ratingError, setRatingError] = useState<string | null>(null);
 
   const showRatingUI = isLastBotMessage && !isTyping && !!messageId && !!onRate;
 
   const handleThumbsUp = async () => {
     if (!messageId || !onRate) return;
     setSubmitting(true);
-    await onRate(messageId, true);
-    setSubmittedRating(true);
-    setRatingState("submitted");
-    setSubmitting(false);
+    setRatingError(null);
+    try {
+      await onRate(messageId, true);
+      setSubmittedRating(true);
+      setRatingState("submitted");
+    } catch {
+      setRatingError("Could not save rating. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleThumbsDown = () => {
@@ -78,20 +85,32 @@ export default function AIChatMessage({
   const handleDislikeSubmit = async () => {
     if (!messageId || !onRate) return;
     setSubmitting(true);
+    setRatingError(null);
     const comment = [selectedChip, commentText.trim()].filter(Boolean).join(" — ") || undefined;
-    await onRate(messageId, false, comment);
-    setSubmittedRating(false);
-    setRatingState("submitted");
-    setSubmitting(false);
+    try {
+      await onRate(messageId, false, comment);
+      setSubmittedRating(false);
+      setRatingState("submitted");
+    } catch {
+      setRatingError("Could not save rating. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleDislikeSkip = async () => {
     if (!messageId || !onRate) return;
     setSubmitting(true);
-    await onRate(messageId, false);
-    setSubmittedRating(false);
-    setRatingState("submitted");
-    setSubmitting(false);
+    setRatingError(null);
+    try {
+      await onRate(messageId, false);
+      setSubmittedRating(false);
+      setRatingState("submitted");
+    } catch {
+      setRatingError("Could not save rating. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const formatSource = (source: any) => {
@@ -454,6 +473,10 @@ export default function AIChatMessage({
                   </button>
                   <span className="text-xs text-muted-foreground">Thanks for the feedback</span>
                 </div>
+              )}
+
+              {ratingError && (
+                <p className="mt-2 text-xs text-red-600">{ratingError}</p>
               )}
             </div>
           )}

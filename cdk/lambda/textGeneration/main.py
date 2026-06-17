@@ -129,6 +129,7 @@ def handler(event, context=None):
             "sources": response_data.get("sources_used", []),
             "warning": response_data.get("warning"),
             "chat_session_id": response_data.get("sessionId"),
+            "message_id": response_data.get("message_id"),
             "token_usage": response_data.get("token_usage", {})
         }
         
@@ -161,6 +162,7 @@ def handler(event, context=None):
                         'sources': response_body['sources'],
                         'warning': response_body.get('warning'),
                         'chat_session_id': response_body['chat_session_id'],
+                        'message_id': response_body.get('message_id'),
                         'token_usage': response_body.get('token_usage', {})
                     }
                     apigw_management.post_to_connection(

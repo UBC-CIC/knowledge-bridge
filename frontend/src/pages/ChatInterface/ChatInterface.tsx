@@ -25,6 +25,7 @@ const WELCOME_PROMPT = `Hello! Please act as the Specialization Explorer.
 3. Be friendly and inviting.`;
 
 const getToken = () => AuthService.getIdToken();
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function AIChatPage() {
   const { setCurrentMessages, setActiveChatName } = useView();
@@ -144,6 +145,9 @@ export default function AIChatPage() {
                 msg.id === streamingMessageId
                   ? {
                       ...msg,
+                      id: typeof message.message_id === "string" && UUID_REGEX.test(message.message_id)
+                        ? message.message_id
+                        : msg.id,
                       sources_used: message.sources || [],
                       warning: message.warning || null,
                       isTyping: false,
@@ -379,6 +383,9 @@ export default function AIChatPage() {
             msg.id === botMsg.id
               ? {
                   ...msg,
+                  id: typeof data.message_id === "string" && UUID_REGEX.test(data.message_id)
+                    ? data.message_id
+                    : msg.id,
                   text: data.response || "Sorry, I couldn't generate a response.",
                   sources_used: data.sources || [],
                   warning: data.warning || null,
@@ -513,6 +520,9 @@ export default function AIChatPage() {
           msg.id === botMsg.id
             ? {
                 ...msg,
+                id: typeof data.message_id === "string" && UUID_REGEX.test(data.message_id)
+                  ? data.message_id
+                  : msg.id,
                 text: data.response || "Sorry, I couldn't generate a response.",
                 sources_used: data.sources || [],
                 warning: data.warning || null,
@@ -549,16 +559,36 @@ export default function AIChatPage() {
   }, [messages, isStreaming]);
 
   const handleRate = async (messageId: string, is_positive: boolean, comment?: string) => {
+    if (!activeChatSessionId) {
+      throw new Error("Missing active chat session id");
+    }
+    if (!UUID_REGEX.test(messageId)) {
+      throw new Error("Message is not persisted yet. Please wait a moment and retry.");
+    }
+
     try {
       const token = await getToken();
-      await fetch(
-        `${import.meta.env.VITE_API_ENDPOINT}/user/${userId}/chat_sessions/${activeChatSessionId}/messages/${messageId}/rating`,
+      const apiBase = String(import.meta.env.VITE_API_ENDPOINT || "").replace(/\/+$/, "");
+      const response = await fetch(
+        `${apiBase}/user/${userId}/chat_sessions/${activeChatSessionId}/messages/${messageId}/rating`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ is_positive, comment: comment ?? null }),
         }
       );
+
+      if (!response.ok) {
+        let details = "";
+        try {
+          const errorData = await response.json();
+          details = errorData?.error ? `: ${errorData.error}` : "";
+        } catch {
+          // Ignore JSON parse errors and surface status text only.
+        }
+        throw new Error(`Failed to submit rating (${response.status})${details}`);
+      }
+
       setMessages((prev) =>
         prev.map((m) =>
           m.id === messageId
@@ -568,6 +598,7 @@ export default function AIChatPage() {
       );
     } catch (error) {
       console.error("Failed to submit rating:", error);
+      throw error;
     }
   };
 
