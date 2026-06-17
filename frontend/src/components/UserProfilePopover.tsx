@@ -92,7 +92,7 @@ export default function UserProfilePopover({ isLoggingOut, onLogout }: UserProfi
           </div>
           <Separator className="mb-3" />
           <div className="mb-3">
-            <p className="text-xs font-semibold text-muted-foreground mb-2">
+            <p className="text-sm font-semibold text-muted-foreground mb-2">
               Accessible SharePoint Lists
             </p>
             {loadingSources ? (
