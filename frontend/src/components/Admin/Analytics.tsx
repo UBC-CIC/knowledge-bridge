@@ -119,7 +119,7 @@ export default function Analytics() {
         <div>
           <h2 className="text-3xl font-bold text-gray-900">Analytics</h2>
           <p className="text-gray-500 mt-1">
-            Deep dive into student engagement and content usage.
+            Deep dive into user engagement and content usage.
           </p>
         </div>
         <div className="flex items-center gap-2">
