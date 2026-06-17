@@ -200,34 +200,48 @@ def upsert_site(external_site_id: str, name: Optional[str], site_url: Optional[s
     return str(site_id)
 
 def upsert_site_source(site_id, source_type, external_source_id, name, source_url, total_documents, group_ids) -> str:
-    new_group_ids = sorted({g.lower() for g in group_ids if g})
-    metadata = {"group_ids": new_group_ids, "permission_scope": "source"}
+    new_group_set = {g.lower() for g in group_ids if g}
 
     with get_db_conn() as conn:
         with conn.cursor() as cur:
-            # Fetch existing group_ids before upsert so we can detect permission changes
-            cur.execute("""
-                SELECT id, metadata->'group_ids' FROM site_sources
-                WHERE site_id = %s AND external_source_id = %s
-            """, (site_id, external_source_id))
-            existing_row = cur.fetchone()
-            old_group_ids = sorted(existing_row[1] or []) if existing_row else None
-
+            # Upsert source row — group permissions live in site_source_access, not metadata
             cur.execute("""
                 INSERT INTO site_sources (site_id, source_type, external_source_id, name, source_url, total_documents, status, metadata, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, 'active', %s::jsonb, now())
+                VALUES (%s, %s, %s, %s, %s, %s, 'active', '{}'::jsonb, now())
                 ON CONFLICT (site_id, external_source_id)
                 DO UPDATE SET name = EXCLUDED.name, source_url = EXCLUDED.source_url,
-                    total_documents = EXCLUDED.total_documents, metadata = EXCLUDED.metadata, updated_at = now()
+                    total_documents = EXCLUDED.total_documents, updated_at = now()
                 RETURNING id
-            """, (site_id, source_type, external_source_id, name, source_url, total_documents, json.dumps(metadata)))
+            """, (site_id, source_type, external_source_id, name, source_url, total_documents))
             source_id = str(cur.fetchone()[0])
+
+            # Fetch existing groups from join table to compute diff
+            cur.execute("""
+                SELECT entra_group_id FROM site_source_access WHERE site_source_id = %s
+            """, (source_id,))
+            old_group_set = {row[0] for row in cur.fetchall()}
+
+            added = new_group_set - old_group_set
+            removed = old_group_set - new_group_set
+
+            if added:
+                psycopg2.extras.execute_values(cur, """
+                    INSERT INTO site_source_access (site_source_id, entra_group_id)
+                    VALUES %s ON CONFLICT DO NOTHING
+                """, [(source_id, gid) for gid in added])
+
+            if removed:
+                cur.execute("""
+                    DELETE FROM site_source_access
+                    WHERE site_source_id = %s AND entra_group_id = ANY(%s)
+                """, (source_id, list(removed)))
 
         conn.commit()
 
-    # If this is an existing source and group_ids changed, propagate to all chunks — no re-embed needed
-    if old_group_ids is not None and old_group_ids != new_group_ids:
-        log(f"[PERMISSIONS] group_ids changed for source {external_source_id}: {old_group_ids} → {new_group_ids}. Propagating to chunks.")
+    # Propagate permission changes to all chunks for this source — no re-embed needed
+    if added or removed:
+        new_group_ids_sorted = sorted(new_group_set)
+        log(f"[PERMISSIONS] source {external_source_id}: added={added}, removed={removed}. Propagating to chunks.")
         with get_db_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -236,7 +250,7 @@ def upsert_site_source(site_id, source_type, external_source_id, name, source_ur
                     WHERE document_id IN (
                         SELECT id FROM documents WHERE source_id = %s
                     )
-                """, (json.dumps(new_group_ids), source_id))
+                """, (json.dumps(new_group_ids_sorted), source_id))
                 updated = cur.rowcount
             conn.commit()
         log(f"[PERMISSIONS] Updated group_ids on {updated} chunks for source {external_source_id}.")

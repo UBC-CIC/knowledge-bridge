@@ -10,6 +10,7 @@ const { validateUUID } = require("./utils/validation.js");
 let sqlConnection;
 const secretsManager = new SecretsManagerClient();
 
+
 const initConnection = async () => {
   if (!sqlConnection) {
     try {
@@ -351,6 +352,36 @@ exports.handler = async (event) => {
 
         response.statusCode = 200;
         response.body = JSON.stringify({ success: true });
+        break;
+      }
+
+      case "GET /user/{user_id}/accessible_sources": {
+        const userId = event.pathParameters?.user_id;
+        const userIdValidation = validateUUID(userId, "user_id");
+        if (!userIdValidation.valid) {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: userIdValidation.error });
+          break;
+        }
+
+        const callerId = event.requestContext?.authorizer?.claims?.sub;
+        if (callerId !== userId) {
+          response.statusCode = 403;
+          response.body = JSON.stringify({ error: "Forbidden" });
+          break;
+        }
+
+        const sources = await sqlConnection`
+          SELECT DISTINCT ss.id, ss.name, ss.source_url
+          FROM user_memberships um
+          JOIN site_source_access ssa ON ssa.entra_group_id = um.entra_group_id
+          JOIN site_sources ss ON ss.id = ssa.site_source_id
+          WHERE um.user_id = ${userId}
+            AND ss.status IN ('active', 'degraded')
+          ORDER BY ss.name
+        `;
+
+        response.body = JSON.stringify({ sources });
         break;
       }
 
