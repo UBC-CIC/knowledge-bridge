@@ -1,6 +1,7 @@
 const { GlueClient, GetJobRunCommand } = require("@aws-sdk/client-glue");
 const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
 const postgres = require("postgres");
+const { writeNotification, writeNotificationToAllAdmins } = require("./utils/notificationWriter");
 
 const glueClient = new GlueClient({});
 const secretsManager = new SecretsManagerClient();
@@ -42,7 +43,7 @@ exports.handler = async () => {
   const jobName = process.env.GLUE_JOB_NAME;
 
   const inFlight = await sqlConnection`
-    SELECT id, glue_run_id
+    SELECT id, glue_run_id, metadata
     FROM ingestion_runs
     WHERE run_type = 'site'
       AND glue_run_id IS NOT NULL
@@ -70,6 +71,35 @@ exports.handler = async () => {
       `;
 
       console.log(`[GlueStatusSync] Run ${row.glue_run_id} → ${dbStatus}`);
+
+      if (isTerminal) {
+        const isCompleted = dbStatus === 'completed';
+        const triggeredByUserId = row.metadata?.triggered_by_user_id;
+        try {
+          if (triggeredByUserId) {
+            await writeNotification(sqlConnection, {
+              userId: triggeredByUserId,
+              type: isCompleted ? 'ingestion_completed' : 'ingestion_failed',
+              title: isCompleted ? 'Ingestion complete' : 'Ingestion failed',
+              message: isCompleted
+                ? 'SharePoint ingestion finished successfully.'
+                : `Ingestion ended with status "${dbStatus}".`,
+              metadata: { ingestion_run_id: row.id.toString() },
+            });
+          } else {
+            await writeNotificationToAllAdmins(sqlConnection, {
+              type: isCompleted ? 'ingestion_completed' : 'ingestion_failed',
+              title: isCompleted ? 'Ingestion complete' : 'Ingestion failed',
+              message: isCompleted
+                ? 'Scheduled SharePoint ingestion finished successfully.'
+                : `Scheduled ingestion ended with status "${dbStatus}".`,
+              metadata: { ingestion_run_id: row.id.toString() },
+            });
+          }
+        } catch (notifyErr) {
+          console.error(`[GlueStatusSync] Failed to write notification for run ${row.id}:`, notifyErr);
+        }
+      }
     } catch (e) {
       console.error(`[GlueStatusSync] Failed to sync run ${row.glue_run_id}:`, e.message);
     }

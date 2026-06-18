@@ -5,6 +5,7 @@ const {
 } = require("@aws-sdk/client-secrets-manager");
 const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { writeNotification } = require("./utils/notificationWriter");
 
 const s3Client = new S3Client({});
 const secretsManager = new SecretsManagerClient({});
@@ -213,6 +214,18 @@ exports.handler = async (event) => {
       `;
       console.log(`Export ${exportRunId} completed: ${sessions.length} sessions, ${totalMessages} messages`);
 
+      try {
+        await writeNotification(sqlConnection, {
+          userId: run.requested_by.toString(),
+          type: 'export_completed',
+          title: 'Export ready',
+          message: `Your "${scopeLabel}" export is complete — ${sessions.length} sessions, ${totalMessages} messages.`,
+          metadata: { export_run_id: exportRunId, presigned_url: presignedUrl, scope_label: scopeLabel },
+        });
+      } catch (notifyErr) {
+        console.error('Failed to write export_completed notification:', notifyErr);
+      }
+
     } catch (err) {
       console.error(`Export ${exportRunId} failed:`, err);
       try {
@@ -223,6 +236,19 @@ exports.handler = async (event) => {
         `;
       } catch (dbErr) {
         console.error('Failed to update error status:', dbErr);
+      }
+      if (run?.requested_by) {
+        try {
+          await writeNotification(sqlConnection, {
+            userId: run.requested_by.toString(),
+            type: 'export_failed',
+            title: 'Export failed',
+            message: `Your "${run.scope}" export could not be completed: ${err.message}`,
+            metadata: { export_run_id: exportRunId },
+          });
+        } catch (notifyErr) {
+          console.error('Failed to write export_failed notification:', notifyErr);
+        }
       }
       failures.push({ itemIdentifier: record.messageId });
     }

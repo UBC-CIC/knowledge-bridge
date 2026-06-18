@@ -1481,6 +1481,11 @@ export class ApiGatewayStack extends cdk.Stack {
         targets: [new eventTargets.LambdaFunction(glueStatusSyncFn)],
         description: "Poll Glue job status and sync to ingestion_runs table",
       });
+
+      glueStatusSyncFn.addEnvironment(
+        "WEBSOCKET_API_ENDPOINT",
+        cdk.Lazy.string({ produce: () => `${this.webSocketApi!.apiEndpoint}/${this.wsStage!.stageName}` })
+      );
     }
 
     // --- Export Jobs ---
@@ -1592,10 +1597,13 @@ export class ApiGatewayStack extends cdk.Stack {
       memorySize: 256,
       // reservedConcurrentExecutions: 50,
       tracing: lambda.Tracing.ACTIVE,
+      vpc: vpcStack.vpc,
       environment: {
         SM_COGNITO_CREDENTIALS: this.secret.secretName,
+        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+        RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
       },
-      layers: [jwt],
+      layers: [jwt, postgres],
     });
 
     new cloudwatch.Alarm(this, 'ConnectFunctionConcurrencyAlarm', {
@@ -1627,6 +1635,12 @@ export class ApiGatewayStack extends cdk.Stack {
         timeout: cdk.Duration.seconds(30),
         memorySize: 256,
         tracing: lambda.Tracing.ACTIVE,
+        vpc: vpcStack.vpc,
+        environment: {
+          SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+          RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
+        },
+        layers: [postgres],
       }
     );
 
@@ -1682,8 +1696,12 @@ export class ApiGatewayStack extends cdk.Stack {
     connectFunction.addToRolePolicy(wsPolicy);
     disconnectFunction.addToRolePolicy(wsPolicy);
     defaultFunction.addToRolePolicy(wsPolicy);
+    exportProcessorRole.addToPolicy(wsPolicy);
+    lambdaRole.addToPolicy(wsPolicy);
 
     this.secret.grantRead(connectFunction);
+    db.secretPathUser.grantRead(connectFunction);
+    db.secretPathUser.grantRead(disconnectFunction);
     // Grant the default function permission to invoke the text generation function
     lambdaTextGen.grantInvoke(defaultFunction);
 
@@ -1746,10 +1764,9 @@ export class ApiGatewayStack extends cdk.Stack {
     this.wsStage.node.addDependency(apiGatewayAccount);
 
     // Add environment variable to text generation function (include stage name)
-    lambdaTextGen.addEnvironment(
-      "WEBSOCKET_API_ENDPOINT",
-      `${this.webSocketApi.apiEndpoint}/${this.wsStage.stageName}`
-    );
+    const wsApiEndpoint = `${this.webSocketApi.apiEndpoint}/${this.wsStage.stageName}`;
+    lambdaTextGen.addEnvironment("WEBSOCKET_API_ENDPOINT", wsApiEndpoint);
+    exportProcessorLambda.addEnvironment("WEBSOCKET_API_ENDPOINT", wsApiEndpoint);
 
     // Add WebSocket URL as stack output
     new cdk.CfnOutput(this, "WebSocketUrl", {

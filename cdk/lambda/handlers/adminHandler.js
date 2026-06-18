@@ -1426,7 +1426,15 @@ exports.handler = async (event) => {
         }
 
         // Insert the DB row first to get its UUID, then start Glue passing that UUID
-        const metadataJson = { force_full: forceFull === "true", job_name: jobName };
+        const ingestionAdminEmail = event.requestContext?.authorizer?.email;
+        const ingestionAdminRows = ingestionAdminEmail
+          ? await sqlConnection`SELECT id FROM users WHERE email = ${ingestionAdminEmail} LIMIT 1`
+          : [];
+        const metadataJson = {
+          force_full: forceFull === "true",
+          job_name: jobName,
+          ...(ingestionAdminRows[0] ? { triggered_by_user_id: ingestionAdminRows[0].id.toString() } : {}),
+        };
         const inserted = await sqlConnection`
           INSERT INTO ingestion_runs (run_type, triggered_by, status, started_at, metadata)
           VALUES ('site', 'manual', 'running', now(), ${JSON.stringify(metadataJson)}::jsonb)
@@ -1832,6 +1840,65 @@ exports.handler = async (event) => {
 
         response.statusCode = 200;
         response.body = JSON.stringify({ runs, total, limit, offset });
+        break;
+      }
+
+      // GET /admin/notifications — list notifications for the current admin
+      case "GET /admin/notifications": {
+        const notifEmail = event.requestContext?.authorizer?.email;
+        if (!notifEmail) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
+        const notifUserRows = await sqlConnection`SELECT id FROM users WHERE email = ${notifEmail} LIMIT 1`;
+        if (!notifUserRows.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "User not found" }); break; }
+        const notifUserId = notifUserRows[0].id.toString();
+
+        const notifications = await sqlConnection`
+          SELECT id::text, type::text, title, message, metadata, created_at
+          FROM notifications
+          WHERE user_id::text = ${notifUserId}
+          ORDER BY created_at DESC
+          LIMIT 20
+        `;
+        const [{ total: notifTotal }] = await sqlConnection`
+          SELECT COUNT(*)::int AS total FROM notifications WHERE user_id::text = ${notifUserId}
+        `;
+        response.statusCode = 200;
+        response.body = JSON.stringify({ notifications, total: notifTotal });
+        break;
+      }
+
+      // DELETE /admin/notifications — clear all notifications for the current admin
+      case "DELETE /admin/notifications": {
+        const clearEmail = event.requestContext?.authorizer?.email;
+        if (!clearEmail) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
+        const clearUserRows = await sqlConnection`SELECT id FROM users WHERE email = ${clearEmail} LIMIT 1`;
+        if (!clearUserRows.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "User not found" }); break; }
+        const clearUserId = clearUserRows[0].id.toString();
+
+        await sqlConnection`DELETE FROM notifications WHERE user_id::text = ${clearUserId}`;
+        response.statusCode = 200;
+        response.body = JSON.stringify({ success: true });
+        break;
+      }
+
+      // DELETE /admin/notifications/{notification_id} — dismiss a single notification
+      case "DELETE /admin/notifications/{notification_id}": {
+        const dismissEmail = event.requestContext?.authorizer?.email;
+        if (!dismissEmail) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
+        const dismissUserRows = await sqlConnection`SELECT id FROM users WHERE email = ${dismissEmail} LIMIT 1`;
+        if (!dismissUserRows.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "User not found" }); break; }
+        const dismissUserId = dismissUserRows[0].id.toString();
+
+        const notificationId = event.pathParameters?.notification_id;
+        if (!notificationId) { response.statusCode = 400; response.body = JSON.stringify({ error: "notification_id required" }); break; }
+
+        const deleted = await sqlConnection`
+          DELETE FROM notifications
+          WHERE id::text = ${notificationId} AND user_id::text = ${dismissUserId}
+          RETURNING id::text
+        `;
+        if (!deleted.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "Notification not found" }); break; }
+        response.statusCode = 200;
+        response.body = JSON.stringify({ success: true });
         break;
       }
 

@@ -686,6 +686,77 @@ paths:
         httpMethod: POST
         type: aws_proxy
 
+  /admin/notifications:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: List notifications for the current admin
+      operationId: list_notifications
+      security:
+        - adminAuthorizer: []
+      responses:
+        "200":
+          description: Notifications list and total count
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+    delete:
+      tags: [Admin]
+      summary: Clear all notifications for the current admin
+      operationId: clear_all_notifications
+      security:
+        - adminAuthorizer: []
+      responses:
+        "200":
+          description: All notifications cleared
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/notifications/{notification_id}:
+    <<: *commonOptions
+    delete:
+      tags: [Admin]
+      summary: Dismiss a single notification
+      operationId: dismiss_notification
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Notification dismissed
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
   /admin/system-settings:
     <<: *commonOptions
     get:
