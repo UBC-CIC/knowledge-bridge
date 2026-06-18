@@ -20,7 +20,7 @@ type NotificationProps = {
   total: number;
   panelOpen: boolean;
   expanded: boolean;
-  onSetExpanded: (v: boolean) => void;
+  setExpanded: (v: boolean) => void;
   openPanel: () => void;
   closePanel: () => void;
   deleteNotification: (id: string) => void;
@@ -90,7 +90,7 @@ export default function Header({ notificationProps }: Props) {
                   notifications={notificationProps.notifications}
                   total={notificationProps.total}
                   expanded={notificationProps.expanded}
-                  onSetExpanded={notificationProps.onSetExpanded}
+                  onSetExpanded={notificationProps.setExpanded}
                   onClose={notificationProps.closePanel}
                   onClearAll={notificationProps.clearAll}
                   onDelete={notificationProps.deleteNotification}
