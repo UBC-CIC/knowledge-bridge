@@ -81,7 +81,7 @@ type ChatMessage = {
     content: string;
     created_at: string;
     sources?: any[];
-    rating?: { is_positive: boolean; comment: string | null } | null;
+    rating?: { is_positive: boolean; comment: string | null; category: string | null } | null;
 };
 
 type PaginationState = { offset: number; total: number; hasMore: boolean };
@@ -92,7 +92,12 @@ const UNASSIGNED_ID = "__unassigned__";
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-export default function ChatHistory() {
+type ChatHistoryProps = {
+    initialSessionId?: string;
+    initialMessageId?: string;
+};
+
+export default function ChatHistory({ initialSessionId, initialMessageId }: ChatHistoryProps = {}) {
     // Groups
     const [groups, setGroups] = useState<EntraGroup[]>([]);
     const [groupsPagination, setGroupsPagination] = useState<PaginationState>({ offset: 0, total: 0, hasMore: false });
@@ -115,6 +120,8 @@ export default function ChatHistory() {
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [loadingMessages, setLoadingMessages] = useState(false);
+    const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+    const pendingScrollMessageId = useRef<string | null>(null);
 
     // Export
     const [triggeringExport, setTriggeringExport] = useState<string | null>(null);
@@ -127,6 +134,28 @@ export default function ChatHistory() {
 
     useEffect(() => { fetchGroups(0, false); }, []);
     useEffect(() => () => { if (exportToastTimer.current) clearTimeout(exportToastTimer.current); }, []);
+
+    // Deep-link: auto-load session and scroll to message when props are provided
+    useEffect(() => {
+        if (!initialSessionId) return;
+        pendingScrollMessageId.current = initialMessageId ?? null;
+        handleSessionSelect(initialSessionId);
+    }, [initialSessionId, initialMessageId]);
+
+    // Scroll to highlighted message after messages load
+    useEffect(() => {
+        if (!pendingScrollMessageId.current || loadingMessages || messages.length === 0) return;
+        const targetId = pendingScrollMessageId.current;
+        pendingScrollMessageId.current = null;
+        setTimeout(() => {
+            const el = document.getElementById(`msg-${targetId}`);
+            if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                setHighlightedMessageId(targetId);
+                setTimeout(() => setHighlightedMessageId(null), 2500);
+            }
+        }, 100);
+    }, [messages, loadingMessages]);
 
     const getAuthHeaders = async () => ({
         Authorization: await AuthService.getIdToken(),
@@ -540,7 +569,7 @@ export default function ChatHistory() {
                                 {messages.map((msg, idx) => {
                                     const isUser = msg.sender.toLowerCase() === "user";
                                     return (
-                                        <div key={msg.id || idx} className={cn("flex flex-col max-w-[85%]", isUser ? "ml-auto" : "mr-auto")}>
+                                        <div key={msg.id || idx} id={msg.id ? `msg-${msg.id}` : undefined} className={cn("flex flex-col max-w-[85%] rounded-lg transition-colors duration-700", isUser ? "ml-auto" : "mr-auto", highlightedMessageId === msg.id && "ring-2 ring-primary/40 bg-primary/5")}>
                                             <div className={cn("flex items-center gap-2 mb-1 text-xs", isUser ? "justify-end text-gray-500" : "text-gray-500")}>
                                                 <span className="font-semibold">{isUser ? "User" : "Assistant"}</span>
                                                 <span className="text-xs opacity-75">{formatDate(msg.created_at)}</span>

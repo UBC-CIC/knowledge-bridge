@@ -1470,16 +1470,17 @@ export class ApiGatewayStack extends cdk.Stack {
         role: lambdaRole,
       });
 
-      glueStatusSyncFn.addToRolePolicy(new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["glue:GetJobRun"],
-        resources: [`arn:aws:glue:${this.region}:${this.account}:job/${glueJobName}`],
-      }));
-
       new events.Rule(this, `${id}-GlueStatusSyncRule`, {
-        schedule: events.Schedule.rate(Duration.minutes(5)),
+        eventPattern: {
+          source: ["aws.glue"],
+          detailType: ["Glue Job State Change"],
+          detail: {
+            jobName: [glueJobName],
+            state: ["SUCCEEDED", "FAILED", "STOPPED", "TIMEOUT", "ERROR"],
+          },
+        },
         targets: [new eventTargets.LambdaFunction(glueStatusSyncFn)],
-        description: "Poll Glue job status and sync to ingestion_runs table",
+        description: "React to Glue job terminal state and sync to ingestion_runs table",
       });
 
       glueStatusSyncFn.addEnvironment(

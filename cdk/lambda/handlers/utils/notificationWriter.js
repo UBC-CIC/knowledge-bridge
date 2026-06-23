@@ -45,7 +45,7 @@ async function writeNotification(sql, { userId, type, title, message, metadata =
 }
 
 async function writeNotificationToAllAdmins(sql, { type, title, message, metadata = {} }) {
-  const admins = await sql`SELECT id::text FROM users WHERE role::text = 'admin'`;
+  const admins = await sql`SELECT id::text FROM users WHERE role::user_role = 'admin'`;
   await Promise.allSettled(
     admins.map((a) => writeNotification(sql, { userId: a.id, type, title, message, metadata }))
   );

@@ -26,6 +26,8 @@ type NotificationProps = {
   deleteNotification: (id: string) => void;
   clearAll: () => void;
   onNavigateToExports: () => void;
+  incomingToast?: Notification | null;
+  dismissToast?: () => void;
 };
 
 type Props = {

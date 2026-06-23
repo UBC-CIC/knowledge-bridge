@@ -757,6 +757,78 @@ paths:
         httpMethod: POST
         type: aws_proxy
 
+  /admin/feedback:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: List dislike feedback entries with message context
+      operationId: list_feedback
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: ISO timestamp — return only feedback at or after this time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated feedback list
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/feedback/summary:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: Daily dislike trend and per-category counts
+      operationId: get_feedback_summary
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: ISO timestamp — include data at or after this time
+      responses:
+        "200":
+          description: Trend data and category counts
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
   /admin/system-settings:
     <<: *commonOptions
     get:
@@ -1969,11 +2041,16 @@ paths:
                 is_positive:
                   type: boolean
                   description: "true for thumbs up, false for thumbs down"
+                category:
+                  type: string
+                  nullable: true
+                  enum: ["Not helpful", "Inaccurate", "Off-topic", "Other"]
+                  description: Feedback category (only for thumbs down)
                 comment:
                   type: string
                   nullable: true
                   maxLength: 2000
-                  description: Optional feedback comment (typically provided on thumbs down)
+                  description: Optional free-text comment (typically provided on thumbs down)
       responses:
         "200":
           description: Rating saved

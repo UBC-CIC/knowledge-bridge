@@ -19,7 +19,7 @@ const isSafeUrl = (url: string) => {
 
 const DISLIKE_CHIPS = ["Not helpful", "Inaccurate", "Off-topic", "Other"];
 
-type MessageRating = { is_positive: boolean; comment: string | null };
+type MessageRating = { is_positive: boolean; comment: string | null; category?: string | null };
 
 type AIChatMessageProps = {
   text: string;
@@ -29,7 +29,7 @@ type AIChatMessageProps = {
   messageId?: string;
   isLastBotMessage?: boolean;
   existingRating?: MessageRating | null;
-  onRate?: (messageId: string, is_positive: boolean, comment?: string) => Promise<void>;
+  onRate?: (messageId: string, is_positive: boolean, category?: string, comment?: string) => Promise<void>;
 };
 
 export default function AIChatMessage({
@@ -68,7 +68,7 @@ export default function AIChatMessage({
     setSubmitting(true);
     setRatingError(null);
     try {
-      await onRate(messageId, true);
+      await onRate(messageId, true, undefined, undefined);
       setSubmittedRating(true);
       setRatingState("submitted");
     } catch {
@@ -86,9 +86,9 @@ export default function AIChatMessage({
     if (!messageId || !onRate) return;
     setSubmitting(true);
     setRatingError(null);
-    const comment = [selectedChip, commentText.trim()].filter(Boolean).join(" — ") || undefined;
+    const comment = commentText.trim() || undefined;
     try {
-      await onRate(messageId, false, comment);
+      await onRate(messageId, false, selectedChip ?? undefined, comment);
       setSubmittedRating(false);
       setRatingState("submitted");
     } catch {
@@ -103,7 +103,7 @@ export default function AIChatMessage({
     setSubmitting(true);
     setRatingError(null);
     try {
-      await onRate(messageId, false);
+      await onRate(messageId, false, "Other", undefined);
       setSubmittedRating(false);
       setRatingState("submitted");
     } catch {

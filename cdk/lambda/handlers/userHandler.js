@@ -251,6 +251,7 @@ exports.handler = async (event) => {
             m.created_at,
             r.is_positive AS rating_is_positive,
             r.comment AS rating_comment,
+            r.category AS rating_category,
             COUNT(*) OVER() AS total_count
           FROM chat_messages m
           LEFT JOIN message_ratings r
@@ -261,10 +262,10 @@ exports.handler = async (event) => {
         `;
 
         const total = rows.length > 0 ? parseInt(rows[0].total_count) : 0;
-        const messages = rows.map(({ total_count, rating_is_positive, rating_comment, ...msg }) => ({
+        const messages = rows.map(({ total_count, rating_is_positive, rating_comment, rating_category, ...msg }) => ({
           ...msg,
           rating: rating_is_positive !== null && rating_is_positive !== undefined
-            ? { is_positive: rating_is_positive, comment: rating_comment ?? null }
+            ? { is_positive: rating_is_positive, comment: rating_comment ?? null, category: rating_category ?? null }
             : null,
         }));
 
@@ -328,6 +329,11 @@ exports.handler = async (event) => {
           ? parsedBody.comment.trim().slice(0, 2000) || null
           : null;
 
+        const VALID_CATEGORIES = ["Not helpful", "Inaccurate", "Off-topic", "Other"];
+        const category = parsedBody.category && VALID_CATEGORIES.includes(parsedBody.category)
+          ? parsedBody.category
+          : null;
+
         // Verify message belongs to this session and session belongs to this user
         const msg = await sqlConnection`
           SELECT m.id FROM chat_messages m
@@ -344,10 +350,10 @@ exports.handler = async (event) => {
         }
 
         await sqlConnection`
-          INSERT INTO message_ratings (message_id, user_id, is_positive, comment)
-          VALUES (${messageId}, ${userId}, ${parsedBody.is_positive}, ${comment})
+          INSERT INTO message_ratings (message_id, user_id, is_positive, comment, category)
+          VALUES (${messageId}, ${userId}, ${parsedBody.is_positive}, ${comment}, ${category}::feedback_category)
           ON CONFLICT (message_id, user_id)
-          DO UPDATE SET is_positive = EXCLUDED.is_positive, comment = EXCLUDED.comment
+          DO UPDATE SET is_positive = EXCLUDED.is_positive, comment = EXCLUDED.comment, category = EXCLUDED.category
         `;
 
         response.statusCode = 200;

@@ -5,15 +5,16 @@ import {
   BarChart3,
   Bot,
   Download,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
 import UserProfilePopover from "@/components/UserProfilePopover";
 
 type AdminSidebarProps = {
-  activeView: "dashboard" | "analytics" | "system-settings" | "chat-history" | "export-jobs";
+  activeView: "dashboard" | "analytics" | "system-settings" | "chat-history" | "export-jobs" | "feedback";
   onViewChange: (
-    view: "dashboard" | "analytics" | "system-settings" | "chat-history" | "export-jobs"
+    view: "dashboard" | "analytics" | "system-settings" | "chat-history" | "export-jobs" | "feedback"
   ) => void;
 };
 
@@ -104,6 +105,17 @@ export default function AdminSidebar({
         >
           <Download className="mr-2 h-4 w-4" />
           Export Jobs
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start ${activeView === "feedback"
+            ? "bg-primary/10 text-primary hover:bg-primary/20 font-medium"
+            : "text-gray-600 hover:text-gray-900"
+            }`}
+          onClick={() => onViewChange("feedback")}
+        >
+          <MessageSquare className="mr-2 h-4 w-4" />
+          Feedback
         </Button>
       </div>
 

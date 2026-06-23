@@ -10,8 +10,10 @@ export function useNotifications(role?: string | null) {
   const [total, setTotal] = useState(0);
   const [panelOpen, setPanelOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [incomingToast, setIncomingToast] = useState<Notification | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isAdmin = role === "admin";
 
   const fetchNotifications = useCallback(async () => {
@@ -42,6 +44,9 @@ export function useNotifications(role?: string | null) {
           if (msg.type === "notification") {
             setNotifications((prev) => [msg.notification, ...prev]);
             setTotal((prev) => prev + 1);
+            setIncomingToast(msg.notification);
+            if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+            toastTimerRef.current = setTimeout(() => setIncomingToast(null), 5000);
           }
         } catch { /* ignore malformed frames */ }
       };
@@ -61,8 +66,9 @@ export function useNotifications(role?: string | null) {
     return () => {
       wsRef.current?.close();
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
-  }, []);
+  }, [isAdmin]);
 
   const openPanel = useCallback(() => {
     setPanelOpen(true);
@@ -100,6 +106,11 @@ export function useNotifications(role?: string | null) {
     } catch { /* swallow */ }
   }, []);
 
+  const dismissToast = useCallback(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setIncomingToast(null);
+  }, []);
+
   return {
     notifications,
     total,
@@ -110,5 +121,7 @@ export function useNotifications(role?: string | null) {
     closePanel,
     deleteNotification,
     clearAll,
+    incomingToast,
+    dismissToast,
   };
 }

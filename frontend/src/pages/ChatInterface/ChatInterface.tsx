@@ -558,7 +558,7 @@ export default function AIChatPage() {
     return null;
   }, [messages, isStreaming]);
 
-  const handleRate = async (messageId: string, is_positive: boolean, comment?: string) => {
+  const handleRate = async (messageId: string, is_positive: boolean, category?: string, comment?: string) => {
     if (!activeChatSessionId) {
       throw new Error("Missing active chat session id");
     }
@@ -574,7 +574,7 @@ export default function AIChatPage() {
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ is_positive, comment: comment ?? null }),
+          body: JSON.stringify({ is_positive, category: category ?? null, comment: comment ?? null }),
         }
       );
 
@@ -592,7 +592,7 @@ export default function AIChatPage() {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === messageId
-            ? { ...m, rating: { is_positive, comment: comment ?? null } }
+            ? { ...m, rating: { is_positive, category: category ?? null, comment: comment ?? null } }
             : m
         )
       );
@@ -618,7 +618,7 @@ export default function AIChatPage() {
           messageId={message.id}
           isLastBotMessage={message.id === lastBotMessageId}
           existingRating={message.rating ?? null}
-          onRate={handleRate}
+          onRate={(id, pos, cat, cmt) => handleRate(id, pos, cat, cmt)}
         />
       );
     }

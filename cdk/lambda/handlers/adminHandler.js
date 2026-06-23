@@ -1146,7 +1146,8 @@ exports.handler = async (event) => {
                m.sources,
                m.created_at,
                r.is_positive AS rating_is_positive,
-               r.comment AS rating_comment
+               r.comment AS rating_comment,
+               r.category::text AS rating_category
              FROM chat_messages m
              LEFT JOIN message_ratings r ON r.message_id = m.id
              WHERE m.chat_session_id = ${sessionId}
@@ -1154,10 +1155,10 @@ exports.handler = async (event) => {
              LIMIT ${limit} OFFSET ${offset}
           `;
 
-          const messages = rows.map(({ rating_is_positive, rating_comment, ...msg }) => ({
+          const messages = rows.map(({ rating_is_positive, rating_comment, rating_category, ...msg }) => ({
             ...msg,
             rating: rating_is_positive !== null && rating_is_positive !== undefined
-              ? { is_positive: rating_is_positive, comment: rating_comment ?? null }
+              ? { is_positive: rating_is_positive, comment: rating_comment ?? null, category: rating_category ?? null }
               : null,
           }));
 
@@ -1899,6 +1900,92 @@ exports.handler = async (event) => {
         if (!deleted.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "Notification not found" }); break; }
         response.statusCode = 200;
         response.body = JSON.stringify({ success: true });
+        break;
+      }
+
+      // GET /admin/feedback — paginated list of dislike ratings with context
+      case "GET /admin/feedback": {
+        try {
+          const feedbackQs = event.queryStringParameters ?? {};
+          const feedbackFrom = feedbackQs.from || null;
+          const feedbackLimit = Math.min(parseInt(feedbackQs.limit ?? "50", 10), 200);
+          const feedbackOffset = parseInt(feedbackQs.offset ?? "0", 10);
+
+          const feedbackRows = await sqlConnection`
+            SELECT
+              mr.id::text,
+              mr.is_positive,
+              mr.comment,
+              mr.category::text AS category,
+              mr.created_at,
+              ai_msg.id::text AS message_id,
+              LEFT(ai_msg.content, 300) AS ai_response,
+              ai_msg.chat_session_id::text,
+              user_msg.content AS user_question,
+              COUNT(*) OVER() AS total_count
+            FROM message_ratings mr
+            JOIN chat_messages ai_msg ON ai_msg.id = mr.message_id
+            LEFT JOIN LATERAL (
+              SELECT content FROM chat_messages
+              WHERE chat_session_id = ai_msg.chat_session_id
+                AND sender = 'user'
+                AND created_at < ai_msg.created_at
+              ORDER BY created_at DESC
+              LIMIT 1
+            ) user_msg ON true
+            WHERE mr.is_positive = false
+              AND (${feedbackFrom}::timestamptz IS NULL OR mr.created_at >= ${feedbackFrom}::timestamptz)
+            ORDER BY mr.created_at DESC
+            LIMIT ${feedbackLimit} OFFSET ${feedbackOffset}
+          `;
+
+          const total = feedbackRows.length > 0 ? parseInt(feedbackRows[0].total_count) : 0;
+          const feedback = feedbackRows.map(({ total_count, ...row }) => row);
+
+          response.statusCode = 200;
+          response.body = JSON.stringify({ feedback, total, limit: feedbackLimit, offset: feedbackOffset });
+        } catch (err) {
+          console.error("GET /admin/feedback error:", err);
+          response.statusCode = 500;
+          response.body = JSON.stringify({ error: "Internal Server Error" });
+        }
+        break;
+      }
+
+      // GET /admin/feedback/summary — daily dislike counts for last N days
+      case "GET /admin/feedback/summary": {
+        try {
+          const summaryQs = event.queryStringParameters ?? {};
+          const summaryFrom = summaryQs.from || null;
+
+          const summaryRows = await sqlConnection`
+            SELECT
+              date_trunc('day', mr.created_at)::date::text AS day,
+              COUNT(*)::int AS count
+            FROM message_ratings mr
+            WHERE mr.is_positive = false
+              AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
+            GROUP BY 1
+            ORDER BY 1
+          `;
+
+          const categoryCounts = await sqlConnection`
+            SELECT
+              COALESCE(mr.category::text, 'Uncategorized') AS category,
+              COUNT(*)::int AS count
+            FROM message_ratings mr
+            WHERE mr.is_positive = false
+              AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
+            GROUP BY 1
+          `;
+
+          response.statusCode = 200;
+          response.body = JSON.stringify({ trend: summaryRows, categories: categoryCounts });
+        } catch (err) {
+          console.error("GET /admin/feedback/summary error:", err);
+          response.statusCode = 500;
+          response.body = JSON.stringify({ error: "Internal Server Error" });
+        }
         break;
       }
 
