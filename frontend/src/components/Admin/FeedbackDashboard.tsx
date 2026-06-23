@@ -20,6 +20,31 @@ import { ThumbsDown, ThumbsUp, MessageSquare, ExternalLink, Calendar, ChevronLef
 import { AuthService } from "@/functions/authService";
 import { cn } from "@/lib/utils";
 
+// ---------------------------------------------------------------------------
+// Cache — same pattern as ChatHistory
+// ---------------------------------------------------------------------------
+const CACHE_TTL = 5 * 60 * 1000; // 5 min
+
+const getCached = (key: string) => {
+  try {
+    const item = localStorage.getItem(key);
+    if (!item) return null;
+    const parsed = JSON.parse(item);
+    if (Date.now() - parsed.timestamp > CACHE_TTL) { localStorage.removeItem(key); return null; }
+    return parsed.data;
+  } catch { return null; }
+};
+
+const setCached = (key: string, data: any) => {
+  try {
+    localStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), data }));
+  } catch {
+    // Evict all feedback cache entries and retry once
+    Object.keys(localStorage).forEach(k => { if (k.startsWith("admin_feedback_")) localStorage.removeItem(k); });
+    try { localStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), data })); } catch { }
+  }
+};
+
 const CATEGORIES = ["Not helpful", "Inaccurate", "Off-topic", "Other"] as const;
 type Category = (typeof CATEGORIES)[number];
 
@@ -115,9 +140,18 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
   }, [datePreset, customRange]);
 
   const fetchSummary = useCallback(async () => {
+    const { from, to } = buildDateParams();
+    const cacheKey = `admin_feedback_summary_${from ?? "all"}_${to ?? "all"}`;
+    const cached = getCached(cacheKey);
+    if (cached) {
+      setTrend(cached.trend);
+      setCategoryCounts(cached.categories);
+      setTotalLikes(cached.totalLikes);
+      setTotalDislikes(cached.totalDislikes);
+      return;
+    }
     setSummaryLoading(true);
     try {
-      const { from, to } = buildDateParams();
       const params = new URLSearchParams();
       if (from) params.set("from", from);
       if (to) params.set("to", to);
@@ -132,6 +166,12 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
       setCategoryCounts(data.categories ?? []);
       setTotalLikes(data.totalLikes ?? 0);
       setTotalDislikes(data.totalDislikes ?? 0);
+      setCached(cacheKey, {
+        trend: data.trend ?? [],
+        categories: data.categories ?? [],
+        totalLikes: data.totalLikes ?? 0,
+        totalDislikes: data.totalDislikes ?? 0,
+      });
     } catch (e) {
       console.error(e);
     } finally {
@@ -140,9 +180,16 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
   }, [buildDateParams]);
 
   const fetchFeedback = useCallback(async (pageNum: number) => {
+    const { from, to } = buildDateParams();
+    const cacheKey = `admin_feedback_list_${from ?? "all"}_${to ?? "all"}_${activeCategory ?? "all"}_p${pageNum}`;
+    const cached = getCached(cacheKey);
+    if (cached) {
+      setTotal(cached.total);
+      setFeedback(cached.feedback);
+      return;
+    }
     setLoading(true);
     try {
-      const { from, to } = buildDateParams();
       const params = new URLSearchParams();
       if (from) params.set("from", from);
       if (to) params.set("to", to);
@@ -158,6 +205,7 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
       const data = await res.json();
       setTotal(data.total ?? 0);
       setFeedback(data.feedback ?? []);
+      setCached(cacheKey, { total: data.total ?? 0, feedback: data.feedback ?? [] });
     } catch (e) {
       console.error(e);
     } finally {
@@ -165,15 +213,16 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
     }
   }, [buildDateParams, activeCategory]);
 
-  // Refetch everything when date range or category changes
+  // Refetch everything when date range or category changes; reset to page 0
   useEffect(() => {
     setPage(0);
     fetchSummary();
     fetchFeedback(0);
   }, [datePreset, customRange, activeCategory]);
 
-  // Refetch list when page changes (but not summary)
+  // Refetch list only when page advances beyond 0 (page 0 is handled above)
   useEffect(() => {
+    if (page === 0) return;
     fetchFeedback(page);
   }, [page]);
 
@@ -301,8 +350,8 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
                   contentStyle={{ fontSize: 12 }}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="likes" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} name="Likes" />
-                <Line type="monotone" dataKey="dislikes" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} name="Dislikes" />
+                <Line type="monotone" dataKey="dislikes" stroke="#ef4444" strokeWidth={2} strokeDasharray="4 2" dot={{ r: 4 }} name="Dislikes" />
+                <Line type="monotone" dataKey="likes" stroke="#22c55e" strokeWidth={2} dot={{ r: 4 }} name="Likes" />
               </LineChart>
             </ResponsiveContainer>
           )}

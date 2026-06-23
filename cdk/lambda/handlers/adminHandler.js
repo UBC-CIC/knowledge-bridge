@@ -1911,6 +1911,10 @@ exports.handler = async (event) => {
           const feedbackTo = feedbackQs.to || null;
           const feedbackLimit = Math.min(parseInt(feedbackQs.limit ?? "5", 10), 200);
           const feedbackOffset = parseInt(feedbackQs.offset ?? "0", 10);
+          const VALID_CATEGORIES = ["Not helpful", "Inaccurate", "Off-topic", "Other"];
+          const feedbackCategory = feedbackQs.category && VALID_CATEGORIES.includes(feedbackQs.category)
+            ? feedbackQs.category
+            : null;
 
           const feedbackRows = await sqlConnection`
             SELECT
@@ -1941,6 +1945,7 @@ exports.handler = async (event) => {
             WHERE mr.is_positive = false
               AND (${feedbackFrom}::timestamptz IS NULL OR mr.created_at >= ${feedbackFrom}::timestamptz)
               AND (${feedbackTo}::timestamptz IS NULL OR mr.created_at <= ${feedbackTo}::timestamptz)
+              AND (${feedbackCategory}::feedback_category IS NULL OR mr.category = ${feedbackCategory}::feedback_category)
             ORDER BY mr.created_at DESC
             LIMIT ${feedbackLimit} OFFSET ${feedbackOffset}
           `;
