@@ -1908,7 +1908,8 @@ exports.handler = async (event) => {
         try {
           const feedbackQs = event.queryStringParameters ?? {};
           const feedbackFrom = feedbackQs.from || null;
-          const feedbackLimit = Math.min(parseInt(feedbackQs.limit ?? "50", 10), 200);
+          const feedbackTo = feedbackQs.to || null;
+          const feedbackLimit = Math.min(parseInt(feedbackQs.limit ?? "5", 10), 200);
           const feedbackOffset = parseInt(feedbackQs.offset ?? "0", 10);
 
           const feedbackRows = await sqlConnection`
@@ -1922,6 +1923,8 @@ exports.handler = async (event) => {
               LEFT(ai_msg.content, 300) AS ai_response,
               ai_msg.chat_session_id::text,
               user_msg.content AS user_question,
+              u.email AS user_email,
+              u.display_name AS user_display_name,
               COUNT(*) OVER() AS total_count
             FROM message_ratings mr
             JOIN chat_messages ai_msg ON ai_msg.id = mr.message_id
@@ -1933,8 +1936,11 @@ exports.handler = async (event) => {
               ORDER BY created_at DESC
               LIMIT 1
             ) user_msg ON true
+            LEFT JOIN chat_sessions cs ON cs.id = ai_msg.chat_session_id
+            LEFT JOIN users u ON u.id = cs.user_id
             WHERE mr.is_positive = false
               AND (${feedbackFrom}::timestamptz IS NULL OR mr.created_at >= ${feedbackFrom}::timestamptz)
+              AND (${feedbackTo}::timestamptz IS NULL OR mr.created_at <= ${feedbackTo}::timestamptz)
             ORDER BY mr.created_at DESC
             LIMIT ${feedbackLimit} OFFSET ${feedbackOffset}
           `;
@@ -1952,35 +1958,72 @@ exports.handler = async (event) => {
         break;
       }
 
-      // GET /admin/feedback/summary — daily dislike counts for last N days
+      // GET /admin/feedback/summary — daily likes+dislikes trend and per-category counts
       case "GET /admin/feedback/summary": {
         try {
           const summaryQs = event.queryStringParameters ?? {};
           const summaryFrom = summaryQs.from || null;
+          const summaryTo = summaryQs.to || null;
 
-          const summaryRows = await sqlConnection`
-            SELECT
-              date_trunc('day', mr.created_at)::date::text AS day,
-              COUNT(*)::int AS count
+          const dislikeTrend = await sqlConnection`
+            SELECT date_trunc('day', mr.created_at)::date::text AS day, COUNT(*)::int AS count
             FROM message_ratings mr
             WHERE mr.is_positive = false
               AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
-            GROUP BY 1
-            ORDER BY 1
+              AND (${summaryTo}::timestamptz IS NULL OR mr.created_at <= ${summaryTo}::timestamptz)
+            GROUP BY 1 ORDER BY 1
           `;
+
+          const likeTrend = await sqlConnection`
+            SELECT date_trunc('day', mr.created_at)::date::text AS day, COUNT(*)::int AS count
+            FROM message_ratings mr
+            WHERE mr.is_positive = true
+              AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
+              AND (${summaryTo}::timestamptz IS NULL OR mr.created_at <= ${summaryTo}::timestamptz)
+            GROUP BY 1 ORDER BY 1
+          `;
+
+          // Merge likes and dislikes into a single array keyed by day
+          const dayMap = {};
+          dislikeTrend.forEach(r => { dayMap[r.day] = { day: r.day, dislikes: r.count, likes: 0 }; });
+          likeTrend.forEach(r => {
+            if (dayMap[r.day]) dayMap[r.day].likes = r.count;
+            else dayMap[r.day] = { day: r.day, dislikes: 0, likes: r.count };
+          });
+          const trend = Object.values(dayMap).sort((a, b) => a.day.localeCompare(b.day));
 
           const categoryCounts = await sqlConnection`
             SELECT
-              COALESCE(mr.category::text, 'Uncategorized') AS category,
+              mr.category::text AS category,
               COUNT(*)::int AS count
             FROM message_ratings mr
             WHERE mr.is_positive = false
               AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
+              AND (${summaryTo}::timestamptz IS NULL OR mr.created_at <= ${summaryTo}::timestamptz)
             GROUP BY 1
           `;
 
+          const totalLikes = await sqlConnection`
+            SELECT COUNT(*)::int AS count FROM message_ratings mr
+            WHERE mr.is_positive = true
+              AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
+              AND (${summaryTo}::timestamptz IS NULL OR mr.created_at <= ${summaryTo}::timestamptz)
+          `;
+
+          const totalDislikes = await sqlConnection`
+            SELECT COUNT(*)::int AS count FROM message_ratings mr
+            WHERE mr.is_positive = false
+              AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
+              AND (${summaryTo}::timestamptz IS NULL OR mr.created_at <= ${summaryTo}::timestamptz)
+          `;
+
           response.statusCode = 200;
-          response.body = JSON.stringify({ trend: summaryRows, categories: categoryCounts });
+          response.body = JSON.stringify({
+            trend,
+            categories: categoryCounts,
+            totalLikes: totalLikes[0].count,
+            totalDislikes: totalDislikes[0].count,
+          });
         } catch (err) {
           console.error("GET /admin/feedback/summary error:", err);
           response.statusCode = 500;

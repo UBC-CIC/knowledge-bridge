@@ -95,9 +95,10 @@ const UNASSIGNED_ID = "__unassigned__";
 type ChatHistoryProps = {
     initialSessionId?: string;
     initialMessageId?: string;
+    initialUserLabel?: string;
 };
 
-export default function ChatHistory({ initialSessionId, initialMessageId }: ChatHistoryProps = {}) {
+export default function ChatHistory({ initialSessionId, initialMessageId, initialUserLabel }: ChatHistoryProps = {}) {
     // Groups
     const [groups, setGroups] = useState<EntraGroup[]>([]);
     const [groupsPagination, setGroupsPagination] = useState<PaginationState>({ offset: 0, total: 0, hasMore: false });
@@ -546,7 +547,11 @@ export default function ChatHistory({ initialSessionId, initialMessageId }: Chat
                             Conversation
                         </CardTitle>
                         <CardDescription className="text-xs">
-                            {selectedSessionId ? "Transcript of selected session." : "Select a session to view the transcript."}
+                            {selectedSessionId
+                                ? initialUserLabel && !groups.length
+                                    ? <span>Session for <span className="font-medium text-gray-700">{initialUserLabel}</span></span>
+                                    : "Transcript of selected session."
+                                : "Select a session to view the transcript."}
                         </CardDescription>
                     </CardHeader>
 

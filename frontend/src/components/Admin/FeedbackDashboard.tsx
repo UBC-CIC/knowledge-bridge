@@ -1,4 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
+import { DayPicker } from "react-day-picker";
+import "react-day-picker/dist/style.css";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 import {
   LineChart,
   Line,
@@ -6,10 +11,12 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   ResponsiveContainer,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { ThumbsDown, MessageSquare, ExternalLink } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ThumbsDown, ThumbsUp, MessageSquare, ExternalLink, Calendar, ChevronLeft, ChevronRight, User } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import { cn } from "@/lib/utils";
 
@@ -31,22 +38,33 @@ type FeedbackItem = {
   comment: string | null;
   ai_response: string;
   user_question: string | null;
+  user_email: string | null;
+  user_display_name: string | null;
   created_at: string;
 };
 
-type TrendPoint = { day: string; count: number };
+type TrendPoint = { day: string; dislikes: number; likes: number };
 type CategoryCount = { category: string; count: number };
 
+type DatePreset = "7d" | "30d" | "all" | "custom";
+
 type FeedbackDashboardProps = {
-  onNavigateToSession: (sessionId: string, messageId?: string) => void;
+  onNavigateToSession: (sessionId: string, messageId?: string, userLabel?: string) => void;
 };
 
-const LIMIT = 50;
+const PAGE_SIZE = 5;
 
-const sevenDaysAgo = () => {
-  const d = new Date();
-  d.setDate(d.getDate() - 7);
-  return d.toISOString();
+const getPresetRange = (preset: DatePreset): { from: string | null; to: string | null } => {
+  const now = new Date();
+  if (preset === "7d") {
+    const d = new Date(now); d.setDate(d.getDate() - 7);
+    return { from: d.toISOString(), to: null };
+  }
+  if (preset === "30d") {
+    const d = new Date(now); d.setDate(d.getDate() - 30);
+    return { from: d.toISOString(), to: null };
+  }
+  return { from: null, to: null };
 };
 
 const formatDay = (iso: string) =>
@@ -55,130 +73,236 @@ const formatDay = (iso: string) =>
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
+const formatPresetLabel = (preset: DatePreset, customRange: { from?: Date; to?: Date }) => {
+  if (preset === "7d") return "Last 7 days";
+  if (preset === "30d") return "Last 30 days";
+  if (preset === "all") return "All time";
+  if (customRange.from && customRange.to) {
+    return `${customRange.from.toLocaleDateString([], { month: "short", day: "numeric" })} – ${customRange.to.toLocaleDateString([], { month: "short", day: "numeric" })}`;
+  }
+  return "Custom range";
+};
+
 export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashboardProps) {
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [categoryCounts, setCategoryCounts] = useState<CategoryCount[]>([]);
+  const [totalLikes, setTotalLikes] = useState(0);
+  const [totalDislikes, setTotalDislikes] = useState(0);
   const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [activeCategory, setActiveCategory] = useState<Category | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
 
-  const from = sevenDaysAgo();
+  const [datePreset, setDatePreset] = useState<DatePreset>("7d");
+  const [customRange, setCustomRange] = useState<{ from?: Date; to?: Date }>({});
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<Category | null>(null);
 
   const getHeaders = async () => ({
     Authorization: await AuthService.getIdToken(),
     "Content-Type": "application/json",
   });
 
+  const buildDateParams = useCallback(() => {
+    if (datePreset === "custom") {
+      return {
+        from: customRange.from?.toISOString() ?? null,
+        to: customRange.to?.toISOString() ?? null,
+      };
+    }
+    return getPresetRange(datePreset);
+  }, [datePreset, customRange]);
+
   const fetchSummary = useCallback(async () => {
+    setSummaryLoading(true);
     try {
+      const { from, to } = buildDateParams();
+      const params = new URLSearchParams();
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
       const headers = await getHeaders();
       const res = await fetch(
-        `${import.meta.env.VITE_API_ENDPOINT}/admin/feedback/summary?from=${encodeURIComponent(from)}`,
+        `${import.meta.env.VITE_API_ENDPOINT}/admin/feedback/summary?${params}`,
         { headers }
       );
-      if (!res.ok) throw new Error("Failed to fetch feedback summary");
+      if (!res.ok) throw new Error("Failed to fetch summary");
       const data = await res.json();
       setTrend(data.trend ?? []);
       setCategoryCounts(data.categories ?? []);
+      setTotalLikes(data.totalLikes ?? 0);
+      setTotalDislikes(data.totalDislikes ?? 0);
     } catch (e) {
       console.error(e);
+    } finally {
+      setSummaryLoading(false);
     }
-  }, []);
+  }, [buildDateParams]);
 
-  const fetchFeedback = useCallback(async (newOffset: number, append: boolean) => {
-    newOffset === 0 ? setLoading(true) : setLoadingMore(true);
+  const fetchFeedback = useCallback(async (pageNum: number) => {
+    setLoading(true);
     try {
+      const { from, to } = buildDateParams();
+      const params = new URLSearchParams();
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      if (activeCategory) params.set("category", activeCategory);
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(pageNum * PAGE_SIZE));
       const headers = await getHeaders();
       const res = await fetch(
-        `${import.meta.env.VITE_API_ENDPOINT}/admin/feedback?from=${encodeURIComponent(from)}&limit=${LIMIT}&offset=${newOffset}`,
+        `${import.meta.env.VITE_API_ENDPOINT}/admin/feedback?${params}`,
         { headers }
       );
       if (!res.ok) throw new Error("Failed to fetch feedback");
       const data = await res.json();
       setTotal(data.total ?? 0);
-      setFeedback(prev => append ? [...prev, ...(data.feedback ?? [])] : (data.feedback ?? []));
-      setOffset(newOffset);
+      setFeedback(data.feedback ?? []);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
-      setLoadingMore(false);
     }
-  }, []);
+  }, [buildDateParams, activeCategory]);
 
+  // Refetch everything when date range or category changes
   useEffect(() => {
+    setPage(0);
     fetchSummary();
-    fetchFeedback(0, false);
-  }, []);
+    fetchFeedback(0);
+  }, [datePreset, customRange, activeCategory]);
+
+  // Refetch list when page changes (but not summary)
+  useEffect(() => {
+    fetchFeedback(page);
+  }, [page]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const getCategoryCount = (cat: Category) =>
     categoryCounts.find(c => c.category === cat)?.count ?? 0;
 
-  const filteredFeedback = activeCategory
-    ? feedback.filter(f => f.category === activeCategory)
-    : feedback;
+  const handlePresetClick = (preset: DatePreset) => {
+    if (preset !== "custom") setCustomRange({});
+    setDatePreset(preset);
+  };
+
+  const handleCustomRangeSelect = (range: { from?: Date; to?: Date } | undefined) => {
+    setCustomRange(range ?? {});
+    if (range?.from && range?.to) {
+      setDatePreset("custom");
+      setCalendarOpen(false);
+    }
+  };
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto animate-in fade-in duration-500">
-      <div>
-        <h2 className="text-3xl font-bold text-gray-900">Feedback</h2>
-        <p className="text-gray-500 mt-1">Last 7 days of negative feedback.</p>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold text-gray-900">Feedback</h2>
+          <p className="text-gray-500 mt-1">Negative feedback from users on AI responses.</p>
+        </div>
+
+        {/* Date filter */}
+        <div className="flex items-center gap-2">
+          {(["7d", "30d", "all"] as DatePreset[]).map(p => (
+            <button
+              key={p}
+              onClick={() => handlePresetClick(p)}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+                datePreset === p
+                  ? "bg-primary text-white border-primary"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+              )}
+            >
+              {p === "7d" ? "Last 7 days" : p === "30d" ? "Last 30 days" : "All time"}
+            </button>
+          ))}
+          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+            <PopoverTrigger asChild>
+              <button
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+                  datePreset === "custom"
+                    ? "bg-primary text-white border-primary"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+                )}
+              >
+                <Calendar size={12} />
+                {datePreset === "custom" ? formatPresetLabel("custom", customRange) : "Custom"}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <DayPicker
+                mode="range"
+                selected={customRange as any}
+                onSelect={handleCustomRangeSelect as any}
+                disabled={{ after: new Date() }}
+                numberOfMonths={2}
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
 
-      {/* Category stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {CATEGORIES.map(cat => (
-          <button
-            key={cat}
-            onClick={() => setActiveCategory(prev => prev === cat ? null : cat)}
-            className={cn(
-              "text-left p-4 rounded-xl border transition-all shadow-sm hover:shadow-md",
-              activeCategory === cat
-                ? "ring-2 ring-primary border-primary bg-primary/5"
-                : "bg-white border-gray-200 hover:border-gray-300"
-            )}
-          >
-            <div className="text-2xl font-bold text-gray-900">{getCategoryCount(cat)}</div>
-            <div className={cn("mt-1.5 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border", CATEGORY_COLORS[cat])}>
-              {cat}
+      {/* Summary stat cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <Card className="border-gray-200 shadow-sm col-span-1">
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold text-green-600">{totalLikes}</div>
+            <div className="mt-1 flex items-center gap-1 text-xs text-green-600 font-medium">
+              <ThumbsUp size={11} /> Likes
             </div>
-          </button>
+          </CardContent>
+        </Card>
+        <Card className="border-gray-200 shadow-sm col-span-1">
+          <CardContent className="p-4">
+            <div className="text-2xl font-bold text-red-600">{totalDislikes}</div>
+            <div className="mt-1 flex items-center gap-1 text-xs text-red-600 font-medium">
+              <ThumbsDown size={11} /> Dislikes
+            </div>
+          </CardContent>
+        </Card>
+        {CATEGORIES.map(cat => (
+          <Card key={cat} className="border-gray-200 shadow-sm col-span-1">
+            <CardContent className="p-4">
+              <div className="text-2xl font-bold text-gray-900">{getCategoryCount(cat)}</div>
+              <div className={cn("mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium border", CATEGORY_COLORS[cat])}>
+                {cat}
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
-      {/* 7-day trend chart */}
+      {/* Trend chart */}
       <Card className="border-gray-200 shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base flex items-center gap-2">
-            <ThumbsDown className="h-4 w-4 text-red-500" />
-            Dislikes per day
-          </CardTitle>
-          <CardDescription className="text-xs">Last 7 days</CardDescription>
+          <CardTitle className="text-base">Ratings over time</CardTitle>
+          <CardDescription className="text-xs">{formatPresetLabel(datePreset, customRange)}</CardDescription>
         </CardHeader>
         <CardContent>
-          {trend.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-gray-400 text-sm">No data yet</div>
+          {summaryLoading ? (
+            <div className="flex items-center justify-center h-40">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+            </div>
+          ) : trend.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-gray-400 text-sm">No data for this period</div>
           ) : (
-            <ResponsiveContainer width="100%" height={160}>
+            <ResponsiveContainer width="100%" height={180}>
               <LineChart data={trend} margin={{ top: 4, right: 16, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="day" tickFormatter={formatDay} tick={{ fontSize: 11 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                 <Tooltip
                   labelFormatter={formatDay}
-                  formatter={(v: number) => [v, "Dislikes"]}
                   contentStyle={{ fontSize: 12 }}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="count"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="likes" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} name="Likes" />
+                <Line type="monotone" dataKey="dislikes" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} name="Dislikes" />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -187,53 +311,63 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
 
       {/* Feedback list */}
       <Card className="border-gray-200 shadow-sm">
-        <CardHeader className="pb-3 border-b">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-base flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-primary" />
-                All feedback
-                {activeCategory && (
-                  <span className={cn("ml-1 px-2 py-0.5 rounded-full text-xs font-medium border", CATEGORY_COLORS[activeCategory])}>
-                    {activeCategory}
-                  </span>
-                )}
-              </CardTitle>
-              <CardDescription className="text-xs mt-0.5">
-                {activeCategory
-                  ? "Filtered by category — click the card above to clear"
-                  : "Click a row to jump to that message in Chat History"}
-              </CardDescription>
-            </div>
-            {activeCategory && (
+        <CardHeader className="pb-0 border-b">
+          <div className="flex items-center justify-between mb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-primary" />
+              All feedback
+            </CardTitle>
+          </div>
+          {/* Category filter chips */}
+          <div className="flex items-center gap-2 pb-3 flex-wrap">
+            <button
+              onClick={() => setActiveCategory(null)}
+              className={cn(
+                "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
+                activeCategory === null
+                  ? "bg-primary text-white border-primary"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+              )}
+            >
+              All
+            </button>
+            {CATEGORIES.map(cat => (
               <button
-                onClick={() => setActiveCategory(null)}
-                className="text-xs text-primary hover:underline"
+                key={cat}
+                onClick={() => setActiveCategory(prev => prev === cat ? null : cat)}
+                className={cn(
+                  "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
+                  activeCategory === cat
+                    ? "bg-primary text-white border-primary"
+                    : cn("bg-white border-gray-200 hover:border-gray-300", CATEGORY_COLORS[cat])
+                )}
               >
-                Clear filter
+                {cat}
               </button>
-            )}
+            ))}
           </div>
         </CardHeader>
+
         <CardContent className="p-0">
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
             </div>
-          ) : filteredFeedback.length === 0 ? (
+          ) : feedback.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-2">
               <ThumbsDown className="h-10 w-10 text-gray-200" />
-              <p className="text-sm">No feedback found</p>
+              <p className="text-sm">No feedback found for this period</p>
             </div>
           ) : (
             <>
               <div className="divide-y divide-gray-100">
-                {filteredFeedback.map(item => {
+                {feedback.map(item => {
                   const cat = (item.category ?? "Other") as Category;
+                  const userLabel = item.user_display_name || item.user_email || null;
                   return (
                     <button
                       key={item.id}
-                      onClick={() => onNavigateToSession(item.chat_session_id, item.message_id)}
+                      onClick={() => onNavigateToSession(item.chat_session_id, item.message_id, userLabel ?? undefined)}
                       className="w-full text-left px-5 py-4 hover:bg-gray-50 transition-colors group"
                     >
                       <div className="flex items-start justify-between gap-4">
@@ -244,12 +378,23 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
                               {item.user_question}
                             </p>
                           )}
-                          <p className="text-sm text-gray-800 line-clamp-2">
-                            <span className="font-medium text-gray-400 mr-1">A:</span>
-                            {item.ai_response}
-                          </p>
+                          <div className="text-sm text-gray-800 line-clamp-3 prose prose-sm max-w-none prose-p:my-0 prose-headings:my-0 prose-ul:my-0 prose-li:my-0">
+                            <span className="font-medium text-gray-400 mr-1 not-prose">A:</span>
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              rehypePlugins={[rehypeSanitize]}
+                            >
+                              {item.ai_response}
+                            </ReactMarkdown>
+                          </div>
                           {item.comment && (
                             <p className="text-xs text-gray-500 italic">"{item.comment}"</p>
+                          )}
+                          {userLabel && (
+                            <p className="text-xs text-gray-400 flex items-center gap-1">
+                              <User size={10} />
+                              {userLabel}
+                            </p>
                           )}
                         </div>
                         <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
@@ -265,17 +410,26 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
                 })}
               </div>
 
-              {!activeCategory && offset + LIMIT < total && (
-                <div className="px-5 py-4 border-t">
-                  <button
-                    onClick={() => fetchFeedback(offset + LIMIT, true)}
-                    disabled={loadingMore}
-                    className="w-full text-xs text-primary hover:underline disabled:opacity-40"
-                  >
-                    {loadingMore ? "Loading…" : `Load more (${feedback.length} / ${total})`}
-                  </button>
-                </div>
-              )}
+              {/* Pagination */}
+              <div className="flex items-center justify-between px-5 py-3 border-t bg-gray-50/50">
+                <button
+                  onClick={() => setPage(p => p - 1)}
+                  disabled={page === 0}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft size={14} /> Prev
+                </button>
+                <span className="text-xs text-gray-500">
+                  Page {page + 1} of {totalPages} &nbsp;·&nbsp; {total} total
+                </span>
+                <button
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={page >= totalPages - 1}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next <ChevronRight size={14} />
+                </button>
+              </div>
             </>
           )}
         </CardContent>

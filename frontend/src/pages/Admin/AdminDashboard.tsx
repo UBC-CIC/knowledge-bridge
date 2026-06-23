@@ -15,7 +15,7 @@ export default function AdminDashboard() {
   const [activeView, setActiveView] = useState<View>(
     (searchParams.get("view") as View) ?? "dashboard"
   );
-  const [chatHistorySession, setChatHistorySession] = useState<{ sessionId: string; messageId?: string } | null>(null);
+  const [chatHistorySession, setChatHistorySession] = useState<{ sessionId: string; messageId?: string; userLabel?: string } | null>(null);
 
   useEffect(() => {
     const view = searchParams.get("view") as View | null;
@@ -25,8 +25,8 @@ export default function AdminDashboard() {
     }
   }, [searchParams]);
 
-  const handleNavigateToSession = (sessionId: string, messageId?: string) => {
-    setChatHistorySession({ sessionId, messageId });
+  const handleNavigateToSession = (sessionId: string, messageId?: string, userLabel?: string) => {
+    setChatHistorySession({ sessionId, messageId, userLabel });
     setActiveView("chat-history");
   };
 
@@ -48,6 +48,7 @@ export default function AdminDashboard() {
             <ChatHistory
               initialSessionId={chatHistorySession?.sessionId}
               initialMessageId={chatHistorySession?.messageId}
+              initialUserLabel={chatHistorySession?.userLabel}
             />
           )}
           {activeView === "export-jobs" && <ExportJobs />}

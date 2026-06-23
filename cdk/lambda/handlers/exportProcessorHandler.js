@@ -137,6 +137,7 @@ exports.handler = async (event) => {
               JSON_AGG(
                 JSON_BUILD_OBJECT(
                   'is_positive', mr.is_positive,
+                  'category', mr.category,
                   'comment', mr.comment,
                   'rated_by', ru.email,
                   'created_at', mr.created_at
