@@ -250,7 +250,7 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold text-gray-900">Feedback</h2>
-          <p className="text-gray-500 mt-1">Negative feedback from users on AI responses.</p>
+          <p className="text-gray-500 mt-1">Feedback from users on AI responses.</p>
         </div>
 
         {/* Date filter */}
