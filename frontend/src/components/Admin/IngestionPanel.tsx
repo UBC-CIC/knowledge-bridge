@@ -172,6 +172,50 @@ function detectPreset(cron: string): PresetKey {
 
 const PAGE_SIZE = 5;
 
+// ─── Force-full confirmation dialog ───────────────────────────────────────────
+
+function ForceFullConfirmDialog({ open, onConfirm, onCancel }: {
+  open: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+        <div className="flex items-start gap-3">
+          <div className="p-2 rounded-lg bg-amber-100 shrink-0">
+            <RefreshCw className="h-5 w-5 text-amber-600" />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Are you sure you want to proceed?</h2>
+            <p className="mt-1.5 text-sm text-gray-600 leading-relaxed">
+              This action will <span className="font-medium text-gray-800">delete all existing vectors</span> from the database and re-ingest every document from scratch. Depending on the size of your data, this can take anywhere from a few minutes to several hours.
+            </p>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 transition-colors"
+          >
+            Yes, force full re-ingest
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Shared select style ───────────────────────────────────────────────────────
 
 const selectCls = "px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors";
@@ -201,6 +245,7 @@ function SchedulePanel() {
   const [tzSearch, setTzSearch] = useState("");
   const [tzOpen, setTzOpen] = useState(false);
   const tzRef = useRef<HTMLDivElement>(null);
+  const [forceFullConfirmOpen, setForceFullConfirmOpen] = useState(false);
 
   const getToken = () => AuthService.getIdToken();
 
@@ -531,7 +576,7 @@ function SchedulePanel() {
               <div
                 role="switch"
                 aria-checked={forceFull}
-                onClick={() => setForceFull(v => !v)}
+                onClick={() => { if (!forceFull) setForceFullConfirmOpen(true); else setForceFull(false); }}
                 className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${forceFull ? "bg-amber-500" : "bg-gray-200"}`}
               >
                 <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${forceFull ? "translate-x-5" : "translate-x-0"}`} />
@@ -541,6 +586,12 @@ function SchedulePanel() {
                 <p className="text-xs text-gray-400">Re-process all documents, ignore change detection</p>
               </div>
             </label>
+
+            <ForceFullConfirmDialog
+              open={forceFullConfirmOpen}
+              onConfirm={() => { setForceFull(true); setForceFullConfirmOpen(false); }}
+              onCancel={() => setForceFullConfirmOpen(false)}
+            />
           </div>
 
           {/* Feedback */}
@@ -601,6 +652,7 @@ export default function IngestionPanel() {
   const [forceFull, setForceFull] = useState(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
 
+  const [forceFullConfirmOpen, setForceFullConfirmOpen] = useState(false);
   const [viewingRunId, setViewingRunId] = useState<string | null>(null);
   const [logType, setLogType] = useState<"output" | "error">("output");
   const [logs, setLogs] = useState<LogLine[]>([]);
@@ -758,12 +810,18 @@ export default function IngestionPanel() {
             <input
               type="checkbox"
               checked={forceFull}
-              onChange={(e) => setForceFull(e.target.checked)}
+              onChange={(e) => { if (e.target.checked) setForceFullConfirmOpen(true); else setForceFull(false); }}
               disabled={triggering || isInFlight}
               className="rounded border-gray-300"
             />
             Force full re-ingest
           </label>
+
+          <ForceFullConfirmDialog
+            open={forceFullConfirmOpen}
+            onConfirm={() => { setForceFull(true); setForceFullConfirmOpen(false); }}
+            onCancel={() => { setForceFull(false); setForceFullConfirmOpen(false); }}
+          />
           {(activeRun?.status === "running" || activeRun?.status === "stopping") && (
             <Button
               variant="outline"
