@@ -371,7 +371,25 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
                   labelFormatter={formatDay}
                   contentStyle={{ fontSize: 12 }}
                 />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Legend
+                  wrapperStyle={{ fontSize: 12 }}
+                  content={() => (
+                    <div className="flex items-center justify-center gap-5 pt-2">
+                      <div className="flex items-center gap-1.5">
+                        <svg width="24" height="10">
+                          <line x1="0" y1="5" x2="24" y2="5" stroke="#ef4444" strokeWidth="2" strokeDasharray="4 2" />
+                        </svg>
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>Dislikes</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg width="24" height="10">
+                          <line x1="0" y1="5" x2="24" y2="5" stroke="#22c55e" strokeWidth="2" />
+                        </svg>
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>Likes</span>
+                      </div>
+                    </div>
+                  )}
+                />
                 <Line type="monotone" dataKey="dislikes" stroke="#ef4444" strokeWidth={2} strokeDasharray="4 2" dot={{ r: 4 }} name="Dislikes" />
                 <Line type="monotone" dataKey="likes" stroke="#22c55e" strokeWidth={2} dot={{ r: 4 }} name="Likes" />
               </LineChart>
