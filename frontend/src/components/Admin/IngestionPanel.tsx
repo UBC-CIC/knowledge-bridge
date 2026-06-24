@@ -428,6 +428,21 @@ function SchedulePanel() {
                 </button>
               ))}
             </div>
+            {preset === "Daily" && (
+              <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+                <span className="font-medium text-gray-600">Daily ingestion</span> is only recommended if your SharePoint data changes very frequently and you need it to be current within 24 hours. For most organizations, weekly is sufficient.
+              </p>
+            )}
+            {preset === "Weekly" && (
+              <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+                <span className="font-medium text-gray-600">Weekly ingestion</span> is a good default for most organizations — it keeps content reasonably fresh without putting unnecessary load on the database.
+              </p>
+            )}
+            {preset === "Monthly" && (
+              <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+                <span className="font-medium text-gray-600">Monthly ingestion</span> is best suited for stable or archival content that rarely changes. Avoid this if users rely on up-to-date information.
+              </p>
+            )}
           </div>
 
           {/* Constrained dropdowns for Daily / Weekly / Monthly */}
@@ -477,6 +492,9 @@ function SchedulePanel() {
 
               {/* Preview */}
               <p className="text-xs text-primary/80 font-medium">{describeCron(effectiveCron, timezone)}</p>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                <span className="font-medium text-gray-600">Tip:</span> Schedule ingestion during non-peak hours (e.g. late night or early morning) to avoid any impact on active users.
+              </p>
             </div>
           )}
 
