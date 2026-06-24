@@ -1,6 +1,6 @@
 const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
 const postgres = require("postgres");
-const { writeNotification, writeNotificationToAllAdmins } = require("./utils/notificationWriter");
+const { writeNotification } = require("./utils/notificationWriter");
 
 const secretsManager = new SecretsManagerClient();
 
@@ -28,14 +28,13 @@ exports.handler = async (event) => {
 
   const results = await Promise.allSettled(
     event.Records.map(async (record) => {
-      const { userId, type, title, message, metadata = {}, broadcast } = JSON.parse(record.Sns.Message);
+      const { userId, type, title, message, metadata = {} } = JSON.parse(record.Sns.Message);
 
-      if (broadcast) {
-        await writeNotificationToAllAdmins(sqlConnection, { type, title, message, metadata });
-      } else {
-        if (!userId) throw new Error("userId is required when broadcast is false");
-        await writeNotification(sqlConnection, { userId, type, title, message, metadata });
+      if (!userId) {
+        console.warn("[NotificationDispatcher] Skipping record — no userId");
+        return;
       }
+      await writeNotification(sqlConnection, { userId, type, title, message, metadata });
     })
   );
 

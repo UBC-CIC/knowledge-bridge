@@ -72,7 +72,8 @@ exports.handler = async (event) => {
   console.log(`[GlueStatusSync] Run ${glueRunId} → ${dbStatus}`);
 
   const isCompleted = dbStatus === "completed";
-  const triggeredByUserId = row.metadata?.triggered_by_user_id;
+  const meta = typeof row.metadata === "string" ? JSON.parse(row.metadata) : (row.metadata ?? {});
+  const triggeredByUserId = meta.triggered_by_user_id;
 
   try {
     const payload = {
@@ -82,7 +83,7 @@ exports.handler = async (event) => {
         ? "SharePoint ingestion finished successfully."
         : `Ingestion ended with status "${dbStatus}".`,
       metadata: { ingestion_run_id: row.id.toString() },
-      ...(triggeredByUserId ? { userId: triggeredByUserId } : { broadcast: true }),
+      ...(triggeredByUserId ? { userId: triggeredByUserId } : {}),
     };
 
     await sns.send(new PublishCommand({

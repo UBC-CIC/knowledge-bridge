@@ -101,7 +101,14 @@ exports.handler = async (event) => {
       console.log("Scheduled trigger skipped — a job is already in-flight");
       return;
     }
-    const metadataJson = { force_full: forceFull === "true", job_name: jobName, triggered_by: "scheduler" };
+    const scheduleRow = await sqlConnection`SELECT updated_by FROM ingestion_schedule LIMIT 1`;
+    const scheduledByUserId = scheduleRow[0]?.updated_by?.toString() ?? null;
+    const metadataJson = {
+      force_full: forceFull === "true",
+      job_name: jobName,
+      triggered_by: "scheduler",
+      ...(scheduledByUserId ? { triggered_by_user_id: scheduledByUserId } : {}),
+    };
     const inserted = await sqlConnection`
       INSERT INTO ingestion_runs (run_type, triggered_by, status, started_at, metadata)
       VALUES ('site', 'scheduler', 'running', now(), ${JSON.stringify(metadataJson)}::jsonb)

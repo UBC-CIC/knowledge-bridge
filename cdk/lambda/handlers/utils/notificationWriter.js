@@ -22,9 +22,8 @@ async function writeNotification(sql, { userId, type, title, message, metadata =
 
   if (!connections.length) return notification;
 
-  const apigw = new ApiGatewayManagementApiClient({
-    endpoint: process.env.WEBSOCKET_API_ENDPOINT,
-  });
+  const wsEndpoint = (process.env.WEBSOCKET_API_ENDPOINT || "").replace(/^wss:\/\//, "https://");
+  const apigw = new ApiGatewayManagementApiClient({ endpoint: wsEndpoint });
   const payload = Buffer.from(JSON.stringify({ type: "notification", notification }));
 
   await Promise.allSettled(
@@ -36,6 +35,8 @@ async function writeNotification(sql, { userId, type, title, message, metadata =
       } catch (err) {
         if (err.$metadata?.httpStatusCode === 410) {
           await sql`DELETE FROM ws_connections WHERE connection_id = ${conn.connection_id}`;
+        } else {
+          console.error(`[NotificationWriter] PostToConnection failed for ${conn.connection_id}:`, err.message);
         }
       }
     })
@@ -44,11 +45,4 @@ async function writeNotification(sql, { userId, type, title, message, metadata =
   return notification;
 }
 
-async function writeNotificationToAllAdmins(sql, { type, title, message, metadata = {} }) {
-  const admins = await sql`SELECT id::text FROM users WHERE role::user_role = 'admin'`;
-  await Promise.allSettled(
-    admins.map((a) => writeNotification(sql, { userId: a.id, type, title, message, metadata }))
-  );
-}
-
-module.exports = { writeNotification, writeNotificationToAllAdmins };
+module.exports = { writeNotification };
