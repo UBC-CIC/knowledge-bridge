@@ -16,7 +16,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ThumbsDown, ThumbsUp, MessageSquare, ExternalLink, Calendar, ChevronLeft, ChevronRight, User } from "lucide-react";
+import { ThumbsDown, ThumbsUp, MessageSquare, ExternalLink, Calendar, ChevronLeft, ChevronRight, User, RefreshCw } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +33,12 @@ const getCached = (key: string) => {
     if (Date.now() - parsed.timestamp > CACHE_TTL) { localStorage.removeItem(key); return null; }
     return parsed.data;
   } catch { return null; }
+};
+
+const clearFeedbackCache = () => {
+  Object.keys(localStorage).forEach(k => {
+    if (k.startsWith("admin_feedback_")) localStorage.removeItem(k);
+  });
 };
 
 const setCached = (key: string, data: any) => {
@@ -236,6 +242,13 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
     setDatePreset(preset);
   };
 
+  const handleRefresh = () => {
+    clearFeedbackCache();
+    setPage(0);
+    fetchSummary();
+    fetchFeedback(0);
+  };
+
   const handleCustomRangeSelect = (range: { from?: Date; to?: Date } | undefined) => {
     setCustomRange(range ?? {});
     if (range?.from && range?.to) {
@@ -253,8 +266,17 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
           <p className="text-gray-500 mt-1">Feedback from users on AI responses.</p>
         </div>
 
-        {/* Date filter */}
+        {/* Date filter + refresh */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={loading || summaryLoading}
+            className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm disabled:opacity-50"
+            title="Clear cache and refresh"
+          >
+            <RefreshCw size={12} className={(loading || summaryLoading) ? "animate-spin text-primary" : ""} />
+            Refresh
+          </button>
           {(["7d", "30d", "all"] as DatePreset[]).map(p => (
             <button
               key={p}
