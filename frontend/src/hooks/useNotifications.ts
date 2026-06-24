@@ -38,6 +38,16 @@ export function useNotifications(role?: string | null) {
       const ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
 
+      ws.onopen = () => {
+        // Ping every 8 minutes to prevent API Gateway's 10-minute idle timeout
+        const heartbeatInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ action: "ping" }));
+          }
+        }, 8 * 60 * 1000);
+        ws.addEventListener("close", () => clearInterval(heartbeatInterval));
+      };
+
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
@@ -46,13 +56,17 @@ export function useNotifications(role?: string | null) {
             setTotal((prev) => prev + 1);
             setIncomingToast(msg.notification);
             if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-            toastTimerRef.current = setTimeout(() => setIncomingToast(null), 5000);
+            toastTimerRef.current = setTimeout(() => setIncomingToast(null), 6000);
           }
         } catch { /* ignore malformed frames */ }
       };
 
       ws.onclose = () => {
-        if (isAdmin) reconnectRef.current = setTimeout(() => connectWebSocket(), 5000);
+        if (isAdmin) {
+          // Re-fetch so any pushes missed during the outage show up immediately
+          fetchNotifications();
+          reconnectRef.current = setTimeout(() => connectWebSocket(), 5000);
+        }
       };
 
       ws.onerror = () => ws.close();
@@ -72,9 +86,7 @@ export function useNotifications(role?: string | null) {
 
   const openPanel = useCallback(() => {
     setPanelOpen(true);
-    if (wsRef.current?.readyState !== WebSocket.OPEN) {
-      fetchNotifications();
-    }
+    fetchNotifications(); // always sync on open to catch any missed pushes
   }, [fetchNotifications]);
 
   const closePanel = useCallback(() => {

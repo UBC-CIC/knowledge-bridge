@@ -25,6 +25,8 @@ import * as eventTargets from "aws-cdk-lib/aws-events-targets";
 import * as sqs from "aws-cdk-lib/aws-sqs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as lambdaEventSources from "aws-cdk-lib/aws-lambda-event-sources";
+import * as sns from "aws-cdk-lib/aws-sns";
+import * as snsSubscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as crypto from 'crypto';
 
 function computeConfigHash(config: object): string {
@@ -1452,6 +1454,12 @@ export class ApiGatewayStack extends cdk.Stack {
     });
     db.secretPathTableCreator.grantRead(lambdaRole);
 
+    // SNS topic declared early so glueStatusSyncFn can reference it via Lazy.string
+    const notificationTopic = new sns.Topic(this, `${id}-NotificationTopic`, {
+      topicName: `${id}-admin-notifications`,
+      displayName: "Admin Notifications",
+    });
+
     if (glueJobName) {
       const glueStatusSyncFn = new lambda.Function(this, `${id}-glueStatusSync`, {
         runtime: lambda.Runtime.NODEJS_22_X,
@@ -1484,8 +1492,8 @@ export class ApiGatewayStack extends cdk.Stack {
       });
 
       glueStatusSyncFn.addEnvironment(
-        "WEBSOCKET_API_ENDPOINT",
-        cdk.Lazy.string({ produce: () => `${this.webSocketApi!.apiEndpoint}/${this.wsStage!.stageName}` })
+        "NOTIFICATION_TOPIC_ARN",
+        cdk.Lazy.string({ produce: () => notificationTopic.topicArn })
       );
     }
 
@@ -1767,7 +1775,53 @@ export class ApiGatewayStack extends cdk.Stack {
     // Add environment variable to text generation function (include stage name)
     const wsApiEndpoint = `${this.webSocketApi.apiEndpoint}/${this.wsStage.stageName}`;
     lambdaTextGen.addEnvironment("WEBSOCKET_API_ENDPOINT", wsApiEndpoint);
-    exportProcessorLambda.addEnvironment("WEBSOCKET_API_ENDPOINT", wsApiEndpoint);
+
+    // ─── SNS Notification Dispatcher ─────────────────────────────────────────
+
+    const notificationDispatcherRole = new iam.Role(this, `${id}-NotificationDispatcherRole`, {
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
+    notificationDispatcherRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      resources: ["arn:aws:logs:*:*:*"],
+    }));
+    notificationDispatcherRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["ec2:CreateNetworkInterface", "ec2:DescribeNetworkInterfaces", "ec2:DeleteNetworkInterface",
+                "ec2:AssignPrivateIpAddresses", "ec2:UnassignPrivateIpAddresses"],
+      resources: ["*"],
+    }));
+    notificationDispatcherRole.addToPolicy(wsPolicy);
+    db.secretPathUser.grantRead(notificationDispatcherRole);
+
+    const notificationDispatcherLambda = new lambda.Function(this, `${id}-NotificationDispatcher`, {
+      functionName: `${id}-notificationDispatcher`,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      code: lambda.Code.fromAsset("lambda"),
+      handler: "handlers/notificationDispatcher.handler",
+      timeout: Duration.seconds(30),
+      memorySize: 256,
+      vpc: vpcStack.vpc,
+      layers: [postgres],
+      role: notificationDispatcherRole,
+      environment: {
+        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+        RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
+        WEBSOCKET_API_ENDPOINT: wsApiEndpoint,
+      },
+    });
+
+    notificationTopic.addSubscription(
+      new snsSubscriptions.LambdaSubscription(notificationDispatcherLambda)
+    );
+
+    // Wire topic ARN into glueStatusSync and exportProcessor
+    const notificationTopicArn = notificationTopic.topicArn;
+    notificationTopic.grantPublish(lambdaRole);          // glueStatusSync uses lambdaRole
+    notificationTopic.grantPublish(exportProcessorRole);
+
+    exportProcessorLambda.addEnvironment("NOTIFICATION_TOPIC_ARN", notificationTopicArn);
 
     // Add WebSocket URL as stack output
     new cdk.CfnOutput(this, "WebSocketUrl", {

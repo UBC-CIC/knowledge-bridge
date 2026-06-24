@@ -28,6 +28,10 @@ exports.handler = async (event) => {
     const body = JSON.parse(event.body);
     const { action, query, chat_session_id, user_id, is_intro_message } = body;
 
+    if (action === "ping") {
+      return { statusCode: 200, body: JSON.stringify({ type: "pong" }) };
+    }
+
     if (action === "generate_text") {
       // Validate inputs before invoking text generation Lambda
       const sanitizedQuery = sanitizeString(query, 10000);
