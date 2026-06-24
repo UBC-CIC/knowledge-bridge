@@ -5,9 +5,11 @@ import {
   BarChart3,
   Bot,
   Download,
-  MessageSquare,
+  MessagesSquare,
+  ThumbsUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AuthService } from "@/functions/authService";
 import UserProfilePopover from "@/components/UserProfilePopover";
 
@@ -51,72 +53,68 @@ export default function AdminSidebar({
         <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
           Menu
         </div>
-        <Button
-          variant="ghost"
-          className={`w-full justify-start ${activeView === "dashboard"
-            ? "bg-primary/10 text-primary hover:bg-primary/20 font-medium"
-            : "text-gray-600 hover:text-gray-900"
-            }`}
-          onClick={() => onViewChange("dashboard")}
-        >
-          <LayoutDashboard className="mr-2 h-4 w-4" />
-          Dashboard & Management
-        </Button>
-        <Button
-          variant="ghost"
-          className={`w-full justify-start ${activeView === "analytics"
-            ? "bg-primary/10 text-primary hover:bg-primary/20 font-medium"
-            : "text-gray-600 hover:text-gray-900"
-            }`}
-          onClick={() => onViewChange("analytics")}
-        >
-          <BarChart3 className="mr-2 h-4 w-4" />
-          Analytics
-        </Button>
-        <Button
-          variant="ghost"
-          className={`w-full justify-start ${activeView === "system-settings"
-            ? "bg-primary/10 text-primary hover:bg-primary/20 font-medium"
-            : "text-gray-600 hover:text-gray-900"
-            }`}
-          onClick={() => onViewChange("system-settings")}
-        >
-          <Bot className="mr-2 h-4 w-4" />
-          System Settings
-        </Button>
-        <Button
-          variant="ghost"
-          className={`w-full justify-start ${activeView === "chat-history"
-            ? "bg-primary/10 text-primary hover:bg-primary/20 font-medium"
-            : "text-gray-600 hover:text-gray-900"
-            }`}
-          onClick={() => onViewChange("chat-history")}
-        >
-          <Bot className="mr-2 h-4 w-4" />
-          Chat History
-        </Button>
-        <Button
-          variant="ghost"
-          className={`w-full justify-start ${activeView === "export-jobs"
-            ? "bg-primary/10 text-primary hover:bg-primary/20 font-medium"
-            : "text-gray-600 hover:text-gray-900"
-            }`}
-          onClick={() => onViewChange("export-jobs")}
-        >
-          <Download className="mr-2 h-4 w-4" />
-          Export Jobs
-        </Button>
-        <Button
-          variant="ghost"
-          className={`w-full justify-start ${activeView === "feedback"
-            ? "bg-primary/10 text-primary hover:bg-primary/20 font-medium"
-            : "text-gray-600 hover:text-gray-900"
-            }`}
-          onClick={() => onViewChange("feedback")}
-        >
-          <MessageSquare className="mr-2 h-4 w-4" />
-          Feedback
-        </Button>
+        <TooltipProvider delayDuration={400}>
+          {(
+            [
+              {
+                view: "dashboard",
+                label: "Dashboard & Management",
+                icon: <LayoutDashboard className="mr-2 h-4 w-4" />,
+                description: "Trigger ingestion, manage schedules, and monitor run history.",
+              },
+              {
+                view: "analytics",
+                label: "Analytics",
+                icon: <BarChart3 className="mr-2 h-4 w-4" />,
+                description: "Usage trends, session counts, and activity breakdowns.",
+              },
+              {
+                view: "system-settings",
+                label: "System Settings",
+                icon: <Bot className="mr-2 h-4 w-4" />,
+                description: "Configure the AI assistant's behaviour and system prompt.",
+              },
+              {
+                view: "chat-history",
+                label: "Chat History",
+                icon: <MessagesSquare className="mr-2 h-4 w-4" />,
+                description: "Browse and search all user conversations by group.",
+              },
+              {
+                view: "export-jobs",
+                label: "Export Jobs",
+                icon: <Download className="mr-2 h-4 w-4" />,
+                description: "View and download completed chat export jobs.",
+              },
+              {
+                view: "feedback",
+                label: "Feedback",
+                icon: <ThumbsUp className="mr-2 h-4 w-4" />,
+                description: "Review user ratings and comments on AI responses.",
+              },
+            ] as const
+          ).map(({ view, label, icon, description }) => (
+            <Tooltip key={view}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className={`w-full justify-start ${
+                    activeView === view
+                      ? "bg-primary/10 text-primary hover:bg-primary/20 font-medium"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                  onClick={() => onViewChange(view)}
+                >
+                  {icon}
+                  {label}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-[200px] text-xs">
+                {description}
+              </TooltipContent>
+            </Tooltip>
+          ))}
+        </TooltipProvider>
       </div>
 
       <UserProfilePopover isLoggingOut={isLoggingOut} onLogout={handleLogout} />
