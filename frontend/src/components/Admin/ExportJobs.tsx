@@ -32,6 +32,41 @@ const EXPORT_TYPE_STYLES: Record<ExportType, string> = {
     analytics: "bg-amber-50 text-amber-700 border-amber-200",
 };
 
+const VISIBLE_GROUPS = 2;
+
+function ScopeCell({ label, type }: { label: string; type: ExportType }) {
+    if (type !== "analytics") {
+        return <span className="font-medium text-gray-800 text-sm">{label}</span>;
+    }
+    // Format: "Group A, Group B · Last 30d"
+    const [groupsPart, timePart] = label.split(" · ");
+    const groupNames = groupsPart ? groupsPart.split(", ").filter(Boolean) : [];
+    const visible = groupNames.slice(0, VISIBLE_GROUPS);
+    const overflow = groupNames.slice(VISIBLE_GROUPS);
+    return (
+        <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-1">
+                {visible.map(name => (
+                    <span key={name} className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-xs font-medium">
+                        {name}
+                    </span>
+                ))}
+                {overflow.length > 0 && (
+                    <span
+                        className="inline-flex items-center px-2 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 text-xs font-medium cursor-default"
+                        title={overflow.join(", ")}
+                    >
+                        +{overflow.length} more
+                    </span>
+                )}
+            </div>
+            {timePart && (
+                <span className="text-xs text-gray-400">{timePart}</span>
+            )}
+        </div>
+    );
+}
+
 const LIMIT = 10;
 
 export default function ExportJobs() {
@@ -163,9 +198,7 @@ export default function ExportJobs() {
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <span className="font-medium text-gray-800 text-sm">
-                                                        {run.scope_label}
-                                                    </span>
+                                                    <ScopeCell label={run.scope_label} type={exportType} />
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <span className={cn(
