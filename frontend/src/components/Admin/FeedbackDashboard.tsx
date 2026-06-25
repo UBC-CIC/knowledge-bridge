@@ -354,6 +354,7 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
           </CardContent>
         </Card>
 
+
         {/* Category breakdown */}
         <Card className="border-gray-200 shadow-sm">
           <CardContent className="p-5 flex flex-col justify-center h-full min-h-[140px]">
