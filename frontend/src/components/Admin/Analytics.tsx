@@ -18,7 +18,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { AuthService } from "@/functions/authService";
-import { Download, Layers } from "lucide-react";
+import { Check, ChevronDown, Download, Layers, X } from "lucide-react";
 
 // Wong palette + extensions for more groups
 const GROUP_COLORS = [
@@ -30,6 +30,118 @@ type TimeSeriesPoint = { date: string; users: number; chat_sessions: number; que
 type Group = { id: string; display_name: string };
 type GroupSeries = { group: Group; series: TimeSeriesPoint[] };
 
+// ---------------------------------------------------------------------------
+// Searchable multi-select dropdown
+// ---------------------------------------------------------------------------
+function GroupMultiSelect({
+  groups,
+  selected,
+  onChange,
+}: {
+  groups: Group[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = groups.filter(g =>
+    g.display_name.toLowerCase().includes(search.toLowerCase())
+  );
+  const allSelected = groups.every(g => selected.has(g.id));
+
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    onChange(next);
+  };
+
+  const toggleAll = () => {
+    onChange(allSelected ? new Set() : new Set(groups.map(g => g.id)));
+  };
+
+  const selectedCount = selected.size;
+  const label = selectedCount === 0
+    ? "No groups"
+    : selectedCount === groups.length
+    ? "All groups"
+    : `${selectedCount} group${selectedCount > 1 ? "s" : ""}`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-2 h-9 px-3 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 shadow-sm hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary/30 min-w-[140px]"
+      >
+        <span className="flex-1 text-left truncate">{label}</span>
+        <ChevronDown size={14} className={`flex-shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-10 z-50 w-64 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden">
+          {/* Search */}
+          <div className="p-2 border-b border-gray-100">
+            <input
+              autoFocus
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search groups…"
+              className="w-full h-8 px-3 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+
+          {/* Select all / Clear */}
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-100">
+            <button onClick={toggleAll} className="text-xs text-primary font-medium hover:underline">
+              {allSelected ? "Deselect all" : "Select all"}
+            </button>
+            {selectedCount > 0 && selectedCount < groups.length && (
+              <button onClick={() => onChange(new Set(groups.map(g => g.id)))} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
+                <X size={11} /> Reset
+              </button>
+            )}
+          </div>
+
+          {/* Group list */}
+          <div className="max-h-52 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-gray-400">No groups match</p>
+            ) : (
+              filtered.map(g => (
+                <button
+                  key={g.id}
+                  onClick={() => toggle(g.id)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left hover:bg-gray-50 transition-colors"
+                >
+                  <div className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                    selected.has(g.id) ? "bg-primary border-primary" : "border-gray-300"
+                  }`}>
+                    {selected.has(g.id) && <Check size={10} className="text-white" strokeWidth={3} />}
+                  </div>
+                  <span className="truncate text-gray-700">{g.display_name}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Chart helpers
+// ---------------------------------------------------------------------------
 type ChartCardProps = { title: string; subtitle: string; children: React.ReactNode };
 
 function ChartCard({ title, subtitle, children }: ChartCardProps) {
@@ -60,6 +172,9 @@ function CustomTooltip({ active, payload, label }: any) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 export default function Analytics() {
   const [timeRange, setTimeRange] = useState("90d");
   const [isAllTime, setIsAllTime] = useState(false);
@@ -68,10 +183,9 @@ export default function Analytics() {
   const [groupId, setGroupId] = useState<string>("all");
   const [groups, setGroups] = useState<Group[]>([]);
   const [overlayMode, setOverlayMode] = useState(false);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
 
-  // Single-group mode data
   const [timeSeries, setTimeSeries] = useState<TimeSeriesPoint[]>([]);
-  // Overlay mode data — one entry per group
   const [groupSeries, setGroupSeries] = useState<GroupSeries[]>([]);
 
   const [loading, setLoading] = useState(true);
@@ -79,12 +193,11 @@ export default function Analytics() {
   const [exporting, setExporting] = useState(false);
   const [exportToast, setExportToast] = useState<{ type: "success" | "error"; msg: string } | null>(null);
   const exportToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const groupsFetchedRef = useRef(false);
 
   const effectiveTimeRange = isAllTime ? "all" : timeRange;
 
-  // Fetch groups once on mount
+  // Fetch groups once on mount — default all selected
   useEffect(() => {
     if (groupsFetchedRef.current) return;
     groupsFetchedRef.current = true;
@@ -97,21 +210,22 @@ export default function Analytics() {
         );
         if (res.ok) {
           const data = await res.json();
-          setGroups(data.groups ?? []);
+          const loaded: Group[] = data.groups ?? [];
+          setGroups(loaded);
+          setSelectedGroupIds(new Set(loaded.map(g => g.id)));
         }
       } catch { /* non-fatal */ }
     };
     load();
   }, []);
 
-  // Fetch analytics whenever filters change
   useEffect(() => {
-    if (overlayMode && groupId === "all") {
+    if (overlayMode) {
       fetchOverlay();
     } else {
       fetchSingle();
     }
-  }, [effectiveTimeRange, groupId, overlayMode]);
+  }, [effectiveTimeRange, groupId, overlayMode, selectedGroupIds]);
 
   const getHeaders = async () => ({
     Authorization: await AuthService.getIdToken(),
@@ -141,19 +255,20 @@ export default function Analytics() {
   };
 
   const fetchOverlay = async () => {
-    if (!groups.length) { setLoading(false); return; }
+    const activeGroups = groups.filter(g => selectedGroupIds.has(g.id));
+    if (!activeGroups.length) { setGroupSeries([]); setLoading(false); return; }
     try {
       setLoading(true);
       setError(null);
       const headers = await getHeaders();
       const results = await Promise.all(
-        groups.map(async (g) => {
+        activeGroups.map(async (g) => {
           const params = new URLSearchParams({ timeRange: effectiveTimeRange, groupId: g.id });
           const res = await fetch(
             `${import.meta.env.VITE_API_ENDPOINT}/admin/analytics?${params}`,
             { headers }
           );
-          if (!res.ok) return { group: g, series: [] };
+          if (!res.ok) return { group: g, series: [] as TimeSeriesPoint[] };
           const data = await res.json();
           return { group: g, series: data.timeSeries ?? [] };
         })
@@ -225,14 +340,8 @@ export default function Analytics() {
       />
     ));
 
-  const commonChartProps = {
-    margin: { top: 10, right: 10, left: -20, bottom: 0 },
-  };
-  const commonAxisProps = {
-    axisLine: false,
-    tickLine: false,
-    tick: { fontSize: 12, fill: "#6b7280" },
-  };
+  const commonChartProps = { margin: { top: 10, right: 10, left: -20, bottom: 0 } };
+  const commonAxisProps = { axisLine: false, tickLine: false, tick: { fontSize: 12, fill: "#6b7280" } };
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto animate-in fade-in duration-500">
@@ -243,41 +352,46 @@ export default function Analytics() {
           <p className="text-gray-500 mt-1">Deep dive into user engagement and content usage.</p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Group dropdown */}
-          <select
-            value={groupId}
-            onChange={(e) => {
-              setGroupId(e.target.value);
-              if (e.target.value !== "all") setOverlayMode(false);
-            }}
-            className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-          >
-            <option value="all">All Groups</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>{g.display_name}</option>
-            ))}
-          </select>
-
-          {/* Overlay toggle — only when All Groups selected */}
-          {groupId === "all" && (
-            <button
-              onClick={() => setOverlayMode((v) => !v)}
-              title="Compare groups side by side"
-              className={`flex items-center gap-1.5 h-9 px-3 rounded-lg border text-sm font-medium transition-colors shadow-sm ${
-                overlayMode
-                  ? "bg-primary text-white border-primary"
-                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
-              }`}
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Single-group dropdown — hidden in overlay mode */}
+          {!overlayMode && (
+            <select
+              value={groupId}
+              onChange={(e) => setGroupId(e.target.value)}
+              className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
-              <Layers size={14} />
-              Compare groups
-            </button>
+              <option value="all">All Groups</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>{g.display_name}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Compare groups toggle */}
+          <button
+            onClick={() => setOverlayMode((v) => !v)}
+            className={`flex items-center gap-1.5 h-9 px-3 rounded-lg border text-sm font-medium transition-colors shadow-sm ${
+              overlayMode
+                ? "bg-primary text-white border-primary"
+                : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+            }`}
+          >
+            <Layers size={14} />
+            Compare groups
+          </button>
+
+          {/* Multi-select — only in overlay mode */}
+          {overlayMode && groups.length > 0 && (
+            <GroupMultiSelect
+              groups={groups}
+              selected={selectedGroupIds}
+              onChange={setSelectedGroupIds}
+            />
           )}
 
           {/* Time range */}
-          {!isAllTime ? (
-            <div className="flex items-center bg-white rounded-lg border border-gray-200 p-1 px-3 shadow-sm gap-2">
+          {!isAllTime && (
+            <div className="flex items-center bg-white rounded-lg border border-gray-200 px-3 shadow-sm gap-2 h-9">
               <span className="text-sm font-medium text-gray-700 whitespace-nowrap">Last</span>
               <Input
                 type="number"
@@ -296,7 +410,7 @@ export default function Analytics() {
               />
               <span className="text-sm font-medium text-gray-700 whitespace-nowrap">Days</span>
             </div>
-          ) : null}
+          )}
           <button
             onClick={() => setIsAllTime((v) => !v)}
             className={`h-9 px-3 rounded-lg border text-sm font-medium transition-colors shadow-sm ${
@@ -331,8 +445,7 @@ export default function Analytics() {
         <div className="flex items-center justify-center py-20">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" />
         </div>
-      ) : overlayMode && groupId === "all" ? (
-        // Overlay mode — one line per group on each chart
+      ) : overlayMode ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <ChartCard title="Users" subtitle="Active users by group over time">
             <ResponsiveContainer width="100%" height="100%">
@@ -374,7 +487,6 @@ export default function Analytics() {
           </ChartCard>
         </div>
       ) : (
-        // Single-group (or all) mode
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <ChartCard
             title="Total Users"
