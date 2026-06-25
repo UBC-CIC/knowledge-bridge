@@ -1779,7 +1779,7 @@ exports.handler = async (event) => {
         }
 
         const exportMetadata = scope === 'analytics'
-          ? JSON.stringify({ groupId: body?.groupId ?? null, timeRange: body?.timeRange ?? null })
+          ? { groupId: body?.groupId ?? null, timeRange: body?.timeRange ?? null }
           : null;
 
         const exportTypeValue = scope === 'analytics' ? 'analytics' : 'chat';
@@ -1840,7 +1840,7 @@ exports.handler = async (event) => {
               WHEN er.scope::text = 'analytics' AND jsonb_typeof(er.metadata->'groupId') = 'array' THEN (
                 SELECT STRING_AGG(eg2.display_name, ', ' ORDER BY eg2.display_name)
                 FROM jsonb_array_elements_text(er.metadata->'groupId') AS gid
-                JOIN entra_groups eg2 ON eg2.id = gid
+                JOIN entra_groups eg2 ON eg2.id::text = gid
               )
               WHEN er.scope::text = 'analytics' THEN eg_meta.display_name
               ELSE NULL
@@ -1848,7 +1848,7 @@ exports.handler = async (event) => {
           FROM export_runs er
           LEFT JOIN entra_groups eg      ON eg.id = er.scope_id::text AND er.scope::text = 'group'
           LEFT JOIN users u2             ON u2.id = er.scope_id AND er.scope::text = 'user'
-          LEFT JOIN entra_groups eg_meta ON eg_meta.id = (er.metadata->>'groupId') AND er.scope::text = 'analytics' AND jsonb_typeof(er.metadata->'groupId') = 'string'
+          LEFT JOIN entra_groups eg_meta ON eg_meta.id::text = (er.metadata->>'groupId') AND er.scope::text = 'analytics' AND jsonb_typeof(er.metadata->'groupId') = 'string'
           WHERE er.requested_by = ${adminUserId}
           ${exportTypeFilter ? sqlConnection`AND er.export_type = ${exportTypeFilter}::export_type` : sqlConnection``}
           ORDER BY er.requested_at DESC
