@@ -125,6 +125,46 @@ const formatPresetLabel = (preset: DatePreset, customRange: { from?: Date; to?: 
   return "Custom range";
 };
 
+function CategoryPieChart({ getCategoryCount }: { getCategoryCount: (cat: Category) => number }) {
+  const dislikeTotal = CATEGORIES.reduce((s, c) => s + getCategoryCount(c), 0);
+  const pieData = CATEGORIES.map(cat => ({ name: cat, value: getCategoryCount(cat) }));
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-shrink-0">
+        <ResponsiveContainer width={110} height={110}>
+          <PieChart>
+            <Pie data={pieData} cx="50%" cy="50%" innerRadius={28} outerRadius={50} paddingAngle={2} dataKey="value">
+              {pieData.map((entry) => (
+                <Cell key={entry.name} fill={CATEGORY_BAR_COLORS[entry.name as Category]} />
+              ))}
+            </Pie>
+            <Tooltip
+              formatter={(value: number, name: string) => {
+                const pct = dislikeTotal > 0 ? Math.round((value / dislikeTotal) * 100) : 0;
+                return [`${value} (${pct}%)`, name];
+              }}
+              contentStyle={{ fontSize: 12 }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex-1 space-y-1.5">
+        {CATEGORIES.map(cat => {
+          const count = getCategoryCount(cat);
+          const pct = dislikeTotal > 0 ? Math.round((count / dislikeTotal) * 100) : 0;
+          return (
+            <div key={cat} className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: CATEGORY_BAR_COLORS[cat] }} />
+              <span className="text-xs text-gray-600 flex-1 truncate">{cat}</span>
+              <span className="text-xs font-semibold text-gray-700">{pct}%</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashboardProps) {
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [categoryCounts, setCategoryCounts] = useState<CategoryCount[]>([]);
@@ -366,53 +406,9 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
               <div className="flex items-center justify-center h-16">
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary" />
               </div>
-            ) : (() => {
-              const dislikeTotal = CATEGORIES.reduce((s, c) => s + getCategoryCount(c), 0);
-              const pieData = CATEGORIES.map(cat => ({ name: cat, value: getCategoryCount(cat) }));
-              return (
-                <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0">
-                    <ResponsiveContainer width={110} height={110}>
-                      <PieChart>
-                        <Pie
-                          data={pieData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={28}
-                          outerRadius={50}
-                          paddingAngle={2}
-                          dataKey="value"
-                        >
-                          {pieData.map((entry) => (
-                            <Cell key={entry.name} fill={CATEGORY_BAR_COLORS[entry.name as Category]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(value: number, name: string) => {
-                            const pct = dislikeTotal > 0 ? Math.round((value / dislikeTotal) * 100) : 0;
-                            return [`${value} (${pct}%)`, name];
-                          }}
-                          contentStyle={{ fontSize: 12 }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="flex-1 space-y-1.5">
-                    {CATEGORIES.map(cat => {
-                      const count = getCategoryCount(cat);
-                      const pct = dislikeTotal > 0 ? Math.round((count / dislikeTotal) * 100) : 0;
-                      return (
-                        <div key={cat} className="flex items-center gap-1.5">
-                          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: CATEGORY_BAR_COLORS[cat] }} />
-                          <span className="text-xs text-gray-600 flex-1 truncate">{cat}</span>
-                          <span className="text-xs font-semibold text-gray-700">{pct}%</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            }()}
+            ) : (
+              <CategoryPieChart getCategoryCount={getCategoryCount} />
+            )}
           </CardContent>
         </Card>
       </div>
