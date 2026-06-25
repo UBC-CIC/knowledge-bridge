@@ -13,6 +13,9 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -330,27 +333,27 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Total Likes */}
         <Card className="border-gray-200 shadow-sm">
-          <CardContent className="p-6 flex items-center justify-center h-full min-h-[140px] gap-5">
-            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-green-50 flex-shrink-0">
-              <ThumbsUp className="h-7 w-7 text-green-600" />
-            </div>
-            <div>
+          <CardContent className="p-6 flex flex-col items-center justify-center h-full min-h-[140px] gap-2">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center justify-center w-14 h-14 rounded-full bg-green-50 flex-shrink-0">
+                <ThumbsUp className="h-7 w-7 text-green-600" />
+              </div>
               <div className="text-5xl font-bold text-green-600 leading-none">{totalLikes}</div>
-              <div className="mt-2 text-sm font-semibold text-green-700 tracking-wide">Total Likes</div>
             </div>
+            <div className="text-sm font-semibold text-green-700 tracking-wide">Total Likes</div>
           </CardContent>
         </Card>
 
         {/* Total Dislikes */}
         <Card className="border-gray-200 shadow-sm">
-          <CardContent className="p-6 flex items-center justify-center h-full min-h-[140px] gap-5">
-            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-red-50 flex-shrink-0">
-              <ThumbsDown className="h-7 w-7 text-red-500" />
-            </div>
-            <div>
+          <CardContent className="p-6 flex flex-col items-center justify-center h-full min-h-[140px] gap-2">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center justify-center w-14 h-14 rounded-full bg-red-50 flex-shrink-0">
+                <ThumbsDown className="h-7 w-7 text-red-500" />
+              </div>
               <div className="text-5xl font-bold text-red-500 leading-none">{totalDislikes}</div>
-              <div className="mt-2 text-sm font-semibold text-red-600 tracking-wide">Total Dislikes</div>
             </div>
+            <div className="text-sm font-semibold text-red-600 tracking-wide">Total Dislikes</div>
           </CardContent>
         </Card>
 
@@ -358,34 +361,58 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
         {/* Category breakdown */}
         <Card className="border-gray-200 shadow-sm">
           <CardContent className="p-5 flex flex-col justify-center h-full min-h-[140px]">
-            <div className="text-base font-semibold text-gray-700 mb-4">Dislike Reasons</div>
+            <div className="text-base font-semibold text-gray-700 mb-3">Dislike Reasons</div>
             {summaryLoading ? (
               <div className="flex items-center justify-center h-16">
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary" />
               </div>
-            ) : (
-              <div className="space-y-3">
-                {CATEGORIES.map(cat => {
-                  const count = getCategoryCount(cat);
-                  const maxCount = Math.max(...CATEGORIES.map(c => getCategoryCount(c)), 1);
-                  const pct = Math.round((count / maxCount) * 100);
-                  return (
-                    <div key={cat}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm text-gray-600">{cat}</span>
-                        <span className="text-sm font-bold text-gray-800">{count}</span>
-                      </div>
-                      <div className="w-full h-2 rounded-full bg-gray-100">
-                        <div
-                          className="h-2 rounded-full transition-all duration-500"
-                          style={{ width: `${pct}%`, backgroundColor: CATEGORY_BAR_COLORS[cat] }}
+            ) : (() => {
+              const dislikeTotal = CATEGORIES.reduce((s, c) => s + getCategoryCount(c), 0);
+              const pieData = CATEGORIES.map(cat => ({ name: cat, value: getCategoryCount(cat) }));
+              return (
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0">
+                    <ResponsiveContainer width={110} height={110}>
+                      <PieChart>
+                        <Pie
+                          data={pieData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={28}
+                          outerRadius={50}
+                          paddingAngle={2}
+                          dataKey="value"
+                        >
+                          {pieData.map((entry) => (
+                            <Cell key={entry.name} fill={CATEGORY_BAR_COLORS[entry.name as Category]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value: number, name: string) => {
+                            const pct = dislikeTotal > 0 ? Math.round((value / dislikeTotal) * 100) : 0;
+                            return [`${value} (${pct}%)`, name];
+                          }}
+                          contentStyle={{ fontSize: 12 }}
                         />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex-1 space-y-1.5">
+                    {CATEGORIES.map(cat => {
+                      const count = getCategoryCount(cat);
+                      const pct = dislikeTotal > 0 ? Math.round((count / dislikeTotal) * 100) : 0;
+                      return (
+                        <div key={cat} className="flex items-center gap-1.5">
+                          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: CATEGORY_BAR_COLORS[cat] }} />
+                          <span className="text-xs text-gray-600 flex-1 truncate">{cat}</span>
+                          <span className="text-xs font-semibold text-gray-700">{pct}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }()}
           </CardContent>
         </Card>
       </div>
