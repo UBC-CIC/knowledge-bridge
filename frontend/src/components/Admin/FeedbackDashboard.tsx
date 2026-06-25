@@ -330,11 +330,11 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Total Likes */}
         <Card className="border-gray-200 shadow-sm">
-          <CardContent className="p-6 flex flex-col items-center justify-center h-full min-h-[140px] gap-3">
-            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-green-50">
+          <CardContent className="p-6 flex items-center justify-center h-full min-h-[140px] gap-5">
+            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-green-50 flex-shrink-0">
               <ThumbsUp className="h-7 w-7 text-green-600" />
             </div>
-            <div className="text-center">
+            <div>
               <div className="text-5xl font-bold text-green-600 leading-none">{totalLikes}</div>
               <div className="mt-2 text-sm font-semibold text-green-700 tracking-wide">Total Likes</div>
             </div>
@@ -343,11 +343,11 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
 
         {/* Total Dislikes */}
         <Card className="border-gray-200 shadow-sm">
-          <CardContent className="p-6 flex flex-col items-center justify-center h-full min-h-[140px] gap-3">
-            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-red-50">
+          <CardContent className="p-6 flex items-center justify-center h-full min-h-[140px] gap-5">
+            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-red-50 flex-shrink-0">
               <ThumbsDown className="h-7 w-7 text-red-500" />
             </div>
-            <div className="text-center">
+            <div>
               <div className="text-5xl font-bold text-red-500 leading-none">{totalDislikes}</div>
               <div className="mt-2 text-sm font-semibold text-red-600 tracking-wide">Total Dislikes</div>
             </div>
