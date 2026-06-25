@@ -1,9 +1,8 @@
 const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
-const { SNSClient, PublishCommand } = require("@aws-sdk/client-sns");
 const postgres = require("postgres");
+const { publishNotification } = require("./utils/publishNotification");
 
 const secretsManager = new SecretsManagerClient();
-const sns = new SNSClient();
 
 const GLUE_TO_DB_STATUS = {
   SUCCEEDED: "completed",
@@ -86,10 +85,7 @@ exports.handler = async (event) => {
       ...(triggeredByUserId ? { userId: triggeredByUserId } : {}),
     };
 
-    await sns.send(new PublishCommand({
-      TopicArn: process.env.NOTIFICATION_TOPIC_ARN,
-      Message: JSON.stringify(payload),
-    }));
+    await publishNotification(payload);
 
     console.log(`[GlueStatusSync] Published notification for run ${row.id}`);
   } catch (notifyErr) {

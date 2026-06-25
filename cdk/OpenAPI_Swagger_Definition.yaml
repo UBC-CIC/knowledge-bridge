@@ -1464,10 +1464,16 @@ paths:
         - name: timeRange
           in: query
           required: false
-          description: Time range for analytics data (e.g., 7d, 30d, 90d, 6m, 1y)
+          description: Time range for analytics data (e.g., 7d, 30d, 90d, 6m, 1y, all)
           schema:
             type: string
             default: "90d"
+        - name: groupId
+          in: query
+          required: false
+          description: Entra group ID to filter analytics by. Omit or pass "all" for all groups.
+          schema:
+            type: string
       responses:
         "200":
           description: Analytics time series and totals

@@ -1525,10 +1525,10 @@ export class ApiGatewayStack extends cdk.Stack {
     // --- Export Jobs ---
 
     const exportBucket = new s3.Bucket(this, `${id}-ExportBucket`, {
-      bucketName: `${id.toLowerCase()}-chat-exports`,
+      bucketName: `${id.toLowerCase()}-exports`,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
-      lifecycleRules: [{ expiration: Duration.days(30), id: "expire-exports-30d" }],
+      lifecycleRules: [{ expiration: Duration.days(7), id: "expire-exports-7d" }],
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
     });

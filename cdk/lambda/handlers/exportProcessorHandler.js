@@ -5,9 +5,7 @@ const {
 } = require("@aws-sdk/client-secrets-manager");
 const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
-const { SNSClient, PublishCommand } = require("@aws-sdk/client-sns");
-
-const sns = new SNSClient({});
+const { publishNotification } = require("./utils/publishNotification");
 
 const s3Client = new S3Client({});
 const secretsManager = new SecretsManagerClient({});
@@ -44,7 +42,7 @@ exports.handler = async (event) => {
       console.log(`Processing exportRunId=${exportRunId}`);
 
       const [run] = await sqlConnection`
-        SELECT id, scope, scope_id, requested_by
+        SELECT id, scope, scope_id, metadata, requested_by
         FROM export_runs
         WHERE id = ${exportRunId}
         LIMIT 1
@@ -115,6 +113,132 @@ exports.handler = async (event) => {
         `;
       }
 
+      // -----------------------------------------------------------------------
+      // Analytics CSV export
+      // -----------------------------------------------------------------------
+      if (run.scope === 'analytics') {
+        const meta = typeof run.metadata === 'string' ? JSON.parse(run.metadata) : (run.metadata ?? {});
+        const groupId = meta.groupId && meta.groupId !== 'all' ? meta.groupId : null;
+        const timeRangeParam = meta.timeRange ?? null;
+        const isAllTime = timeRangeParam === 'all' || !timeRangeParam;
+
+        let startDateIso = null;
+        if (!isAllTime) {
+          let daysBack = 90;
+          const m = String(timeRangeParam).match(/^(\d+)([dmy])$/);
+          if (m) {
+            const value = parseInt(m[1], 10);
+            const unit = m[2];
+            if (unit === 'd') daysBack = value;
+            if (unit === 'm') daysBack = value * 30;
+            if (unit === 'y') daysBack = value * 365;
+          }
+          daysBack = Math.min(Math.max(1, daysBack), 365);
+          const startDate = new Date();
+          startDate.setDate(startDate.getDate() - daysBack);
+          startDateIso = startDate.toISOString();
+        }
+
+        // Determine which groups to export
+        let groupsToExport;
+        if (groupId) {
+          const [grp] = await sqlConnection`SELECT id, display_name FROM entra_groups WHERE id = ${groupId} LIMIT 1`;
+          groupsToExport = grp ? [grp] : [];
+        } else {
+          groupsToExport = await sqlConnection`SELECT id, display_name FROM entra_groups ORDER BY display_name ASC`;
+          // Also include an "All" aggregate
+          groupsToExport = [{ id: null, display_name: 'All' }, ...groupsToExport];
+        }
+
+        const csvRows = ['date,group,users,chat_sessions,questions'];
+
+        for (const grp of groupsToExport) {
+          let rows;
+          if (!grp.id && !startDateIso) {
+            rows = await sqlConnection`
+              WITH date_series AS (
+                SELECT generate_series(DATE_TRUNC('day', (SELECT MIN(created_at) FROM chat_sessions)), DATE_TRUNC('day', NOW()), '1 day'::interval)::date AS date
+              ),
+              dcs AS (SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users FROM chat_sessions cs GROUP BY 1),
+              dq  AS (SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id WHERE cm.sender = 'user' GROUP BY 1)
+              SELECT TO_CHAR(ds.date, 'YYYY-MM-DD') AS date, COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users, COALESCE(dq.questions, 0)::int AS questions, COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+              FROM date_series ds LEFT JOIN dcs ON ds.date = dcs.date LEFT JOIN dq ON ds.date = dq.date ORDER BY ds.date ASC
+            `;
+          } else if (!grp.id) {
+            rows = await sqlConnection`
+              WITH date_series AS (SELECT generate_series(DATE_TRUNC('day', ${startDateIso}::timestamp), DATE_TRUNC('day', NOW()), '1 day'::interval)::date AS date),
+              dcs AS (SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users FROM chat_sessions cs WHERE cs.created_at >= ${startDateIso} GROUP BY 1),
+              dq  AS (SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id WHERE cm.created_at >= ${startDateIso} AND cm.sender = 'user' GROUP BY 1)
+              SELECT TO_CHAR(ds.date, 'YYYY-MM-DD') AS date, COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users, COALESCE(dq.questions, 0)::int AS questions, COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+              FROM date_series ds LEFT JOIN dcs ON ds.date = dcs.date LEFT JOIN dq ON ds.date = dq.date ORDER BY ds.date ASC
+            `;
+          } else if (!startDateIso) {
+            rows = await sqlConnection`
+              WITH date_series AS (SELECT generate_series(DATE_TRUNC('day', (SELECT MIN(cs.created_at) FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${grp.id})), DATE_TRUNC('day', NOW()), '1 day'::interval)::date AS date),
+              dcs AS (SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${grp.id} GROUP BY 1),
+              dq  AS (SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${grp.id} WHERE cm.sender = 'user' GROUP BY 1)
+              SELECT TO_CHAR(ds.date, 'YYYY-MM-DD') AS date, COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users, COALESCE(dq.questions, 0)::int AS questions, COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+              FROM date_series ds LEFT JOIN dcs ON ds.date = dcs.date LEFT JOIN dq ON ds.date = dq.date ORDER BY ds.date ASC
+            `;
+          } else {
+            rows = await sqlConnection`
+              WITH date_series AS (SELECT generate_series(DATE_TRUNC('day', ${startDateIso}::timestamp), DATE_TRUNC('day', NOW()), '1 day'::interval)::date AS date),
+              dcs AS (SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${grp.id} WHERE cs.created_at >= ${startDateIso} GROUP BY 1),
+              dq  AS (SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${grp.id} WHERE cm.created_at >= ${startDateIso} AND cm.sender = 'user' GROUP BY 1)
+              SELECT TO_CHAR(ds.date, 'YYYY-MM-DD') AS date, COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users, COALESCE(dq.questions, 0)::int AS questions, COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+              FROM date_series ds LEFT JOIN dcs ON ds.date = dcs.date LEFT JOIN dq ON ds.date = dq.date ORDER BY ds.date ASC
+            `;
+          }
+          const groupLabel = grp.display_name.replace(/"/g, '""');
+          for (const r of rows) {
+            csvRows.push(`${r.date},"${groupLabel}",${r.users},${r.chat_sessions},${r.questions}`);
+          }
+        }
+
+        const csvContent = csvRows.join('\n');
+        const analyticsScope = groupId
+          ? (groupsToExport[0]?.display_name ?? 'group')
+          : 'all-groups';
+        const s3Key = `exports/analytics/${exportRunId}.csv`;
+
+        await s3Client.send(new PutObjectCommand({
+          Bucket: process.env.EXPORT_BUCKET_NAME,
+          Key: s3Key,
+          Body: csvContent,
+          ContentType: 'text/csv',
+          ContentDisposition: `attachment; filename="analytics-${analyticsScope}-${exportRunId}.csv"`,
+        }));
+
+        const presignedUrl = await getSignedUrl(
+          s3Client,
+          new GetObjectCommand({ Bucket: process.env.EXPORT_BUCKET_NAME, Key: s3Key }),
+          { expiresIn: 604800 }
+        );
+        const urlExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const rowCount = csvRows.length - 1; // exclude header
+
+        await sqlConnection`
+          UPDATE export_runs SET status = 'completed', s3_key = ${s3Key}, presigned_url = ${presignedUrl}, url_expires_at = ${urlExpiresAt}, row_count = ${rowCount}, completed_at = now()
+          WHERE id = ${exportRunId}
+        `;
+        console.log(`Analytics export ${exportRunId} completed: ${rowCount} rows`);
+
+        const exportScopeLabel = groupId ? (groupsToExport[0]?.display_name ?? 'group') : 'All Groups';
+        try {
+          await publishNotification({
+            userId: run.requested_by.toString(),
+            type: 'export_completed',
+            title: 'Analytics export ready',
+            message: `Your analytics CSV export (${exportScopeLabel}) is ready — ${rowCount} rows.`,
+            metadata: { export_run_id: exportRunId, presigned_url: presignedUrl, scope_label: exportScopeLabel },
+          });
+        } catch (notifyErr) {
+          console.error('Failed to publish export_completed notification:', notifyErr);
+        }
+        continue;
+      }
+
+      // -----------------------------------------------------------------------
       // Determine scope_label for the export metadata
       let scopeLabel = 'All Chats';
       if (run.scope === 'group' && sessions.length > 0) {
@@ -184,7 +308,7 @@ exports.handler = async (event) => {
         sessions: sessionObjects,
       };
 
-      const s3Key = `exports/${exportRunId}.json`;
+      const s3Key = `exports/chat/${exportRunId}.json`;
       await s3Client.send(new PutObjectCommand({
         Bucket: process.env.EXPORT_BUCKET_NAME,
         Key: s3Key,
@@ -218,16 +342,13 @@ exports.handler = async (event) => {
       console.log(`Export ${exportRunId} completed: ${sessions.length} sessions, ${totalMessages} messages`);
 
       try {
-        await sns.send(new PublishCommand({
-          TopicArn: process.env.NOTIFICATION_TOPIC_ARN,
-          Message: JSON.stringify({
-            userId: run.requested_by.toString(),
-            type: 'export_completed',
-            title: 'Export ready',
-            message: `Your "${scopeLabel}" export is complete — ${sessions.length} sessions, ${totalMessages} messages.`,
-            metadata: { export_run_id: exportRunId, presigned_url: presignedUrl, scope_label: scopeLabel },
-          }),
-        }));
+        await publishNotification({
+          userId: run.requested_by.toString(),
+          type: 'export_completed',
+          title: 'Export ready',
+          message: `Your "${scopeLabel}" export is complete — ${sessions.length} sessions, ${totalMessages} messages.`,
+          metadata: { export_run_id: exportRunId, presigned_url: presignedUrl, scope_label: scopeLabel },
+        });
       } catch (notifyErr) {
         console.error('Failed to publish export_completed notification:', notifyErr);
       }
@@ -245,16 +366,13 @@ exports.handler = async (event) => {
       }
       if (run?.requested_by) {
         try {
-          await sns.send(new PublishCommand({
-            TopicArn: process.env.NOTIFICATION_TOPIC_ARN,
-            Message: JSON.stringify({
-              userId: run.requested_by.toString(),
-              type: 'export_failed',
-              title: 'Export failed',
-              message: `Your "${run.scope}" export could not be completed: ${err.message}`,
-              metadata: { export_run_id: exportRunId },
-            }),
-          }));
+          await publishNotification({
+            userId: run.requested_by.toString(),
+            type: 'export_failed',
+            title: 'Export failed',
+            message: `Your "${run.scope}" export could not be completed: ${err.message}`,
+            metadata: { export_run_id: exportRunId },
+          });
         } catch (notifyErr) {
           console.error('Failed to publish export_failed notification:', notifyErr);
         }

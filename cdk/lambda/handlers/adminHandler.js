@@ -754,111 +754,191 @@ exports.handler = async (event) => {
       // Get analytics data
       case "GET /admin/analytics": {
         const qs = event.queryStringParameters ?? {};
+        const groupId = qs.groupId && qs.groupId !== "all" ? qs.groupId : null;
 
-        // If timeRange is NOT provided, return all-time totals only (no timeSeries)
-        const timeRangeProvided = typeof qs.timeRange === "string" && qs.timeRange.trim().length > 0;
+        // "all" timeRange = no date cutoff; otherwise parse Nd/Nm/Ny
+        const timeRangeParam = typeof qs.timeRange === "string" ? qs.timeRange.trim() : "";
+        const isAllTime = timeRangeParam === "all";
+        const timeRangeProvided = timeRangeParam.length > 0;
 
-        // Helper: compute totals (either all-time or since startDate)
-        const fetchTotals = async (startDateIso /* string | null */) => {
-          if (!startDateIso) {
-            const totalsRows = await sqlConnection`
+        // Resolve startDateIso — null means all-time
+        let startDateIso = null;
+        if (timeRangeProvided && !isAllTime) {
+          let daysBack = 90;
+          const m = timeRangeParam.match(/^(\d+)([dmy])$/);
+          if (m) {
+            const value = parseInt(m[1], 10);
+            const unit = m[2];
+            if (unit === "d") daysBack = value;
+            if (unit === "m") daysBack = value * 30;
+            if (unit === "y") daysBack = value * 365;
+          }
+          daysBack = Math.min(Math.max(1, daysBack), 365);
+          const startDate = new Date();
+          startDate.setDate(startDate.getDate() - daysBack);
+          startDateIso = startDate.toISOString();
+        }
+
+        // Helper: compute totals scoped by optional groupId and optional startDate
+        const fetchTotals = async () => {
+          if (!startDateIso && !groupId) {
+            const rows = await sqlConnection`
               SELECT
                 (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs) AS users,
                 (SELECT COUNT(cs.id)::int FROM chat_sessions cs) AS chat_sessions,
                 (SELECT COUNT(cm.id)::int FROM chat_messages cm) AS messages,
                 (SELECT COUNT(cm.id)::int FROM chat_messages cm WHERE cm.sender = 'user') AS questions
             `;
-            return totalsRows[0];
+            return rows[0];
           }
-
-          const totalsRows = await sqlConnection`
+          if (!groupId) {
+            const rows = await sqlConnection`
+              SELECT
+                (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs WHERE cs.created_at >= ${startDateIso}) AS users,
+                (SELECT COUNT(cs.id)::int FROM chat_sessions cs WHERE cs.created_at >= ${startDateIso}) AS chat_sessions,
+                (SELECT COUNT(cm.id)::int FROM chat_messages cm WHERE cm.created_at >= ${startDateIso}) AS messages,
+                (SELECT COUNT(cm.id)::int FROM chat_messages cm WHERE cm.created_at >= ${startDateIso} AND cm.sender = 'user') AS questions
+            `;
+            return rows[0];
+          }
+          if (!startDateIso) {
+            const rows = await sqlConnection`
+              SELECT
+                (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}) AS users,
+                (SELECT COUNT(cs.id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}) AS chat_sessions,
+                (SELECT COUNT(cm.id)::int FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}) AS messages,
+                (SELECT COUNT(cm.id)::int FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cm.sender = 'user') AS questions
+            `;
+            return rows[0];
+          }
+          const rows = await sqlConnection`
             SELECT
-              (SELECT COUNT(DISTINCT cs.user_id)::int
-              FROM chat_sessions cs
-              WHERE cs.created_at >= ${startDateIso}) AS users,
-
-              (SELECT COUNT(cs.id)::int
-              FROM chat_sessions cs
-              WHERE cs.created_at >= ${startDateIso}) AS chat_sessions,
-
-              (SELECT COUNT(cm.id)::int
-              FROM chat_messages cm
-              WHERE cm.created_at >= ${startDateIso}) AS messages,
-
-              (SELECT COUNT(cm.id)::int
-              FROM chat_messages cm
-              WHERE cm.created_at >= ${startDateIso}
-                AND cm.sender = 'user') AS questions
+              (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cs.created_at >= ${startDateIso}) AS users,
+              (SELECT COUNT(cs.id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cs.created_at >= ${startDateIso}) AS chat_sessions,
+              (SELECT COUNT(cm.id)::int FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cm.created_at >= ${startDateIso}) AS messages,
+              (SELECT COUNT(cm.id)::int FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cm.created_at >= ${startDateIso} AND cm.sender = 'user') AS questions
           `;
-          return totalsRows[0];
+          return rows[0];
         };
 
         if (!timeRangeProvided) {
-          const totals = await fetchTotals(null);
-
+          const totals = await fetchTotals();
           response.statusCode = 200;
           response.body = JSON.stringify({ totals });
           break;
         }
 
-        // time series for provided timeRange (cap 365)
-        const timeRange = qs.timeRange || "90d";
-
-        let daysBack = 90;
-        const m = String(timeRange).match(/^(\d+)([dmy])$/);
-        if (m) {
-          const value = parseInt(m[1], 10);
-          const unit = m[2];
-          if (unit === "d") daysBack = value;
-          if (unit === "m") daysBack = value * 30;
-          if (unit === "y") daysBack = value * 365;
+        // Time series — build dynamically based on groupId and startDateIso
+        let timeSeries;
+        if (!groupId && !startDateIso) {
+          // All time, all groups
+          timeSeries = await sqlConnection`
+            WITH date_series AS (
+              SELECT generate_series(
+                DATE_TRUNC('day', (SELECT MIN(created_at) FROM chat_sessions)),
+                DATE_TRUNC('day', NOW()),
+                '1 day'::interval
+              )::date AS date
+            ),
+            daily_chat_sessions AS (
+              SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users
+              FROM chat_sessions cs GROUP BY 1
+            ),
+            daily_questions AS (
+              SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users
+              FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id
+              WHERE cm.sender = 'user' GROUP BY 1
+            )
+            SELECT TO_CHAR(ds.date, 'Mon DD') AS date,
+              COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users,
+              COALESCE(dq.questions, 0)::int AS questions,
+              COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+            FROM date_series ds
+            LEFT JOIN daily_chat_sessions dcs ON ds.date = dcs.date
+            LEFT JOIN daily_questions dq ON ds.date = dq.date
+            ORDER BY ds.date ASC
+          `;
+        } else if (!groupId) {
+          // Date-filtered, all groups
+          timeSeries = await sqlConnection`
+            WITH date_series AS (
+              SELECT generate_series(DATE_TRUNC('day', ${startDateIso}::timestamp), DATE_TRUNC('day', NOW()), '1 day'::interval)::date AS date
+            ),
+            daily_chat_sessions AS (
+              SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users
+              FROM chat_sessions cs WHERE cs.created_at >= ${startDateIso} GROUP BY 1
+            ),
+            daily_questions AS (
+              SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users
+              FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id
+              WHERE cm.created_at >= ${startDateIso} AND cm.sender = 'user' GROUP BY 1
+            )
+            SELECT TO_CHAR(ds.date, 'Mon DD') AS date,
+              COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users,
+              COALESCE(dq.questions, 0)::int AS questions,
+              COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+            FROM date_series ds
+            LEFT JOIN daily_chat_sessions dcs ON ds.date = dcs.date
+            LEFT JOIN daily_questions dq ON ds.date = dq.date
+            ORDER BY ds.date ASC
+          `;
+        } else if (!startDateIso) {
+          // All time, specific group
+          timeSeries = await sqlConnection`
+            WITH date_series AS (
+              SELECT generate_series(
+                DATE_TRUNC('day', (SELECT MIN(cs.created_at) FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId})),
+                DATE_TRUNC('day', NOW()),
+                '1 day'::interval
+              )::date AS date
+            ),
+            daily_chat_sessions AS (
+              SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users
+              FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}
+              GROUP BY 1
+            ),
+            daily_questions AS (
+              SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users
+              FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}
+              WHERE cm.sender = 'user' GROUP BY 1
+            )
+            SELECT TO_CHAR(ds.date, 'Mon DD') AS date,
+              COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users,
+              COALESCE(dq.questions, 0)::int AS questions,
+              COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+            FROM date_series ds
+            LEFT JOIN daily_chat_sessions dcs ON ds.date = dcs.date
+            LEFT JOIN daily_questions dq ON ds.date = dq.date
+            ORDER BY ds.date ASC
+          `;
+        } else {
+          // Date-filtered, specific group
+          timeSeries = await sqlConnection`
+            WITH date_series AS (
+              SELECT generate_series(DATE_TRUNC('day', ${startDateIso}::timestamp), DATE_TRUNC('day', NOW()), '1 day'::interval)::date AS date
+            ),
+            daily_chat_sessions AS (
+              SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users
+              FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}
+              WHERE cs.created_at >= ${startDateIso} GROUP BY 1
+            ),
+            daily_questions AS (
+              SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users
+              FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}
+              WHERE cm.created_at >= ${startDateIso} AND cm.sender = 'user' GROUP BY 1
+            )
+            SELECT TO_CHAR(ds.date, 'Mon DD') AS date,
+              COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users,
+              COALESCE(dq.questions, 0)::int AS questions,
+              COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+            FROM date_series ds
+            LEFT JOIN daily_chat_sessions dcs ON ds.date = dcs.date
+            LEFT JOIN daily_questions dq ON ds.date = dq.date
+            ORDER BY ds.date ASC
+          `;
         }
-        daysBack = Math.min(Math.max(1, daysBack), 365);
 
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - daysBack);
-        const startDateIso = startDate.toISOString();
-
-        const timeSeries = await sqlConnection`
-          WITH date_series AS (
-            SELECT generate_series(
-              DATE_TRUNC('day', ${startDateIso}::timestamp),
-              DATE_TRUNC('day', NOW()),
-              '1 day'::interval
-            )::date AS date
-          ),
-          daily_chat_sessions AS (
-            SELECT
-              DATE_TRUNC('day', cs.created_at)::date AS date,
-              COUNT(cs.id)::int AS chat_sessions,
-              COUNT(DISTINCT cs.user_id)::int AS session_users
-            FROM chat_sessions cs
-            WHERE cs.created_at >= ${startDateIso}
-            GROUP BY DATE_TRUNC('day', cs.created_at)::date
-          ),
-          daily_questions AS (
-            SELECT
-              DATE_TRUNC('day', cm.created_at)::date AS date,
-              COUNT(cm.id)::int AS questions,
-              COUNT(DISTINCT cs.user_id)::int AS question_users
-            FROM chat_messages cm
-            JOIN chat_sessions cs ON cs.id = cm.chat_session_id
-            WHERE cm.created_at >= ${startDateIso}
-              AND cm.sender = 'user'
-            GROUP BY DATE_TRUNC('day', cm.created_at)::date
-          )
-          SELECT
-            TO_CHAR(ds.date, 'Mon DD') AS date,
-            COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users,
-            COALESCE(dq.questions, 0)::int AS questions,
-            COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
-          FROM date_series ds
-          LEFT JOIN daily_chat_sessions dcs ON ds.date = dcs.date
-          LEFT JOIN daily_questions dq ON ds.date = dq.date
-          ORDER BY ds.date ASC
-        `;
-
-        const totals = await fetchTotals(startDateIso);
+        const totals = await fetchTotals();
 
         response.statusCode = 200;
         response.body = JSON.stringify({ timeSeries, totals });
@@ -1680,9 +1760,9 @@ exports.handler = async (event) => {
         try { body = parseBody(event.body); } catch (_) {}
 
         const scope = body?.scope;
-        if (!['all', 'group', 'user'].includes(scope)) {
+        if (!['all', 'group', 'user', 'analytics'].includes(scope)) {
           response.statusCode = 400;
-          response.body = JSON.stringify({ error: "scope must be 'all', 'group', or 'user'" });
+          response.body = JSON.stringify({ error: "scope must be 'all', 'group', 'user', or 'analytics'" });
           break;
         }
         if ((scope === 'group' || scope === 'user') && !body?.scope_id) {
@@ -1698,9 +1778,13 @@ exports.handler = async (event) => {
           break;
         }
 
+        const exportMetadata = scope === 'analytics'
+          ? JSON.stringify({ groupId: body?.groupId ?? null, timeRange: body?.timeRange ?? null })
+          : null;
+
         const inserted = await sqlConnection`
-          INSERT INTO export_runs (requested_by, status, scope, scope_id)
-          VALUES (${exportAdminUserId}::uuid, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null}::uuid)
+          INSERT INTO export_runs (requested_by, status, scope, scope_id, metadata)
+          VALUES (${exportAdminUserId}::uuid, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null}::uuid, ${exportMetadata}::jsonb)
           RETURNING id::text
         `;
         const exportRunId = inserted[0].id;
@@ -1738,6 +1822,7 @@ exports.handler = async (event) => {
             er.status,
             er.scope,
             er.scope_id,
+            er.metadata,
             er.presigned_url,
             er.url_expires_at,
             er.error_message,
@@ -1745,8 +1830,9 @@ exports.handler = async (event) => {
             er.requested_at,
             er.completed_at,
             CASE
-              WHEN er.scope::text = 'group' THEN eg.display_name
-              WHEN er.scope::text = 'user'  THEN u2.email
+              WHEN er.scope::text = 'group'     THEN eg.display_name
+              WHEN er.scope::text = 'user'      THEN u2.email
+              WHEN er.scope::text = 'analytics' THEN 'Analytics CSV'
               ELSE 'All Chats'
             END AS scope_label
           FROM export_runs er

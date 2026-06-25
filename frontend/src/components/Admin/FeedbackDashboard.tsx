@@ -467,7 +467,7 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
           <div className="flex items-center justify-between mb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-primary" />
-              All feedback
+              Feedback By Category
             </CardTitle>
           </div>
           {/* Category filter chips */}
