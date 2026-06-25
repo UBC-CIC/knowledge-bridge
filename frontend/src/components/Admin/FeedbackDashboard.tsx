@@ -155,8 +155,8 @@ function CategoryPieChart({ getCategoryCount }: { getCategoryCount: (cat: Catego
           return (
             <div key={cat} className="flex items-center gap-1.5">
               <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: CATEGORY_BAR_COLORS[cat] }} />
-              <span className="text-xs text-gray-600 flex-1 truncate">{cat}</span>
-              <span className="text-xs font-semibold text-gray-700">{pct}%</span>
+              <span className="text-sm text-gray-600 flex-1 truncate">{cat}</span>
+              <span className="text-sm font-semibold text-gray-700">{pct}%</span>
             </div>
           );
         })}
