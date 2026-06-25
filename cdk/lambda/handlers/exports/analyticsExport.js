@@ -1,6 +1,6 @@
 async function build(exportRunId, run, { sqlConnection }) {
   const meta = typeof run.metadata === 'string' ? JSON.parse(run.metadata) : (run.metadata ?? {});
-  const groupId = meta.groupId && meta.groupId !== 'all' ? meta.groupId : null;
+  const rawGroupId = meta.groupId;
   const timeRangeParam = meta.timeRange ?? null;
   const isAllTime = timeRangeParam === 'all' || !timeRangeParam;
 
@@ -21,9 +21,12 @@ async function build(exportRunId, run, { sqlConnection }) {
     startDateIso = startDate.toISOString();
   }
 
+  // groupId can be: a single UUID string, an array of UUIDs, or "all"/null
   let groupsToExport;
-  if (groupId) {
-    const [grp] = await sqlConnection`SELECT id, display_name FROM entra_groups WHERE id = ${groupId} LIMIT 1`;
+  if (Array.isArray(rawGroupId) && rawGroupId.length > 0) {
+    groupsToExport = await sqlConnection`SELECT id, display_name FROM entra_groups WHERE id = ANY(${rawGroupId}) ORDER BY display_name ASC`;
+  } else if (rawGroupId && rawGroupId !== 'all') {
+    const [grp] = await sqlConnection`SELECT id, display_name FROM entra_groups WHERE id = ${rawGroupId} LIMIT 1`;
     groupsToExport = grp ? [grp] : [];
   } else {
     groupsToExport = await sqlConnection`SELECT id, display_name FROM entra_groups ORDER BY display_name ASC`;
@@ -75,7 +78,11 @@ async function build(exportRunId, run, { sqlConnection }) {
     }
   }
 
-  const scopeLabel = groupId ? (groupsToExport[0]?.display_name ?? 'group') : 'All Groups';
+  const scopeLabel = Array.isArray(rawGroupId) && rawGroupId.length > 0
+    ? groupsToExport.map(g => g.display_name).join(', ')
+    : (rawGroupId && rawGroupId !== 'all')
+      ? (groupsToExport[0]?.display_name ?? 'group')
+      : 'All Groups';
   const rowCount = csvRows.length - 1;
 
   return {

@@ -286,10 +286,10 @@ export default function Analytics() {
     try {
       setExporting(true);
       const headers = await getHeaders();
-      const body: Record<string, string> = {
+      const body: Record<string, unknown> = {
         scope: "analytics",
         timeRange: effectiveTimeRange,
-        groupId: overlayMode ? "all" : groupId,
+        groupId: overlayMode ? Array.from(selectedGroupIds) : groupId,
       };
       const res = await fetch(
         `${import.meta.env.VITE_API_ENDPOINT}/admin/export/trigger`,

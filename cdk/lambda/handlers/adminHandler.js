@@ -1817,6 +1817,7 @@ exports.handler = async (event) => {
         const qs = event.queryStringParameters ?? {};
         const limit = 10;
         const offset = Math.max(parseInt(qs.offset ?? '0', 10), 0);
+        const exportTypeFilter = ['chat', 'analytics'].includes(qs.export_type) ? qs.export_type : null;
 
         const rawRuns = await sqlConnection`
           SELECT
@@ -1834,11 +1835,14 @@ exports.handler = async (event) => {
               WHEN er.scope::text = 'group' THEN eg.display_name
               WHEN er.scope::text = 'user'  THEN u2.email
               ELSE NULL
-            END AS _scope_base
+            END AS _scope_base,
+            eg_meta.display_name AS _meta_group_name
           FROM export_runs er
-          LEFT JOIN entra_groups eg ON eg.id = er.scope_id::text AND er.scope::text = 'group'
-          LEFT JOIN users u2        ON u2.id = er.scope_id AND er.scope::text = 'user'
+          LEFT JOIN entra_groups eg      ON eg.id = er.scope_id::text AND er.scope::text = 'group'
+          LEFT JOIN users u2             ON u2.id = er.scope_id AND er.scope::text = 'user'
+          LEFT JOIN entra_groups eg_meta ON eg_meta.id = (er.metadata->>'groupId') AND er.scope::text = 'analytics'
           WHERE er.requested_by = ${adminUserId}
+          ${exportTypeFilter ? sqlConnection`AND er.export_type = ${exportTypeFilter}::export_type` : sqlConnection``}
           ORDER BY er.requested_at DESC
           LIMIT ${limit} OFFSET ${offset}
         `;
@@ -1847,7 +1851,12 @@ exports.handler = async (event) => {
           const meta = (typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata) ?? {};
           let scope_label;
           if (r.scope === 'analytics') {
-            const groupPart = meta.groupId && meta.groupId !== 'all' ? 'Selected groups' : 'All groups';
+            let groupPart;
+            if (Array.isArray(meta.groupId) && meta.groupId.length > 0) {
+              groupPart = `${meta.groupId.length} groups`;
+            } else {
+              groupPart = r._meta_group_name ?? (meta.groupId && meta.groupId !== 'all' ? meta.groupId : 'All groups');
+            }
             const timePart = meta.timeRange === 'all' ? 'All time'
               : meta.timeRange ? `Last ${meta.timeRange}` : null;
             scope_label = [groupPart, timePart].filter(Boolean).join(' · ');
@@ -1856,12 +1865,14 @@ exports.handler = async (event) => {
           } else {
             scope_label = r._scope_base ?? r.scope;
           }
-          const { _scope_base, metadata, ...rest } = r;
+          const { _scope_base, _meta_group_name, metadata, ...rest } = r;
           return { ...rest, scope_label };
         });
 
         const [{ total }] = await sqlConnection`
-          SELECT COUNT(*)::int AS total FROM export_runs WHERE requested_by = ${adminUserId}
+          SELECT COUNT(*)::int AS total FROM export_runs
+          WHERE requested_by = ${adminUserId}
+          ${exportTypeFilter ? sqlConnection`AND export_type = ${exportTypeFilter}::export_type` : sqlConnection``}
         `;
 
         response.statusCode = 200;

@@ -39,6 +39,7 @@ export default function ExportJobs() {
     const [total, setTotal] = useState(0);
     const [offset, setOffset] = useState(0);
     const [loading, setLoading] = useState(false);
+    const [typeFilter, setTypeFilter] = useState<ExportType | "all">("all");
 
     const getAuthHeaders = async () => ({
         Authorization: await AuthService.getIdToken(),
@@ -57,8 +58,9 @@ export default function ExportJobs() {
         setLoading(true);
         try {
             const headers = await getAuthHeaders();
+            const typeParam = typeFilter !== "all" ? `&export_type=${typeFilter}` : "";
             const res = await fetch(
-                `${import.meta.env.VITE_API_ENDPOINT}/admin/export/runs?limit=${LIMIT}&offset=${newOffset}`,
+                `${import.meta.env.VITE_API_ENDPOINT}/admin/export/runs?limit=${LIMIT}&offset=${newOffset}${typeParam}`,
                 { headers }
             );
             if (!res.ok) throw new Error("Failed to fetch export runs");
@@ -73,7 +75,7 @@ export default function ExportJobs() {
         }
     };
 
-    useEffect(() => { fetchRuns(0); }, []);
+    useEffect(() => { fetchRuns(0); }, [typeFilter]);
 
     return (
         <div className="space-y-6 max-w-5xl mx-auto animate-in fade-in duration-500">
@@ -121,7 +123,20 @@ export default function ExportJobs() {
                                 <thead>
                                     <tr className="border-b bg-gray-50/60 text-sm text-gray-500 uppercase tracking-wide">
                                         <th className="px-6 py-3">Requested</th>
-                                        <th className="px-6 py-3">Export Type</th>
+                                        <th className="px-6 py-3">
+                                            <div className="flex items-center gap-2">
+                                                Export Type
+                                                <select
+                                                    value={typeFilter}
+                                                    onChange={e => setTypeFilter(e.target.value as ExportType | "all")}
+                                                    className="text-xs font-normal normal-case tracking-normal border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-primary"
+                                                >
+                                                    <option value="all">All</option>
+                                                    <option value="chat">Chat</option>
+                                                    <option value="analytics">Analytics</option>
+                                                </select>
+                                            </div>
+                                        </th>
                                         <th className="px-6 py-3">Scope</th>
                                         <th className="px-6 py-3">Status</th>
                                         <th className="px-6 py-3">Completed</th>
