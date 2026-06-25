@@ -328,55 +328,55 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
 
       {/* Summary stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Likes */}
+        {/* Total Likes */}
         <Card className="border-gray-200 shadow-sm">
-          <CardContent className="p-5 flex items-center gap-4">
-            <div className="flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-full bg-green-50">
-              <ThumbsUp className="h-6 w-6 text-green-600" />
+          <CardContent className="p-6 flex flex-col items-center justify-center h-full min-h-[140px] gap-3">
+            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-green-50">
+              <ThumbsUp className="h-7 w-7 text-green-600" />
             </div>
-            <div>
-              <div className="text-4xl font-bold text-green-600 leading-none">{totalLikes}</div>
-              <div className="mt-1 text-sm font-medium text-green-700">Likes</div>
+            <div className="text-center">
+              <div className="text-5xl font-bold text-green-600 leading-none">{totalLikes}</div>
+              <div className="mt-2 text-sm font-semibold text-green-700 tracking-wide">Total Likes</div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Dislikes */}
+        {/* Total Dislikes */}
         <Card className="border-gray-200 shadow-sm">
-          <CardContent className="p-5 flex items-center gap-4">
-            <div className="flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-full bg-red-50">
-              <ThumbsDown className="h-6 w-6 text-red-500" />
+          <CardContent className="p-6 flex flex-col items-center justify-center h-full min-h-[140px] gap-3">
+            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-red-50">
+              <ThumbsDown className="h-7 w-7 text-red-500" />
             </div>
-            <div>
-              <div className="text-4xl font-bold text-red-500 leading-none">{totalDislikes}</div>
-              <div className="mt-1 text-sm font-medium text-red-600">Dislikes</div>
+            <div className="text-center">
+              <div className="text-5xl font-bold text-red-500 leading-none">{totalDislikes}</div>
+              <div className="mt-2 text-sm font-semibold text-red-600 tracking-wide">Total Dislikes</div>
             </div>
           </CardContent>
         </Card>
 
         {/* Category breakdown */}
         <Card className="border-gray-200 shadow-sm">
-          <CardContent className="p-5">
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Dislike reasons</div>
+          <CardContent className="p-5 flex flex-col justify-center h-full min-h-[140px]">
+            <div className="text-sm font-semibold text-gray-700 mb-4">Dislike reasons</div>
             {summaryLoading ? (
               <div className="flex items-center justify-center h-16">
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary" />
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {CATEGORIES.map(cat => {
                   const count = getCategoryCount(cat);
                   const maxCount = Math.max(...CATEGORIES.map(c => getCategoryCount(c)), 1);
                   const pct = Math.round((count / maxCount) * 100);
                   return (
                     <div key={cat}>
-                      <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-xs text-gray-600">{cat}</span>
-                        <span className="text-xs font-semibold text-gray-800">{count}</span>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm text-gray-600">{cat}</span>
+                        <span className="text-sm font-bold text-gray-800">{count}</span>
                       </div>
-                      <div className="w-full h-1.5 rounded-full bg-gray-100">
+                      <div className="w-full h-2 rounded-full bg-gray-100">
                         <div
-                          className="h-1.5 rounded-full transition-all duration-500"
+                          className="h-2 rounded-full transition-all duration-500"
                           style={{ width: `${pct}%`, backgroundColor: CATEGORY_BAR_COLORS[cat] }}
                         />
                       </div>
