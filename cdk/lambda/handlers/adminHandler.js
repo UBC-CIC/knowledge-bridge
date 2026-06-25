@@ -1782,9 +1782,11 @@ exports.handler = async (event) => {
           ? JSON.stringify({ groupId: body?.groupId ?? null, timeRange: body?.timeRange ?? null })
           : null;
 
+        const exportTypeValue = scope === 'analytics' ? 'analytics' : 'chat';
+
         const inserted = await sqlConnection`
-          INSERT INTO export_runs (requested_by, status, scope, scope_id, metadata)
-          VALUES (${exportAdminUserId}::uuid, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null}::uuid, ${exportMetadata}::jsonb)
+          INSERT INTO export_runs (requested_by, status, scope, scope_id, metadata, export_type)
+          VALUES (${exportAdminUserId}::uuid, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null}::uuid, ${exportMetadata}::jsonb, ${exportTypeValue}::export_type)
           RETURNING id::text
         `;
         const exportRunId = inserted[0].id;
@@ -1816,25 +1818,23 @@ exports.handler = async (event) => {
         const limit = 10;
         const offset = Math.max(parseInt(qs.offset ?? '0', 10), 0);
 
-        const runs = await sqlConnection`
+        const rawRuns = await sqlConnection`
           SELECT
             er.id,
             er.status,
             er.scope,
-            er.scope_id,
+            er.export_type,
             er.metadata,
             er.presigned_url,
             er.url_expires_at,
             er.error_message,
-            er.row_count,
             er.requested_at,
             er.completed_at,
             CASE
-              WHEN er.scope::text = 'group'     THEN eg.display_name
-              WHEN er.scope::text = 'user'      THEN u2.email
-              WHEN er.scope::text = 'analytics' THEN 'Analytics CSV'
-              ELSE 'All Chats'
-            END AS scope_label
+              WHEN er.scope::text = 'group' THEN eg.display_name
+              WHEN er.scope::text = 'user'  THEN u2.email
+              ELSE NULL
+            END AS _scope_base
           FROM export_runs er
           LEFT JOIN entra_groups eg ON eg.id = er.scope_id::text AND er.scope::text = 'group'
           LEFT JOIN users u2        ON u2.id = er.scope_id AND er.scope::text = 'user'
@@ -1842,6 +1842,23 @@ exports.handler = async (event) => {
           ORDER BY er.requested_at DESC
           LIMIT ${limit} OFFSET ${offset}
         `;
+
+        const runs = rawRuns.map(r => {
+          const meta = (typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata) ?? {};
+          let scope_label;
+          if (r.scope === 'analytics') {
+            const groupPart = meta.groupId && meta.groupId !== 'all' ? 'Selected groups' : 'All groups';
+            const timePart = meta.timeRange === 'all' ? 'All time'
+              : meta.timeRange ? `Last ${meta.timeRange}` : null;
+            scope_label = [groupPart, timePart].filter(Boolean).join(' · ');
+          } else if (r.scope === 'all') {
+            scope_label = 'All chats';
+          } else {
+            scope_label = r._scope_base ?? r.scope;
+          }
+          const { _scope_base, metadata, ...rest } = r;
+          return { ...rest, scope_label };
+        });
 
         const [{ total }] = await sqlConnection`
           SELECT COUNT(*)::int AS total FROM export_runs WHERE requested_by = ${adminUserId}
