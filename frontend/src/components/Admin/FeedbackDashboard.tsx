@@ -357,7 +357,7 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
         {/* Category breakdown */}
         <Card className="border-gray-200 shadow-sm">
           <CardContent className="p-5 flex flex-col justify-center h-full min-h-[140px]">
-            <div className="text-sm font-semibold text-gray-700 mb-4">Dislike reasons</div>
+            <div className="text-base font-semibold text-gray-700 mb-4">Dislike Reasons</div>
             {summaryLoading ? (
               <div className="flex items-center justify-center h-16">
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary" />
