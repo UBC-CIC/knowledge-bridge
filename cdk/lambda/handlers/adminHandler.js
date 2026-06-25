@@ -299,29 +299,12 @@ exports.handler = async (event) => {
           break;
         }
 
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const createdByUserId = event.requestContext?.authorizer?.userId ?? null;
+        if (!createdByUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
-
-        // Find admin user id (ensure role is admin)
-        const adminRows = await sqlConnection`
-          SELECT id, email
-          FROM users
-          WHERE email = ${adminEmail}
-          LIMIT 1
-        `;
-
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
-          break;
-        }
-
-
-        const createdByUserId = adminRows[0].id;
 
         // Create new version, make it active, deactivate old
         try {
@@ -474,24 +457,10 @@ exports.handler = async (event) => {
           break;
         }
 
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const callerUserId = event.requestContext?.authorizer?.userId ?? null;
+        if (!callerUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
-          break;
-        }
-
-        // Find admin user id
-        const adminRows = await sqlConnection`
-          SELECT id, email
-          FROM users
-          WHERE email = ${adminEmail}
-          LIMIT 1
-        `;
-
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
           break;
         }
 
@@ -612,24 +581,10 @@ exports.handler = async (event) => {
           break;
         }
 
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const callerUserId = event.requestContext?.authorizer?.userId ?? null;
+        if (!callerUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
-          break;
-        }
-
-        // Find admin user id (ensure role is admin)
-        const adminRows = await sqlConnection`
-          SELECT id, email
-          FROM users
-          WHERE email = ${adminEmail}
-          LIMIT 1
-        `;
-
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
           break;
         }
 
@@ -1231,8 +1186,8 @@ exports.handler = async (event) => {
         }
 
         // validate user
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const adminUserId = event.requestContext?.authorizer?.userId ?? null;
+        if (!adminUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
@@ -1338,21 +1293,7 @@ exports.handler = async (event) => {
         }
 
         // get admin user ID and confirm role
-        const adminRows = await sqlConnection`
-          SELECT id
-          FROM users
-          WHERE email = ${adminEmail}
-          LIMIT 1
-        `;
-
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
-          break;
-        }
-
-
-        const updatedByUserId = adminRows[0].id;
+        const updatedByUserId = adminUserId;
 
         // Single UPDATE of the latest row (no â€œensure row existsâ€ step)
         const updated = await sqlConnection`
@@ -1434,10 +1375,7 @@ exports.handler = async (event) => {
         }
 
         // Insert the DB row first to get its UUID, then start Glue passing that UUID
-        const ingestionAdminEmail = event.requestContext?.authorizer?.email;
-        const ingestionAdminRows = ingestionAdminEmail
-          ? await sqlConnection`SELECT id FROM users WHERE email = ${ingestionAdminEmail} LIMIT 1`
-          : [];
+        const ingestionAdminRows = [{ id: event.requestContext?.authorizer?.userId }].filter(r => r.id);
         const metadataJson = {
           force_full: forceFull === "true",
           job_name: jobName,
@@ -1689,10 +1627,7 @@ exports.handler = async (event) => {
           }
         }
 
-        // Resolve caller's user ID from email
-        const adminEmail = event.requestContext?.authorizer?.email;
-        const userRows = adminEmail ? await sqlConnection`SELECT id FROM users WHERE email = ${adminEmail} LIMIT 1` : [];
-        const updatedByUserId = userRows[0]?.id ?? null;
+        const updatedByUserId = event.requestContext?.authorizer?.userId ?? null;
 
         // Upsert single row in ingestion_schedule
         await sqlConnection`
@@ -1756,26 +1691,16 @@ exports.handler = async (event) => {
           break;
         }
 
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const exportAdminUserId = event.requestContext?.authorizer?.userId ?? null;
+        if (!exportAdminUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
 
-        const adminRows = await sqlConnection`
-          SELECT id FROM users WHERE email = ${adminEmail} LIMIT 1
-        `;
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
-          break;
-        }
-        const adminUserId = adminRows[0].id;
-
         const inserted = await sqlConnection`
           INSERT INTO export_runs (requested_by, status, scope, scope_id)
-          VALUES (${adminUserId}::uuid, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null}::uuid)
+          VALUES (${exportAdminUserId}::uuid, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null}::uuid)
           RETURNING id::text
         `;
         const exportRunId = inserted[0].id;
@@ -1796,22 +1721,12 @@ exports.handler = async (event) => {
 
       // GET /admin/export/runs — list export jobs for the current admin
       case "GET /admin/export/runs": {
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const adminUserId = event.requestContext?.authorizer?.userId ?? null;
+        if (!adminUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
-
-        const adminRows = await sqlConnection`
-          SELECT id FROM users WHERE email = ${adminEmail} LIMIT 1
-        `;
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
-          break;
-        }
-        const adminUserId = adminRows[0].id;
 
         const qs = event.queryStringParameters ?? {};
         const limit = 10;
@@ -1853,11 +1768,8 @@ exports.handler = async (event) => {
 
       // GET /admin/notifications — list notifications for the current admin
       case "GET /admin/notifications": {
-        const notifEmail = event.requestContext?.authorizer?.email;
-        if (!notifEmail) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
-        const notifUserRows = await sqlConnection`SELECT id FROM users WHERE email = ${notifEmail} LIMIT 1`;
-        if (!notifUserRows.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "User not found" }); break; }
-        const notifUserId = notifUserRows[0].id.toString();
+        const notifUserId = event.requestContext?.authorizer?.userId ?? null;
+        if (!notifUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
         const notifications = await sqlConnection`
           SELECT id::text, type::text, title, message, metadata, created_at
@@ -1876,11 +1788,8 @@ exports.handler = async (event) => {
 
       // DELETE /admin/notifications — clear all notifications for the current admin
       case "DELETE /admin/notifications": {
-        const clearEmail = event.requestContext?.authorizer?.email;
-        if (!clearEmail) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
-        const clearUserRows = await sqlConnection`SELECT id FROM users WHERE email = ${clearEmail} LIMIT 1`;
-        if (!clearUserRows.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "User not found" }); break; }
-        const clearUserId = clearUserRows[0].id.toString();
+        const clearUserId = event.requestContext?.authorizer?.userId ?? null;
+        if (!clearUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
         await sqlConnection`DELETE FROM notifications WHERE user_id::text = ${clearUserId}`;
         response.statusCode = 200;
@@ -1890,11 +1799,8 @@ exports.handler = async (event) => {
 
       // DELETE /admin/notifications/{notification_id} — dismiss a single notification
       case "DELETE /admin/notifications/{notification_id}": {
-        const dismissEmail = event.requestContext?.authorizer?.email;
-        if (!dismissEmail) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
-        const dismissUserRows = await sqlConnection`SELECT id FROM users WHERE email = ${dismissEmail} LIMIT 1`;
-        if (!dismissUserRows.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "User not found" }); break; }
-        const dismissUserId = dismissUserRows[0].id.toString();
+        const dismissUserId = event.requestContext?.authorizer?.userId ?? null;
+        if (!dismissUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
         const notificationId = event.pathParameters?.notification_id;
         if (!notificationId) { response.statusCode = 400; response.body = JSON.stringify({ error: "notification_id required" }); break; }

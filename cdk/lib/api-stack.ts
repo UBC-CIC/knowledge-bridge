@@ -511,25 +511,50 @@ export class ApiGatewayStack extends cdk.Stack {
               limit: 100, // Reduced from 1000 to 100 for anonymous users
               aggregateKeyType: "IP",
               scopeDownStatement: {
-                // Only apply to requests WITHOUT Authorization header
-                notStatement: {
-                  statement: {
-                    byteMatchStatement: {
-                      searchString: "Bearer",
-                      fieldToMatch: {
-                        singleHeader: {
-                          name: "authorization",
+                // Apply to requests WITHOUT Authorization header AND not OPTIONS (CORS preflight)
+                andStatement: {
+                  statements: [
+                    {
+                      notStatement: {
+                        statement: {
+                          byteMatchStatement: {
+                            searchString: "Bearer",
+                            fieldToMatch: {
+                              singleHeader: {
+                                Name: "authorization",
+                              },
+                            },
+                            textTransformations: [
+                              {
+                                priority: 0,
+                                type: "NONE",
+                              },
+                            ],
+                            positionalConstraint: "CONTAINS",
+                          },
                         },
                       },
-                      textTransformations: [
-                        {
-                          priority: 0,
-                          type: "NONE",
-                        },
-                      ],
-                      positionalConstraint: "CONTAINS",
                     },
-                  },
+                    {
+                      notStatement: {
+                        statement: {
+                          byteMatchStatement: {
+                            searchString: "OPTIONS",
+                            fieldToMatch: {
+                              method: {},
+                            },
+                            textTransformations: [
+                              {
+                                priority: 0,
+                                type: "NONE",
+                              },
+                            ],
+                            positionalConstraint: "EXACTLY",
+                          },
+                        },
+                      },
+                    },
+                  ],
                 },
               },
             },
@@ -558,7 +583,7 @@ export class ApiGatewayStack extends cdk.Stack {
                   searchString: "Bearer",
                   fieldToMatch: {
                     singleHeader: {
-                      name: "authorization",
+                      Name: "authorization",
                     },
                   },
                   textTransformations: [

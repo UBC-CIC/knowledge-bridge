@@ -54,11 +54,19 @@ const setCached = (key: string, data: any) => {
 const CATEGORIES = ["Not helpful", "Inaccurate", "Off-topic", "Other"] as const;
 type Category = (typeof CATEGORIES)[number];
 
+// Wong colorblind-safe palette
 const CATEGORY_COLORS: Record<Category, string> = {
-  "Not helpful": "bg-orange-100 text-orange-700 border-orange-200",
-  "Inaccurate":  "bg-red-100 text-red-700 border-red-200",
-  "Off-topic":   "bg-purple-100 text-purple-700 border-purple-200",
-  "Other":       "bg-gray-100 text-gray-700 border-gray-200",
+  "Not helpful": "bg-[#E69F00]/15 text-[#9a6b00] border-[#E69F00]/40",
+  "Inaccurate":  "bg-[#D55E00]/15 text-[#923f00] border-[#D55E00]/40",
+  "Off-topic":   "bg-[#0072B2]/15 text-[#004f7c] border-[#0072B2]/40",
+  "Other":       "bg-gray-100 text-gray-600 border-gray-200",
+};
+
+const CATEGORY_BAR_COLORS: Record<Category, string> = {
+  "Not helpful": "#E69F00",
+  "Inaccurate":  "#D55E00",
+  "Off-topic":   "#0072B2",
+  "Other":       "#9ca3af",
 };
 
 type FeedbackItem = {
@@ -319,33 +327,66 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
       </div>
 
       {/* Summary stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        <Card className="border-gray-200 shadow-sm col-span-1">
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold text-green-600">{totalLikes}</div>
-            <div className="mt-1 flex items-center gap-1 text-xs text-green-600 font-medium">
-              <ThumbsUp size={11} /> Likes
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Likes */}
+        <Card className="border-gray-200 shadow-sm">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-full bg-green-50">
+              <ThumbsUp className="h-6 w-6 text-green-600" />
+            </div>
+            <div>
+              <div className="text-4xl font-bold text-green-600 leading-none">{totalLikes}</div>
+              <div className="mt-1 text-sm font-medium text-green-700">Likes</div>
             </div>
           </CardContent>
         </Card>
-        <Card className="border-gray-200 shadow-sm col-span-1">
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold text-red-600">{totalDislikes}</div>
-            <div className="mt-1 flex items-center gap-1 text-xs text-red-600 font-medium">
-              <ThumbsDown size={11} /> Dislikes
+
+        {/* Dislikes */}
+        <Card className="border-gray-200 shadow-sm">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-full bg-red-50">
+              <ThumbsDown className="h-6 w-6 text-red-500" />
+            </div>
+            <div>
+              <div className="text-4xl font-bold text-red-500 leading-none">{totalDislikes}</div>
+              <div className="mt-1 text-sm font-medium text-red-600">Dislikes</div>
             </div>
           </CardContent>
         </Card>
-        {CATEGORIES.map(cat => (
-          <Card key={cat} className="border-gray-200 shadow-sm col-span-1">
-            <CardContent className="p-4">
-              <div className="text-2xl font-bold text-gray-900">{getCategoryCount(cat)}</div>
-              <div className={cn("mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium border", CATEGORY_COLORS[cat])}>
-                {cat}
+
+        {/* Category breakdown */}
+        <Card className="border-gray-200 shadow-sm">
+          <CardContent className="p-5">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Dislike reasons</div>
+            {summaryLoading ? (
+              <div className="flex items-center justify-center h-16">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary" />
               </div>
-            </CardContent>
-          </Card>
-        ))}
+            ) : (
+              <div className="space-y-2">
+                {CATEGORIES.map(cat => {
+                  const count = getCategoryCount(cat);
+                  const maxCount = Math.max(...CATEGORIES.map(c => getCategoryCount(c)), 1);
+                  const pct = Math.round((count / maxCount) * 100);
+                  return (
+                    <div key={cat}>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-xs text-gray-600">{cat}</span>
+                        <span className="text-xs font-semibold text-gray-800">{count}</span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-gray-100">
+                        <div
+                          className="h-1.5 rounded-full transition-all duration-500"
+                          style={{ width: `${pct}%`, backgroundColor: CATEGORY_BAR_COLORS[cat] }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Trend chart */}
