@@ -277,9 +277,7 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
     fetchFeedback(0);
   }, [datePreset, customRange, activeCategory]);
 
-  // Refetch list only when page advances beyond 0 (page 0 is handled above)
   useEffect(() => {
-    if (page === 0) return;
     fetchFeedback(page);
   }, [page]);
 
