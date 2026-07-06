@@ -1,8 +1,0 @@
-# This file is generated from requirements.in via pip-compile.
-# Do not edit manually. Run pip-compile requirements.in to regenerate.
-# boto3/botocore are intentionally absent — provided by the Glue runtime.
-azure-identity==1.21.0
-msgraph-sdk==1.27.0
-psycopg2-binary==2.9.9
-httpx==0.27.0
-requests==2.32.3
