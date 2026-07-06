@@ -463,32 +463,6 @@ export class ApiGatewayStack extends cdk.Stack {
                   actionToUse: { count: {} },
                 },
               ],
-              scopeDownStatement: {
-                notStatement: {
-                  statement: {
-                    orStatement: {
-                      statements: [
-                        {
-                          byteMatchStatement: {
-                            searchString: "/admin/generate-presigned-urls/batch",
-                            fieldToMatch: { uriPath: {} },
-                            textTransformations: [{ priority: 0, type: "NONE" }],
-                            positionalConstraint: "ENDS_WITH",
-                          },
-                        },
-                        {
-                          byteMatchStatement: {
-                            searchString: "/admin/data_sources/batch",
-                            fieldToMatch: { uriPath: {} },
-                            textTransformations: [{ priority: 0, type: "NONE" }],
-                            positionalConstraint: "ENDS_WITH",
-                          },
-                        },
-                      ],
-                    },
-                  },
-                },
-              },
             },
           },
           overrideAction: { none: {} },
@@ -1524,13 +1498,27 @@ export class ApiGatewayStack extends cdk.Stack {
 
     // --- Export Jobs ---
 
+    const exportAccessLogsBucket = new s3.Bucket(this, `${id}-ExportAccessLogs`, {
+      bucketNamePrefix: `${id.toLowerCase()}-export-access-logs`,
+      bucketNamespace: s3.BucketNamespace.ACCOUNT_REGIONAL,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      enforceSSL: true,
+      autoDeleteObjects: true,
+      lifecycleRules: [{ expiration: Duration.days(90), id: "expire-export-access-logs-90d" }],
+    });
+
     const exportBucket = new s3.Bucket(this, `${id}-ExportBucket`, {
-      bucketName: `${id.toLowerCase()}-exports`,
+      bucketNamePrefix: `${id.toLowerCase()}-exports`,
+      bucketNamespace: s3.BucketNamespace.ACCOUNT_REGIONAL,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       lifecycleRules: [{ expiration: Duration.days(7), id: "expire-exports-7d" }],
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      serverAccessLogsBucket: exportAccessLogsBucket,
+      serverAccessLogsPrefix: "exports/",
     });
 
     const exportDlq = new sqs.Queue(this, `${id}-ExportDLQ`, {

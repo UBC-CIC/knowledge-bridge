@@ -225,16 +225,13 @@ export class VpcStack extends Stack {
 
       this.vpc.addFlowLog(`${id}-vpcFlowLog`);
 
-      // Add DynamoDB gateway endpoint
-      this.vpc.addGatewayEndpoint(`${id}-DynamoDB Endpoint`, {
-        service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
-        subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
-      });
-
       // Add S3 gateway endpoint
       this.vpc.addGatewayEndpoint(`${id}-S3 Endpoint`, {
         service: ec2.GatewayVpcEndpointAwsService.S3,
-        subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
+        subnets: [
+          { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+          { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+        ],
       });
 
       // Get default security group for VPC
@@ -282,15 +279,6 @@ export class VpcStack extends Stack {
       this.vpc.addInterfaceEndpoint(`${id}-RDS Endpoint`, {
         service: ec2.InterfaceVpcEndpointAwsService.RDS,
         subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      });
-
-      // Add DynamoDB gateway endpoint
-      this.vpc.addGatewayEndpoint(`${id}-DynamoDB Endpoint`, {
-        service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
-        subnets: [
-          { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-          { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-        ],
       });
 
       // Add S3 gateway endpoint

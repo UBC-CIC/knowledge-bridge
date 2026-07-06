@@ -20,11 +20,16 @@ const { GlueClient, StartJobRunCommand, GetJobRunCommand, BatchStopJobRunCommand
 const { CloudWatchLogsClient, GetLogEventsCommand, DescribeLogStreamsCommand } = require("@aws-sdk/client-cloudwatch-logs");
 const { SchedulerClient, GetScheduleCommand, CreateScheduleCommand, UpdateScheduleCommand, DeleteScheduleCommand } = require("@aws-sdk/client-scheduler");
 const { SQSClient, SendMessageCommand } = require("@aws-sdk/client-sqs");
+const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+
+const PRESIGN_TTL = 900; // 15 minutes
 
 const glueClient = new GlueClient({});
 const logsClient = new CloudWatchLogsClient({});
 const schedulerClient = new SchedulerClient({});
 const sqsClient = new SQSClient({});
+const s3Client = new S3Client({});
 
 let sqlConnection;
 const secretsManager = new SecretsManagerClient();
@@ -1826,8 +1831,7 @@ exports.handler = async (event) => {
             er.scope,
             er.export_type,
             er.metadata,
-            er.presigned_url,
-            er.url_expires_at,
+            er.s3_key,
             er.error_message,
             er.requested_at,
             er.completed_at,
@@ -1855,7 +1859,7 @@ exports.handler = async (event) => {
           LIMIT ${limit} OFFSET ${offset}
         `;
 
-        const runs = rawRuns.map(r => {
+        const runs = await Promise.all(rawRuns.map(async (r) => {
           const meta = (typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata) ?? {};
           let scope_label;
           if (r.scope === 'analytics') {
@@ -1868,9 +1872,19 @@ exports.handler = async (event) => {
           } else {
             scope_label = r._scope_base ?? r.scope;
           }
-          const { _scope_base, _meta_group_name, metadata, ...rest } = r;
-          return { ...rest, scope_label };
-        });
+          const { _scope_base, _meta_group_name, metadata, s3_key, ...rest } = r;
+
+          let presigned_url = null;
+          if (r.status === 'completed' && s3_key) {
+            presigned_url = await getSignedUrl(
+              s3Client,
+              new GetObjectCommand({ Bucket: process.env.EXPORT_BUCKET_NAME, Key: s3_key }),
+              { expiresIn: PRESIGN_TTL }
+            );
+          }
+
+          return { ...rest, scope_label, presigned_url };
+        }));
 
         const [{ total }] = await sqlConnection`
           SELECT COUNT(*)::int AS total FROM export_runs
