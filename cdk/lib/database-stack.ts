@@ -120,8 +120,9 @@ export class DatabaseStack extends Stack {
         }
       ),
       multiAz: false,
+      storageType: rds.StorageType.GP3,
       allocatedStorage: 100,
-      maxAllocatedStorage: 150,
+      maxAllocatedStorage: 500,
       allowMajorVersionUpgrade: false,
       enablePerformanceInsights: true,
       performanceInsightRetention: rds.PerformanceInsightRetention.DEFAULT,
@@ -175,12 +176,6 @@ export class DatabaseStack extends Stack {
       assumedBy: new iam.ServicePrincipal("rds.amazonaws.com"),
     });
 
-    rdsProxyRole.addToPolicy(
-      new iam.PolicyStatement({
-        resources: ["*"],
-        actions: ["rds-db:connect"],
-      })
-    );
 
     /**
      * Create RDS Proxy for database connections with all secrets
