@@ -98,7 +98,7 @@ export class GlueStack extends cdk.Stack {
       resources: [`arn:aws:s3:::aws-glue-assets-${this.account}-${this.region}/*`],
     }));
 
-    dbStack.secretPathUser.grantRead(glueRole);
+    // secretPathUser already granted above via inline secretsmanager policy
 
     // Glue VPC connection — uses private-with-egress subnet so NAT is available
     // for Microsoft Graph API calls while still being able to reach RDS Proxy

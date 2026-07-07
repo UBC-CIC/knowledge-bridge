@@ -1,7 +1,7 @@
-import boto3
 import logging
 import re
 from typing import Dict, Any, Optional, List, Tuple
+from helpers.bedrock import get_bedrock_llm_client
 
 from helpers.crud import (
     fetch_recent_messages, ensure_session_exists, insert_message,
@@ -16,7 +16,6 @@ from helpers.guardrail import invoke_guardrail, ACTION_ANONYMIZED, ACTION_BLOCKE
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-logger.info(f"boto3 version: {boto3.__version__}")
 
 
 def _rewrite_query_for_retrieval(
@@ -50,7 +49,7 @@ Output ONLY the search query — no explanation, no quotes, no preamble.
 </latest_user_message>"""
 
     try:
-        bedrock_runtime = boto3.client("bedrock-runtime", region_name=llm_region)
+        bedrock_runtime = get_bedrock_llm_client(llm_region)
         response = bedrock_runtime.converse(
             modelId=config.HAIKU_ARN,
             messages=[{"role": "user", "content": [{"text": user_message}]}],
@@ -286,7 +285,7 @@ def get_response(
         }
     }
 
-    bedrock_runtime = boto3.client("bedrock-runtime", region_name=llm_region)
+    bedrock_runtime = get_bedrock_llm_client(llm_region)
 
     full_response_text = ""
     yielded_text = ""

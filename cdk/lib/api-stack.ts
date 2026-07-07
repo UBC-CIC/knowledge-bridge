@@ -723,58 +723,68 @@ export class ApiGatewayStack extends cdk.Stack {
       userPoolId: this.userPool.userPoolId,
     });
 
-    const lambdaRole = new iam.Role(this, `${id}-postgresLambdaRole`, {
-      roleName: `${id}-postgresLambdaRole`,
-      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    // ── Shared policy helpers ──────────────────────────────────────────────────
+
+    const ec2EniPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        "ec2:CreateNetworkInterface",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DeleteNetworkInterface",
+        "ec2:AssignPrivateIpAddresses",
+        "ec2:UnassignPrivateIpAddresses",
+      ],
+      resources: ["*"],
     });
 
+    const cwLogsPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      resources: ["arn:aws:logs:*:*:*"],
+    });
 
-    // Grant access to specific secrets instead of '*'
+    const xrayPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        "xray:PutTraceSegments",
+        "xray:PutTelemetryRecords",
+        "xray:GetSamplingRules",
+        "xray:GetSamplingTargets",
+      ],
+      resources: ["*"],
+    });
+
+    // ── publicRole: userFunction, chatSessionFunction, systemMessagesFunction, userAuthFunction ──
+    const publicRole = new iam.Role(this, `${id}-publicLambdaRole`, {
+      roleName: `${id}-publicLambdaRole`,
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
+    db.secretPathUser.grantRead(publicRole);
+    this.secret.grantRead(publicRole);
+    publicRole.addToPolicy(ec2EniPolicy);
+    publicRole.addToPolicy(cwLogsPolicy);
+    publicRole.addToPolicy(xrayPolicy);
+
+    // ── textGenRole: lambdaTextGen ─────────────────────────────────────────────
+    const textGenRole = new iam.Role(this, `${id}-textGenLambdaRole`, {
+      roleName: `${id}-textGenLambdaRole`,
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
+    db.secretPathUser.grantRead(textGenRole);
+    textGenRole.addToPolicy(ec2EniPolicy);
+    textGenRole.addToPolicy(cwLogsPolicy);
+    textGenRole.addToPolicy(xrayPolicy);
+
+    // ── adminRole: adminFunction, adminAuthorizationFunction, glueStatusSyncFn ─
+    const lambdaRole = new iam.Role(this, `${id}-adminLambdaRole`, {
+      roleName: `${id}-adminLambdaRole`,
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
     db.secretPathUser.grantRead(lambdaRole);
     this.secret.grantRead(lambdaRole);
-
-    // Grant access to EC2
-    lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          "ec2:CreateNetworkInterface",
-          "ec2:DescribeNetworkInterfaces",
-          "ec2:DeleteNetworkInterface",
-          "ec2:AssignPrivateIpAddresses",
-          "ec2:UnassignPrivateIpAddresses",
-        ],
-        resources: ["*"], // must be *
-      })
-    );
-
-    // Grant access to log
-    lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          //Logs
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-        ],
-        resources: ["arn:aws:logs:*:*:*"],
-      })
-    );
-
-    // Grant X-Ray tracing permissions
-    lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          "xray:PutTraceSegments",
-          "xray:PutTelemetryRecords",
-          "xray:GetSamplingRules",
-          "xray:GetSamplingTargets",
-        ],
-        resources: ["*"],
-      })
-    );
+    lambdaRole.addToPolicy(ec2EniPolicy);
+    lambdaRole.addToPolicy(cwLogsPolicy);
+    lambdaRole.addToPolicy(xrayPolicy);
 
     // Inline policy to allow AdminAddUserToGroup action
     const adminAddUserToGroupPolicyLambda = new iam.Policy(
@@ -797,7 +807,7 @@ export class ApiGatewayStack extends cdk.Stack {
         ],
       }
     );
-    lambdaRole.attachInlinePolicy(adminAddUserToGroupPolicyLambda);
+    publicRole.attachInlinePolicy(adminAddUserToGroupPolicyLambda);
 
     const coglambdaRole = new iam.Role(
       this,
@@ -881,8 +891,7 @@ export class ApiGatewayStack extends cdk.Stack {
         code: lambda.Code.fromAsset("lambda/adminAuthorizerFunction"),
         handler: "adminAuthorizerFunction.handler",
         timeout: Duration.seconds(30),
-        // reservedConcurrentExecutions: 100,
-        vpc: vpcStack.vpc,
+        reservedConcurrentExecutions: 10,
         environment: {
           SM_COGNITO_CREDENTIALS: this.secret.secretName,
         },
@@ -890,6 +899,8 @@ export class ApiGatewayStack extends cdk.Stack {
         memorySize: 512,
         layers: [jwt],
         role: lambdaRole,
+        logRetention: logs.RetentionDays.ONE_MONTH,
+        // No VPC — only verifies JWT + reads Cognito secret, no RDS access needed
       }
     );
 
@@ -919,13 +930,14 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "userAuthorizerFunction.handler",
         timeout: Duration.seconds(30),
         memorySize: 256,
-        // reservedConcurrentExecutions: 50,
+        reservedConcurrentExecutions: 10,
         layers: [jwt],
-        role: lambdaRole,
+        role: publicRole,
         environment: {
           SM_COGNITO_CREDENTIALS: this.secret.secretName,
         },
         functionName: `${id}-userLambdaAuthorizer`,
+        logRetention: logs.RetentionDays.ONE_MONTH,
       }
     );
     userAuthFunction.grantInvoke(
@@ -979,7 +991,7 @@ export class ApiGatewayStack extends cdk.Stack {
         },
         vpc: vpcStack.vpc,
         functionName: `${id}-addMemberOnSignUp`,
-        memorySize: 128,
+        memorySize: 256,
         layers: [postgres],
         role: coglambdaRole,
       }
@@ -1006,12 +1018,13 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "main.handler",
         code: lambda.Code.fromAsset("lambda/textGeneration"),
         timeout: cdk.Duration.seconds(60),
-        role: lambdaRole,
-        // reservedConcurrentExecutions: 100,
+        role: textGenRole,
+        reservedConcurrentExecutions: 20,
         layers: [psycopgLayer, powertoolsLayer],
         vpc: vpcStack.vpc,
         tracing: lambda.Tracing.ACTIVE,
         memorySize: 512,
+        logRetention: logs.RetentionDays.ONE_MONTH,
         environment: {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1022,33 +1035,19 @@ export class ApiGatewayStack extends cdk.Stack {
       }
     )
 
-    // Grant SSM parameter access for HaikuArn and SonnetArn
-      lambdaTextGen.addToRolePolicy(
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: ["ssm:GetParameter", "ssm:GetParameters"],
-          resources: [
-            `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/HaikuArn`,
-            `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/SonnetArn`,
-          ],
-        })
-      );
-
-      // Add SSM parameter names as environment variables
-      lambdaTextGen.addEnvironment("HAIKU_ARN", "/KBA/LLM/HaikuArn");
-      lambdaTextGen.addEnvironment("SONNET_ARN", "/KBA/LLM/SonnetArn");
-
-
     lambdaTextGen.addToRolePolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        actions:["ssm:GetParameter", "ssm:GetParameters"],
+        actions: ["ssm:GetParameter", "ssm:GetParameters"],
         resources: [
           `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/HaikuArn`,
           `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/SonnetArn`,
         ],
       })
     );
+
+    lambdaTextGen.addEnvironment("HAIKU_ARN", "/KBA/LLM/HaikuArn");
+    lambdaTextGen.addEnvironment("SONNET_ARN", "/KBA/LLM/SonnetArn");
 
     // --- Bedrock Input Guardrail ---
     const guardrailConfig = {
@@ -1163,7 +1162,7 @@ export class ApiGatewayStack extends cdk.Stack {
     }));
 
 
-    // Bedrock permissions
+    // Bedrock permissions — scoped to models actually in use
     const textGenBedrockPolicyStatement = new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
@@ -1174,11 +1173,7 @@ export class ApiGatewayStack extends cdk.Stack {
         "bedrock:ConverseStream",
       ],
       resources: [
-        `arn:aws:bedrock:${this.region}::foundation-model/meta.llama3-70b-instruct-v1:0`,
-        `arn:aws:bedrock:us-east-1::foundation-model/cohere.embed-v4:0`,
         `arn:aws:bedrock:${this.region}::foundation-model/cohere.embed-english-v3`,
-        `arn:aws:bedrock:${this.region}::foundation-model/mistral.mistral-large-2402-v1:0`,
-        `arn:aws:bedrock:${this.region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0`,
         `arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-sonnet-4-6`,
         `arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6`,
         `arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0`,
@@ -1202,10 +1197,11 @@ export class ApiGatewayStack extends cdk.Stack {
       },
       functionName: `${id}-userFunction`,
       memorySize: 512,
-      // reservedConcurrentExecutions: 50,
+      reservedConcurrentExecutions: 20,
       layers: [postgres],
-      role: lambdaRole,
+      role: publicRole,
       tracing: lambda.Tracing.ACTIVE,
+      logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
     lambdaUserFunction.addEnvironment('ALLOWED_ORIGIN_PARAM', this.allowedOriginsParamName);
@@ -1222,7 +1218,7 @@ export class ApiGatewayStack extends cdk.Stack {
       sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${this.api.restApiId}/*/*/member*`,
     });
 
-    //Allows Invoking Functions Easily for Testing Purposes
+    // TODO: remove AllowTestInvoke grants before prod hardening (test-invoke-stage is not needed in production)
     lambdaUserFunction.addPermission("AllowTestInvoke", {
       principal: new iam.ServicePrincipal("apigateway.amazonaws.com"),
       action: "lambda:InvokeFunction",
@@ -1253,8 +1249,9 @@ export class ApiGatewayStack extends cdk.Stack {
       functionName: `${id}-systemMessagesFunction`,
       memorySize: 512,
       layers: [postgres],
-      role: lambdaRole,
+      role: publicRole,
       tracing: lambda.Tracing.ACTIVE,
+      logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
     lambdaSystemMessagesFunction.addEnvironment('ALLOWED_ORIGIN_PARAM', this.allowedOriginsParamName);
@@ -1304,8 +1301,9 @@ export class ApiGatewayStack extends cdk.Stack {
         functionName: `${id}-chatSessionFunction`,
         memorySize: 512,
         layers: [postgres],
-        role: lambdaRole,
+        role: publicRole,
         tracing: lambda.Tracing.ACTIVE,
+        logRetention: logs.RetentionDays.ONE_MONTH,
       }
     );
 
@@ -1340,13 +1338,13 @@ export class ApiGatewayStack extends cdk.Stack {
         environment: {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
-
         },
         functionName: `${id}-adminFunction`,
         memorySize: 512,
         layers: [postgres],
         role: lambdaRole,
         tracing: lambda.Tracing.ACTIVE,
+        logRetention: logs.RetentionDays.ONE_MONTH,
       }
     );
 
@@ -1617,7 +1615,7 @@ export class ApiGatewayStack extends cdk.Stack {
       code: lambda.Code.fromAsset("lambda/websocket"),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
-      // reservedConcurrentExecutions: 50,
+      reservedConcurrentExecutions: 20,
       tracing: lambda.Tracing.ACTIVE,
       vpc: vpcStack.vpc,
       environment: {
@@ -1626,6 +1624,7 @@ export class ApiGatewayStack extends cdk.Stack {
         RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
       },
       layers: [jwt, postgres],
+      logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
     new cloudwatch.Alarm(this, 'ConnectFunctionConcurrencyAlarm', {
@@ -1673,12 +1672,17 @@ export class ApiGatewayStack extends cdk.Stack {
       code: lambda.Code.fromAsset("lambda/websocket"),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
-      // reservedConcurrentExecutions: 50,
+      reservedConcurrentExecutions: 20,
       tracing: lambda.Tracing.ACTIVE,
+      vpc: vpcStack.vpc,
       environment: {
         TEXT_GEN_FUNCTION_NAME: lambdaTextGen.functionName,
+        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+        RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
       },
+      layers: [postgres],
       functionName: `${id}-DefaultFunction`,
+      logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
     new cloudwatch.Alarm(this, 'DefaultFunctionConcurrencyAlarm', {
@@ -1724,6 +1728,7 @@ export class ApiGatewayStack extends cdk.Stack {
     this.secret.grantRead(connectFunction);
     db.secretPathUser.grantRead(connectFunction);
     db.secretPathUser.grantRead(disconnectFunction);
+    db.secretPathUser.grantRead(defaultFunction);
     // Grant the default function permission to invoke the text generation function
     lambdaTextGen.grantInvoke(defaultFunction);
 
@@ -1831,7 +1836,7 @@ export class ApiGatewayStack extends cdk.Stack {
 
     // Wire topic ARN into glueStatusSync and exportProcessor
     const notificationTopicArn = notificationTopic.topicArn;
-    notificationTopic.grantPublish(lambdaRole);          // glueStatusSync uses lambdaRole
+    notificationTopic.grantPublish(lambdaRole);          // adminFunction + glueStatusSync use lambdaRole
     notificationTopic.grantPublish(exportProcessorRole);
 
     exportProcessorLambda.addEnvironment("NOTIFICATION_TOPIC_ARN", notificationTopicArn);

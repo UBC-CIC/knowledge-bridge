@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
-import boto3
+from helpers.bedrock import get_bedrock_llm_client
 import helpers.config as config
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,7 @@ def _call_llm_verifier(
         sources=sources,
     )
 
-    bedrock = boto3.client("bedrock-runtime", region_name=llm_region)
+    bedrock = get_bedrock_llm_client(llm_region)
 
     try:
         response = bedrock.converse(

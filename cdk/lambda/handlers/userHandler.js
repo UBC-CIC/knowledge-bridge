@@ -1,43 +1,7 @@
-const postgres = require("postgres");
 const { getCorsHeaders } = require("./utils/cors.js");
-const {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} = require("@aws-sdk/client-secrets-manager");
 const crypto = require("crypto");
 const { validateUUID } = require("./utils/validation.js");
-
-let sqlConnection;
-const secretsManager = new SecretsManagerClient();
-
-
-const initConnection = async () => {
-  if (!sqlConnection) {
-    try {
-      const getSecretValueCommand = new GetSecretValueCommand({
-        SecretId: process.env.SM_DB_CREDENTIALS,
-      });
-      const secretResponse = await secretsManager.send(getSecretValueCommand);
-      const credentials = JSON.parse(secretResponse.SecretString);
-
-      const connectionConfig = {
-        host: process.env.RDS_PROXY_ENDPOINT,
-        port: credentials.port,
-        username: credentials.username,
-        password: credentials.password,
-        database: credentials.dbname,
-        ssl: { rejectUnauthorized: true },
-      };
-
-      sqlConnection = postgres(connectionConfig);
-      await sqlConnection`SELECT 1`;
-      console.log("Database connection initialized successfully");
-    } catch (error) {
-      console.error("Error initializing database connection:", error);
-      throw error;
-    }
-  }
-};
+const { initConnection, getSqlConnection } = require("./initializeConnection.js");
 
 const createResponse = async (event) => ({
     statusCode: 200,
@@ -84,7 +48,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const user = await sqlConnection`
+        const user = await getSqlConnection()`
           SELECT id, email, display_name, created_at, last_seen_at,
                 messages_sent, messages_window_started_at, metadata
           FROM users
@@ -98,7 +62,7 @@ exports.handler = async (event) => {
         }
 
         // update last_seen_at
-        await sqlConnection`
+        await getSqlConnection()`
           UPDATE users SET last_seen_at = NOW() WHERE id = ${userId}
         `;
 
@@ -149,7 +113,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const existingUser = await sqlConnection`
+        const existingUser = await getSqlConnection()`
           SELECT id
           FROM users
           WHERE id = ${userId}
@@ -162,7 +126,7 @@ exports.handler = async (event) => {
         }
 
         try {
-          const updatedUser = await sqlConnection`
+          const updatedUser = await getSqlConnection()`
             UPDATE users
             SET
               email = ${normalizedEmail},
@@ -211,7 +175,7 @@ exports.handler = async (event) => {
         }
 
         // Validate user exists (optional but nice)
-        const userExists = await sqlConnection`
+        const userExists = await getSqlConnection()`
           SELECT id FROM users WHERE id = ${userId}
         `;
         if (userExists.length === 0) {
@@ -221,7 +185,7 @@ exports.handler = async (event) => {
         }
 
         // Validate chat session exists AND belongs to user
-        const chatSession = await sqlConnection`
+        const chatSession = await getSqlConnection()`
           SELECT id, user_id
           FROM chat_sessions
           WHERE id = ${chatSessionId}
@@ -240,7 +204,7 @@ exports.handler = async (event) => {
         const limit = Math.min(parseInt(event.queryStringParameters?.limit) || 200, 1000);
         const offset = parseInt(event.queryStringParameters?.offset) || 0;
 
-        const rows = await sqlConnection`
+        const rows = await getSqlConnection()`
           SELECT
             m.id,
             m.chat_session_id,
@@ -335,7 +299,7 @@ exports.handler = async (event) => {
           : null;
 
         // Verify message belongs to this session and session belongs to this user
-        const msg = await sqlConnection`
+        const msg = await getSqlConnection()`
           SELECT m.id FROM chat_messages m
           JOIN chat_sessions s ON s.id = m.chat_session_id
           WHERE m.id = ${messageId}
@@ -349,7 +313,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        await sqlConnection`
+        await getSqlConnection()`
           INSERT INTO message_ratings (message_id, user_id, is_positive, comment, category)
           VALUES (${messageId}, ${userId}, ${parsedBody.is_positive}, ${comment}, ${category}::feedback_category)
           ON CONFLICT (message_id, user_id)
@@ -370,7 +334,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const sources = await sqlConnection`
+        const sources = await getSqlConnection()`
           SELECT DISTINCT ss.id, ss.name, ss.source_url
           FROM user_memberships um
           JOIN site_source_access ssa ON ssa.entra_group_id = um.entra_group_id
@@ -391,6 +355,5 @@ exports.handler = async (event) => {
     handleError(error, response);
   }
 
-  console.log(response);
   return response;
 };

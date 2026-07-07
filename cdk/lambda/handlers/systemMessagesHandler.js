@@ -1,41 +1,6 @@
-const postgres = require("postgres");
 const { getCorsHeaders } = require("./utils/cors.js");
-const {
-    SecretsManagerClient,
-    GetSecretValueCommand,
-} = require("@aws-sdk/client-secrets-manager");
 const crypto = require("crypto");
-
-let sqlConnection;
-const secretsManager = new SecretsManagerClient();
-
-const initConnection = async () => {
-    if (!sqlConnection) {
-        try {
-            const getSecretValueCommand = new GetSecretValueCommand({
-                SecretId: process.env.SM_DB_CREDENTIALS,
-            });
-            const secretResponse = await secretsManager.send(getSecretValueCommand);
-            const credentials = JSON.parse(secretResponse.SecretString);
-
-            const connectionConfig = {
-                host: process.env.RDS_PROXY_ENDPOINT,
-                port: credentials.port,
-                username: credentials.username,
-                password: credentials.password,
-                database: credentials.dbname,
-                ssl: { rejectUnauthorized: true },
-            };
-
-            sqlConnection = postgres(connectionConfig);
-            await sqlConnection`SELECT 1`;
-            console.log("Database connection initialized successfully");
-        } catch (error) {
-            console.error("Error initializing database connection:", error);
-            throw error;
-        }
-    }
-};
+const { initConnection, getSqlConnection } = require("./initializeConnection.js");
 
 const createResponse = async (event) => ({
     statusCode: 200,
@@ -98,7 +63,7 @@ exports.handler = async (event) => {
                 }
 
                 // Fetch active message of this type
-                const rows = await sqlConnection`
+                const rows = await getSqlConnection()`
                     SELECT id, type, content, version, is_active, created_at
                     FROM system_messages
                     WHERE type = ${messageType}
@@ -128,7 +93,7 @@ exports.handler = async (event) => {
             }
 
             case "GET /system-settings/max-characters-per-user-message": {
-                const rows = await sqlConnection`
+                const rows = await getSqlConnection()`
                 SELECT max_characters_per_user_message
                 FROM system_settings
                 ORDER BY updated_at DESC NULLS LAST
@@ -151,6 +116,5 @@ exports.handler = async (event) => {
         handleError(error, response);
     }
 
-    console.log(response);
     return response;
 };

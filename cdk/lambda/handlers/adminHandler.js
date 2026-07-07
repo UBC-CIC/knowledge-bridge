@@ -10,18 +10,14 @@
  * Only authenticated admin users can access these endpoints.
  */
 
-const postgres = require("postgres");
 const { getCorsHeaders } = require("./utils/cors.js");
-const {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} = require("@aws-sdk/client-secrets-manager");
 const { GlueClient, StartJobRunCommand, GetJobRunCommand, BatchStopJobRunCommand } = require("@aws-sdk/client-glue");
 const { CloudWatchLogsClient, GetLogEventsCommand, DescribeLogStreamsCommand } = require("@aws-sdk/client-cloudwatch-logs");
 const { SchedulerClient, GetScheduleCommand, CreateScheduleCommand, UpdateScheduleCommand, DeleteScheduleCommand } = require("@aws-sdk/client-scheduler");
 const { SQSClient, SendMessageCommand } = require("@aws-sdk/client-sqs");
 const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { initConnection, getSqlConnection } = require("./initializeConnection.js");
 
 const PRESIGN_TTL = 900; // 15 minutes
 
@@ -30,37 +26,6 @@ const logsClient = new CloudWatchLogsClient({});
 const schedulerClient = new SchedulerClient({});
 const sqsClient = new SQSClient({});
 const s3Client = new S3Client({});
-
-let sqlConnection;
-const secretsManager = new SecretsManagerClient();
-
-const initConnection = async () => {
-  if (!sqlConnection) {
-    try {
-      const getSecretValueCommand = new GetSecretValueCommand({
-        SecretId: process.env.SM_DB_CREDENTIALS,
-      });
-      const secretResponse = await secretsManager.send(getSecretValueCommand);
-      const credentials = JSON.parse(secretResponse.SecretString);
-
-      const connectionConfig = {
-        host: process.env.RDS_PROXY_ENDPOINT,
-        port: credentials.port,
-        username: credentials.username,
-        password: credentials.password,
-        database: credentials.dbname,
-        ssl: { rejectUnauthorized: true },
-      };
-
-      sqlConnection = postgres(connectionConfig);
-      await sqlConnection`SELECT 1`;
-      console.log("Database connection initialized successfully");
-    } catch (error) {
-      console.error("Error initializing database connection:", error);
-      throw error;
-    }
-  }
-};
 
 const createResponse = async (event) => ({
     statusCode: 200,
@@ -97,7 +62,7 @@ exports.handler = async (event) => {
       console.error("GLUE_JOB_NAME not configured for scheduled invocation");
       return;
     }
-    const inFlight = await sqlConnection`
+    const inFlight = await getSqlConnection()`
       SELECT id FROM ingestion_runs
       WHERE run_type = 'site' AND status IN ('running', 'stopping')
       LIMIT 1
@@ -106,7 +71,7 @@ exports.handler = async (event) => {
       console.log("Scheduled trigger skipped — a job is already in-flight");
       return;
     }
-    const scheduleRow = await sqlConnection`SELECT updated_by FROM ingestion_schedule LIMIT 1`;
+    const scheduleRow = await getSqlConnection()`SELECT updated_by FROM ingestion_schedule LIMIT 1`;
     const scheduledByUserId = scheduleRow[0]?.updated_by?.toString() ?? null;
     const metadataJson = {
       force_full: forceFull === "true",
@@ -114,7 +79,7 @@ exports.handler = async (event) => {
       triggered_by: "scheduler",
       ...(scheduledByUserId ? { triggered_by_user_id: scheduledByUserId } : {}),
     };
-    const inserted = await sqlConnection`
+    const inserted = await getSqlConnection()`
       INSERT INTO ingestion_runs (run_type, triggered_by, status, started_at, metadata)
       VALUES ('site', 'scheduler', 'running', now(), ${JSON.stringify(metadataJson)}::jsonb)
       RETURNING id
@@ -128,7 +93,7 @@ exports.handler = async (event) => {
         "--INGESTION_RUN_ID": ingestionRunId,
       },
     }));
-    await sqlConnection`
+    await getSqlConnection()`
       UPDATE ingestion_runs SET glue_run_id = ${glueResp.JobRunId} WHERE id = ${ingestionRunId}
     `;
     console.log(`Scheduled ingestion started: runId=${ingestionRunId} glueRunId=${glueResp.JobRunId}`);
@@ -187,7 +152,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const updated = await sqlConnection`
+        const updated = await getSqlConnection()`
           UPDATE users
           SET
             email = ${email},
@@ -217,7 +182,7 @@ exports.handler = async (event) => {
 
       // Fetch all system messages with version history
       case "GET /admin/system-messages": {
-        const rows = await sqlConnection`
+        const rows = await getSqlConnection()`
           SELECT
             sm.id,
             sm.type,
@@ -745,7 +710,7 @@ exports.handler = async (event) => {
 
         // Insert new admin user into database
         // Using postgres library template literal syntax for better performance
-        const result = await sqlConnection`
+        const result = await getSqlConnection()`
           INSERT INTO users (display_name, email, institution_id)
           VALUES (${display_name}, ${email}, ${institution_id || null})
           RETURNING id, display_name, email, institution_id, created_at
@@ -787,7 +752,7 @@ exports.handler = async (event) => {
         // Helper: compute totals scoped by optional groupId and optional startDate
         const fetchTotals = async () => {
           if (!startDateIso && !groupId) {
-            const rows = await sqlConnection`
+            const rows = await getSqlConnection()`
               SELECT
                 (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs) AS users,
                 (SELECT COUNT(cs.id)::int FROM chat_sessions cs) AS chat_sessions,
@@ -797,7 +762,7 @@ exports.handler = async (event) => {
             return rows[0];
           }
           if (!groupId) {
-            const rows = await sqlConnection`
+            const rows = await getSqlConnection()`
               SELECT
                 (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs WHERE cs.created_at >= ${startDateIso}) AS users,
                 (SELECT COUNT(cs.id)::int FROM chat_sessions cs WHERE cs.created_at >= ${startDateIso}) AS chat_sessions,
@@ -807,7 +772,7 @@ exports.handler = async (event) => {
             return rows[0];
           }
           if (!startDateIso) {
-            const rows = await sqlConnection`
+            const rows = await getSqlConnection()`
               SELECT
                 (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}) AS users,
                 (SELECT COUNT(cs.id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}) AS chat_sessions,
@@ -816,7 +781,7 @@ exports.handler = async (event) => {
             `;
             return rows[0];
           }
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT
               (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cs.created_at >= ${startDateIso}) AS users,
               (SELECT COUNT(cs.id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cs.created_at >= ${startDateIso}) AS chat_sessions,
@@ -837,7 +802,7 @@ exports.handler = async (event) => {
         let timeSeries;
         if (!groupId && !startDateIso) {
           // All time, all groups
-          timeSeries = await sqlConnection`
+          timeSeries = await getSqlConnection()`
             WITH date_series AS (
               SELECT generate_series(
                 DATE_TRUNC('day', (SELECT MIN(created_at) FROM chat_sessions)),
@@ -865,7 +830,7 @@ exports.handler = async (event) => {
           `;
         } else if (!groupId) {
           // Date-filtered, all groups
-          timeSeries = await sqlConnection`
+          timeSeries = await getSqlConnection()`
             WITH date_series AS (
               SELECT generate_series(DATE_TRUNC('day', ${startDateIso}::timestamp), DATE_TRUNC('day', NOW()), '1 day'::interval)::date AS date
             ),
@@ -889,7 +854,7 @@ exports.handler = async (event) => {
           `;
         } else if (!startDateIso) {
           // All time, specific group
-          timeSeries = await sqlConnection`
+          timeSeries = await getSqlConnection()`
             WITH date_series AS (
               SELECT generate_series(
                 DATE_TRUNC('day', (SELECT MIN(cs.created_at) FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId})),
@@ -918,7 +883,7 @@ exports.handler = async (event) => {
           `;
         } else {
           // Date-filtered, specific group
-          timeSeries = await sqlConnection`
+          timeSeries = await getSqlConnection()`
             WITH date_series AS (
               SELECT generate_series(DATE_TRUNC('day', ${startDateIso}::timestamp), DATE_TRUNC('day', NOW()), '1 day'::interval)::date AS date
             ),
@@ -952,7 +917,7 @@ exports.handler = async (event) => {
 
       // Fetch latest system settings
       case "GET /admin/system-settings": {
-        const rows = await sqlConnection`
+        const rows = await getSqlConnection()`
           WITH latest AS (
             SELECT *
             FROM system_settings
@@ -1005,7 +970,7 @@ exports.handler = async (event) => {
           const limit = Math.min(parseInt(qs.limit ?? "20", 10), 50);
           const offset = Math.max(parseInt(qs.offset ?? "0", 10), 0);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT
               eg.id,
               eg.display_name,
@@ -1017,7 +982,7 @@ exports.handler = async (event) => {
             LIMIT ${limit} OFFSET ${offset}
           `;
 
-          const [{ total }] = await sqlConnection`
+          const [{ total }] = await getSqlConnection()`
             SELECT COUNT(*)::int AS total FROM entra_groups
           `;
 
@@ -1046,7 +1011,7 @@ exports.handler = async (event) => {
           const limit = Math.min(parseInt(qs.limit ?? "10", 10), 50);
           const offset = Math.max(parseInt(qs.offset ?? "0", 10), 0);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT
               u.id,
               u.email,
@@ -1059,7 +1024,7 @@ exports.handler = async (event) => {
             LIMIT ${limit} OFFSET ${offset}
           `;
 
-          const [{ total }] = await sqlConnection`
+          const [{ total }] = await getSqlConnection()`
             SELECT COUNT(*)::int AS total
             FROM user_memberships
             WHERE entra_group_id = ${groupId}
@@ -1083,7 +1048,7 @@ exports.handler = async (event) => {
           const limit = Math.min(parseInt(qs.limit ?? "10", 10), 50);
           const offset = Math.max(parseInt(qs.offset ?? "0", 10), 0);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT u.id, u.email, u.display_name, u.last_seen_at
             FROM users u
             WHERE NOT EXISTS (
@@ -1093,7 +1058,7 @@ exports.handler = async (event) => {
             LIMIT ${limit} OFFSET ${offset}
           `;
 
-          const [{ total }] = await sqlConnection`
+          const [{ total }] = await getSqlConnection()`
             SELECT COUNT(*)::int AS total
             FROM users u
             WHERE NOT EXISTS (
@@ -1119,7 +1084,7 @@ exports.handler = async (event) => {
           const limit = Math.min(parseInt(qs.limit ?? "50", 10), 100); // cap limit to 100
           const offset = parseInt(qs.offset ?? "0", 10);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT id, email, display_name, created_at, last_seen_at
             FROM users
             ORDER BY COALESCE(last_seen_at, created_at) DESC
@@ -1151,7 +1116,7 @@ exports.handler = async (event) => {
           const limit = parseInt(qs.limit ?? "50", 10);
           const offset = parseInt(qs.offset ?? "0", 10);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT id, user_id, title, created_at, last_active_at
             FROM chat_sessions
             WHERE user_id = ${userId}
@@ -1184,7 +1149,7 @@ exports.handler = async (event) => {
           const limit = parseInt(qs.limit ?? "200", 10);
           const offset = parseInt(qs.offset ?? "0", 10);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
              SELECT
                m.id,
                m.chat_session_id,
@@ -1381,7 +1346,7 @@ exports.handler = async (event) => {
         const updatedByUserId = adminUserId;
 
         // Single UPDATE of the latest row (no â€œensure row existsâ€ step)
-        const updated = await sqlConnection`
+        const updated = await getSqlConnection()`
           WITH latest AS (
             SELECT id
             FROM system_settings
@@ -1448,7 +1413,7 @@ exports.handler = async (event) => {
         }
 
         // Block if a run is already in-flight (status check against DB)
-        const inFlight = await sqlConnection`
+        const inFlight = await getSqlConnection()`
           SELECT id FROM ingestion_runs
           WHERE run_type = 'site' AND status IN ('running', 'stopping')
           LIMIT 1
@@ -1466,7 +1431,7 @@ exports.handler = async (event) => {
           job_name: jobName,
           ...(ingestionAdminRows[0] ? { triggered_by_user_id: ingestionAdminRows[0].id.toString() } : {}),
         };
-        const inserted = await sqlConnection`
+        const inserted = await getSqlConnection()`
           INSERT INTO ingestion_runs (run_type, triggered_by, status, started_at, metadata)
           VALUES ('site', 'manual', 'running', now(), ${JSON.stringify(metadataJson)}::jsonb)
           RETURNING id
@@ -1484,7 +1449,7 @@ exports.handler = async (event) => {
         const glueRunId = glueResp.JobRunId;
 
         // Store the glue run ID back on the row
-        await sqlConnection`
+        await getSqlConnection()`
           UPDATE ingestion_runs SET glue_run_id = ${glueRunId} WHERE id = ${ingestionRunId}
         `;
 
@@ -1501,7 +1466,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const activeRuns = await sqlConnection`
+        const activeRuns = await getSqlConnection()`
           SELECT id, glue_run_id FROM ingestion_runs
           WHERE run_type = 'site' AND status = 'running'
           LIMIT 1
@@ -1521,7 +1486,7 @@ exports.handler = async (event) => {
           }));
         }
 
-        await sqlConnection`
+        await getSqlConnection()`
           UPDATE ingestion_runs SET status = 'stopping' WHERE id = ${runId}
         `;
 
@@ -1537,7 +1502,7 @@ exports.handler = async (event) => {
 
         // Reconcile any 'stopping' rows: if Glue reports the run is no longer running, mark stopped
         if (jobName) {
-          const stoppingRows = await sqlConnection`
+          const stoppingRows = await getSqlConnection()`
             SELECT id, glue_run_id FROM ingestion_runs
             WHERE run_type = 'site' AND status = 'stopping' AND glue_run_id IS NOT NULL
           `;
@@ -1547,7 +1512,7 @@ exports.handler = async (event) => {
               const glueState = jr.JobRun?.JobRunState;
               console.log(`Reconcile stopping run ${row.id}: Glue state=${glueState}`);
               if (glueState && !["RUNNING", "STARTING", "STOPPING"].includes(glueState)) {
-                await sqlConnection`
+                await getSqlConnection()`
                   UPDATE ingestion_runs
                   SET status = 'stopped', finished_at = now()
                   WHERE id = ${row.id}
@@ -1559,11 +1524,11 @@ exports.handler = async (event) => {
           }
         }
 
-        const [{ count: totalCount }] = await sqlConnection`
+        const [{ count: totalCount }] = await getSqlConnection()`
           SELECT COUNT(*) FROM ingestion_runs WHERE run_type = 'site'
         `;
 
-        const runs = await sqlConnection`
+        const runs = await getSqlConnection()`
           SELECT
             id, glue_run_id, run_type, triggered_by, status,
             started_at, finished_at,
@@ -1640,7 +1605,7 @@ exports.handler = async (event) => {
           const cron = rawExpr.replace(/^cron\(/, "").replace(/\)$/, "");
 
           // Fetch last-updated metadata from DB
-          const [meta] = await sqlConnection`
+          const [meta] = await getSqlConnection()`
             SELECT u.email AS updated_by_email, s.updated_at
             FROM ingestion_schedule s
             LEFT JOIN users u ON u.id = s.updated_by
@@ -1715,12 +1680,12 @@ exports.handler = async (event) => {
         const updatedByUserId = event.requestContext?.authorizer?.userId ?? null;
 
         // Upsert single row in ingestion_schedule
-        await sqlConnection`
+        await getSqlConnection()`
           INSERT INTO ingestion_schedule (cron, timezone, enabled, force_full, updated_by, updated_at)
           VALUES (${cron}, ${timezone}, ${enabled !== false}, ${force_full === true}, ${updatedByUserId}, now())
           ON CONFLICT DO NOTHING
         `;
-        await sqlConnection`
+        await getSqlConnection()`
           UPDATE ingestion_schedule
           SET cron = ${cron}, timezone = ${timezone}, enabled = ${enabled !== false},
               force_full = ${force_full === true}, updated_by = ${updatedByUserId}, updated_at = now()
@@ -1746,7 +1711,7 @@ exports.handler = async (event) => {
         }
         try {
           await schedulerClient.send(new DeleteScheduleCommand({ Name: scheduleName }));
-          await sqlConnection`DELETE FROM ingestion_schedule`;
+          await getSqlConnection()`DELETE FROM ingestion_schedule`;
           response.body = JSON.stringify({ deleted: true });
         } catch (err) {
           if (err.name === "ResourceNotFoundException") {
@@ -1789,7 +1754,7 @@ exports.handler = async (event) => {
 
         const exportTypeValue = scope === 'analytics' ? 'analytics' : 'chat';
 
-        const inserted = await sqlConnection`
+        const inserted = await getSqlConnection()`
           INSERT INTO export_runs (requested_by, status, scope, scope_id, metadata, export_type)
           VALUES (${exportAdminUserId}::uuid, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null}::uuid, ${exportMetadata}::jsonb, ${exportTypeValue}::export_type)
           RETURNING id::text
@@ -1801,7 +1766,7 @@ exports.handler = async (event) => {
           MessageBody: JSON.stringify({ exportRunId }),
         }));
 
-        await sqlConnection`
+        await getSqlConnection()`
           UPDATE export_runs SET status = 'processing' WHERE id = ${exportRunId}
         `;
 
@@ -1824,7 +1789,7 @@ exports.handler = async (event) => {
         const offset = Math.max(parseInt(qs.offset ?? '0', 10), 0);
         const exportTypeFilter = ['chat', 'analytics'].includes(qs.export_type) ? qs.export_type : null;
 
-        const rawRuns = await sqlConnection`
+        const rawRuns = await getSqlConnection()`
           SELECT
             er.id,
             er.status,
@@ -1854,7 +1819,7 @@ exports.handler = async (event) => {
           LEFT JOIN users u2             ON u2.id = er.scope_id AND er.scope::text = 'user'
           LEFT JOIN entra_groups eg_meta ON eg_meta.id::text = (er.metadata->>'groupId') AND er.scope::text = 'analytics' AND jsonb_typeof(er.metadata->'groupId') = 'string'
           WHERE er.requested_by = ${adminUserId}
-          ${exportTypeFilter ? sqlConnection`AND er.export_type = ${exportTypeFilter}::export_type` : sqlConnection``}
+          ${exportTypeFilter ? getSqlConnection()`AND er.export_type = ${exportTypeFilter}::export_type` : getSqlConnection()``}
           ORDER BY er.requested_at DESC
           LIMIT ${limit} OFFSET ${offset}
         `;
@@ -1886,10 +1851,10 @@ exports.handler = async (event) => {
           return { ...rest, scope_label, presigned_url };
         }));
 
-        const [{ total }] = await sqlConnection`
+        const [{ total }] = await getSqlConnection()`
           SELECT COUNT(*)::int AS total FROM export_runs
           WHERE requested_by = ${adminUserId}
-          ${exportTypeFilter ? sqlConnection`AND export_type = ${exportTypeFilter}::export_type` : sqlConnection``}
+          ${exportTypeFilter ? getSqlConnection()`AND export_type = ${exportTypeFilter}::export_type` : getSqlConnection()``}
         `;
 
         response.statusCode = 200;
@@ -1902,14 +1867,14 @@ exports.handler = async (event) => {
         const notifUserId = event.requestContext?.authorizer?.userId ?? null;
         if (!notifUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
-        const notifications = await sqlConnection`
+        const notifications = await getSqlConnection()`
           SELECT id::text, type::text, title, message, metadata, created_at
           FROM notifications
           WHERE user_id::text = ${notifUserId}
           ORDER BY created_at DESC
           LIMIT 20
         `;
-        const [{ total: notifTotal }] = await sqlConnection`
+        const [{ total: notifTotal }] = await getSqlConnection()`
           SELECT COUNT(*)::int AS total FROM notifications WHERE user_id::text = ${notifUserId}
         `;
         response.statusCode = 200;
@@ -1922,7 +1887,7 @@ exports.handler = async (event) => {
         const clearUserId = event.requestContext?.authorizer?.userId ?? null;
         if (!clearUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
-        await sqlConnection`DELETE FROM notifications WHERE user_id::text = ${clearUserId}`;
+        await getSqlConnection()`DELETE FROM notifications WHERE user_id::text = ${clearUserId}`;
         response.statusCode = 200;
         response.body = JSON.stringify({ success: true });
         break;
@@ -1936,7 +1901,7 @@ exports.handler = async (event) => {
         const notificationId = event.pathParameters?.notification_id;
         if (!notificationId) { response.statusCode = 400; response.body = JSON.stringify({ error: "notification_id required" }); break; }
 
-        const deleted = await sqlConnection`
+        const deleted = await getSqlConnection()`
           DELETE FROM notifications
           WHERE id::text = ${notificationId} AND user_id::text = ${dismissUserId}
           RETURNING id::text
@@ -1960,7 +1925,7 @@ exports.handler = async (event) => {
             ? feedbackQs.category
             : null;
 
-          const feedbackRows = await sqlConnection`
+          const feedbackRows = await getSqlConnection()`
             SELECT
               mr.id::text,
               mr.is_positive,
@@ -2014,7 +1979,7 @@ exports.handler = async (event) => {
           const summaryFrom = summaryQs.from || null;
           const summaryTo = summaryQs.to || null;
 
-          const dislikeTrend = await sqlConnection`
+          const dislikeTrend = await getSqlConnection()`
             SELECT date_trunc('day', mr.created_at)::date::text AS day, COUNT(*)::int AS count
             FROM message_ratings mr
             WHERE mr.is_positive = false
@@ -2023,7 +1988,7 @@ exports.handler = async (event) => {
             GROUP BY 1 ORDER BY 1
           `;
 
-          const likeTrend = await sqlConnection`
+          const likeTrend = await getSqlConnection()`
             SELECT date_trunc('day', mr.created_at)::date::text AS day, COUNT(*)::int AS count
             FROM message_ratings mr
             WHERE mr.is_positive = true
@@ -2041,7 +2006,7 @@ exports.handler = async (event) => {
           });
           const trend = Object.values(dayMap).sort((a, b) => a.day.localeCompare(b.day));
 
-          const categoryCounts = await sqlConnection`
+          const categoryCounts = await getSqlConnection()`
             SELECT
               mr.category::text AS category,
               COUNT(*)::int AS count
@@ -2052,14 +2017,14 @@ exports.handler = async (event) => {
             GROUP BY 1
           `;
 
-          const totalLikes = await sqlConnection`
+          const totalLikes = await getSqlConnection()`
             SELECT COUNT(*)::int AS count FROM message_ratings mr
             WHERE mr.is_positive = true
               AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
               AND (${summaryTo}::timestamptz IS NULL OR mr.created_at <= ${summaryTo}::timestamptz)
           `;
 
-          const totalDislikes = await sqlConnection`
+          const totalDislikes = await getSqlConnection()`
             SELECT COUNT(*)::int AS count FROM message_ratings mr
             WHERE mr.is_positive = false
               AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
@@ -2101,9 +2066,5 @@ exports.handler = async (event) => {
     }
   }
 
-  // Log response for debugging (visible in AWS CloudWatch Logs)
-  console.log(response);
-
-  // Return HTTP response to API Gateway, which forwards it to the client
   return response;
 };

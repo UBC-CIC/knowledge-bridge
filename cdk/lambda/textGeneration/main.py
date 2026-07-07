@@ -34,27 +34,26 @@ def handler(event, context=None):
 
     query = body.get('query')
     is_intro_message = body.get('is_intro_message', False)
-    
-    # Perform Query Length Validation 
-    if len(query) > config.MAX_CHARACTERS_PER_USER_MESSAGE:
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': f'Query exceeds maximum length of {config.MAX_CHARACTERS_PER_USER_MESSAGE} characters'})
-        }
-    
+
     chat_session_id = body.get('chat_session_id')
-    
+
     # Fallback to path parameters
     if not chat_session_id and 'pathParameters' in event and event['pathParameters']:
         chat_session_id = event['pathParameters'].get('chat_session_id') or event['pathParameters'].get('id')
 
     user_id = body.get('user_id')
     logger.info(f"Request: user_id={user_id}, chat_session_id={chat_session_id}, is_intro={is_intro_message}")
-    
+
     if not query or not chat_session_id:
         return {
             'statusCode': 400,
             'body': json.dumps({'error': 'Missing query or chat_session_id'})
+        }
+
+    if len(query) > config.MAX_CHARACTERS_PER_USER_MESSAGE:
+        return {
+            'statusCode': 400,
+            'body': json.dumps({'error': f'Query exceeds maximum length of {config.MAX_CHARACTERS_PER_USER_MESSAGE} characters'})
         }
 
     # Sanitize session ID before querying DB
@@ -175,7 +174,7 @@ def handler(event, context=None):
 
         return {
             'statusCode': status_code,
-            'headers': { 'Content-Type': 'application/json', **get_cors_headers(event if 'event' in locals() else {}) },
+            'headers': { 'Content-Type': 'application/json', **get_cors_headers(event) },
             'body': json.dumps(response_body)
         }
         
@@ -183,6 +182,6 @@ def handler(event, context=None):
         logger.error(f"Error: {e}", exc_info=True)
         return {
             'statusCode': 500,
-            'headers': { 'Content-Type': 'application/json', **get_cors_headers(event if 'event' in locals() else {}) },
+            'headers': { 'Content-Type': 'application/json', **get_cors_headers(event) },
             'body': json.dumps({'error': 'Internal server error'})
         }
