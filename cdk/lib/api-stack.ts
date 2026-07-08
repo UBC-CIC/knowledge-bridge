@@ -384,7 +384,7 @@ export class ApiGatewayStack extends cdk.Stack {
         tracingEnabled: true,
         description: "Deployment with flashcard support - Nov 18 2025",
         loggingLevel: apigateway.MethodLoggingLevel.INFO,
-        dataTraceEnabled: true,
+        dataTraceEnabled: false, // TODO: enable temporarily for debugging only, never in long-running prod
         metricsEnabled: true,
         
         accessLogDestination: new apigateway.LogGroupLogDestination(

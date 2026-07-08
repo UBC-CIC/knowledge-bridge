@@ -2,6 +2,7 @@ const { getCorsHeaders } = require("./utils/cors.js");
 const crypto = require("crypto");
 const { validateUUID } = require("./utils/validation.js");
 const { initConnection, getSqlConnection } = require("./initializeConnection.js");
+const { getAuthenticatedUserId } = require("./utils/handlerUtils.js");
 
 const createResponse = async (event) => ({
     statusCode: 200,
@@ -40,7 +41,7 @@ exports.handler = async (event) => {
 
 
       case "GET /user/{user_id}": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
         const userIdValidation = validateUUID(userId, "user_id");
         if (!userIdValidation.valid) {
           response.statusCode = 400;
@@ -72,7 +73,7 @@ exports.handler = async (event) => {
 
       // Update's user with email so they no longer will be anonymous
       case "PUT /user/{user_id}": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
         const userIdValidation = validateUUID(userId, "user_id");
         if (!userIdValidation.valid) {
           response.statusCode = 400;
@@ -158,7 +159,7 @@ exports.handler = async (event) => {
       }
 
       case "GET /user/{user_id}/chat_sessions/{chat_session_id}/chat_history": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
         const chatSessionId = event.pathParameters?.chat_session_id;
 
         const userIdValidation = validateUUID(userId, "user_id");
@@ -251,7 +252,7 @@ exports.handler = async (event) => {
       }
 
       case "POST /user/{user_id}/chat_sessions/{chat_session_id}/messages/{message_id}/rating": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
         const chatSessionId = event.pathParameters?.chat_session_id;
         const messageId = event.pathParameters?.message_id;
 
@@ -326,7 +327,7 @@ exports.handler = async (event) => {
       }
 
       case "GET /user/{user_id}/accessible_sources": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
         const userIdValidation = validateUUID(userId, "user_id");
         if (!userIdValidation.valid) {
           response.statusCode = 400;

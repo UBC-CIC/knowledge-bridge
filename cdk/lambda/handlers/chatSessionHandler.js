@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const { getCorsHeaders } = require("./utils/cors.js");
 const { initConnection, getSqlConnection } = require("./initializeConnection.js");
+const { getAuthenticatedUserId } = require("./utils/handlerUtils.js");
 
 const createResponse = async (event) => ({
     statusCode: 200,
@@ -32,11 +33,11 @@ exports.handler = async (event) => {
 
     switch (pathData) {
       case "GET /chat_sessions/user/{user_id}": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
 
         if (!userId) {
-          response.statusCode = 400;
-          response.body = JSON.stringify({ error: "user_id is required" });
+          response.statusCode = 401;
+          response.body = JSON.stringify({ error: "Authentication required" });
           break;
         }
 
@@ -54,11 +55,11 @@ exports.handler = async (event) => {
 
       case "POST /chat_sessions": {
         const body = parseBody(event.body);
-        const userId = body.user_id || body.userId || body.user_sessions_session_id;
+        const userId = getAuthenticatedUserId(event);
 
         if (!userId) {
-          response.statusCode = 400;
-          response.body = JSON.stringify({ error: "user_id is required" });
+          response.statusCode = 401;
+          response.body = JSON.stringify({ error: "Authentication required" });
           break;
         }
 
@@ -97,11 +98,7 @@ exports.handler = async (event) => {
 
       case "PUT /chat_sessions/{chat_session_id}": {
         const chatSessionId = event.pathParameters?.chat_session_id;
-
-        // Accept both names for compatibility while you transition
-        const userId =
-          event.queryStringParameters?.user_id ||
-          event.queryStringParameters?.user_session_id;
+        const userId = getAuthenticatedUserId(event);
 
         if (!chatSessionId) {
           response.statusCode = 400;
@@ -110,8 +107,8 @@ exports.handler = async (event) => {
         }
 
         if (!userId) {
-          response.statusCode = 400;
-          response.body = JSON.stringify({ error: "user_id is required" });
+          response.statusCode = 401;
+          response.body = JSON.stringify({ error: "Authentication required" });
           break;
         }
 
@@ -157,7 +154,7 @@ exports.handler = async (event) => {
 
       case "GET /chat_sessions/{chat_session_id}/chat_history": {
         const chatSessionId = event.pathParameters?.chat_session_id;
-        const authenticatedUserId = event?.requestContext?.authorizer?.userId;
+        const authenticatedUserId = getAuthenticatedUserId(event);
 
         if (!chatSessionId) {
           response.statusCode = 400;
@@ -214,11 +211,7 @@ exports.handler = async (event) => {
 
       case "DELETE /chat_sessions/{chat_session_id}": {
         const chatSessionId = event.pathParameters?.chat_session_id;
-
-        // Accept both names for compatibility while you transition
-        const userId =
-          event.queryStringParameters?.user_id ||
-          event.queryStringParameters?.user_session_id;
+        const userId = getAuthenticatedUserId(event);
 
         if (!chatSessionId) {
           response.statusCode = 400;
@@ -227,8 +220,8 @@ exports.handler = async (event) => {
         }
 
         if (!userId) {
-          response.statusCode = 400;
-          response.body = JSON.stringify({ error: "user_id is required" });
+          response.statusCode = 401;
+          response.body = JSON.stringify({ error: "Authentication required" });
           break;
         }
 

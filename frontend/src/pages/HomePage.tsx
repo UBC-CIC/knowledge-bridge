@@ -126,7 +126,7 @@ export default function HomePage() {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ user_sessions_session_id: userId }),
+          body: JSON.stringify({}),
         }
       );
       if (!createResponse.ok) throw new Error("Failed to create chat session");
@@ -167,9 +167,8 @@ export default function HomePage() {
 
     try {
       const token = await getToken();
-      const url = new URL(`${import.meta.env.VITE_API_ENDPOINT}/chat_sessions/${sessionId}`);
-      url.searchParams.set("user_id", userId);
-      const response = await fetch(url.toString(), {
+      const url = `${import.meta.env.VITE_API_ENDPOINT}/chat_sessions/${sessionId}`;
+      const response = await fetch(url, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,

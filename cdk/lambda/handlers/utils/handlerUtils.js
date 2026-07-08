@@ -30,10 +30,14 @@ const handleError = (error, response) => {
   response.body = JSON.stringify({ error: "Internal server error" });
 };
 
+const getAuthenticatedUserId = (event) =>
+  event.requestContext?.authorizer?.userId;
+
 module.exports = {
   initConnection,
   createResponse,
   parseBody,
   handleError,
-  getSqlConnection: () => global.sqlConnection
+  getSqlConnection: () => global.sqlConnection,
+  getAuthenticatedUserId,
 };
