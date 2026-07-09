@@ -25,12 +25,8 @@ Amplify.configure({
         oauth: {
           domain: "cic-kba.auth.ca-central-1.amazoncognito.com",
           scopes: ["openid", "email", "profile"],
-          redirectSignIn: [
-            import.meta.env.VITE_APP_URL || "http://localhost:5173",
-          ],
-          redirectSignOut: [
-            import.meta.env.VITE_APP_URL || "http://localhost:5173",
-          ],
+          redirectSignIn: [window.location.origin],
+          redirectSignOut: [window.location.origin],
           responseType: "code",
         },
       },

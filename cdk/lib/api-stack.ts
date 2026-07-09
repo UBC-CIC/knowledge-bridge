@@ -242,20 +242,19 @@ export class ApiGatewayStack extends cdk.Stack {
     });
 
     // Cognito hosted UI domain — required for OIDC federation
-    // TODO: fix cyclic dependency between ApiStack and AmplifyStack so this URL
-    // can be derived dynamically instead of hardcoded. AmplifyStack deploys after
-    // ApiStack so the URL isn't known at synth time. Options: custom domain, SSM
-    // written by a pre-deploy step, or restructuring stack order.
-    const amplifyCallbackUrl = "https://main.d2ceee5eyalm6f.amplifyapp.com";
+    // Callback URLs are bootstrapped with localhost only. AmplifyStack adds the real
+    // Amplify URL via UpdateCognitoCallbackUrls custom resource after deploy.
     this.userPool.addDomain(`${id}-CognitoDomain`, {
       cognitoDomain: { domainPrefix: "cic-kba" },
     });
 
     // Microsoft Entra ID OIDC identity provider
-    // Pass credentials at deploy time: cdk deploy -c entraClientId=xxx -c entraClientSecret=yyy -c entraTenantId=zzz
-    const entraClientId = this.node.tryGetContext("entraClientId");
-    const entraClientSecret = this.node.tryGetContext("entraClientSecret");
-    const entraTenantId = this.node.tryGetContext("entraTenantId");
+    // Credentials are read from the existing KBA-SharePoint-Credentials secret in Secrets Manager.
+    // CloudFormation resolves {{resolve:secretsmanager:...}} at deploy time — never stored in context or template.
+    const entraSecret = secretsmanager.Secret.fromSecretNameV2(this, `${id}-EntraSecret`, "KBA-SharePoint-Credentials");
+    const entraClientId     = entraSecret.secretValueFromJson("client_id").unsafeUnwrap();
+    const entraClientSecret = entraSecret.secretValueFromJson("client_secret").unsafeUnwrap();
+    const entraTenantId     = entraSecret.secretValueFromJson("tenant_id").unsafeUnwrap();
 
     const entraOidcProvider = new cognito.UserPoolIdentityProviderOidc(this, `${id}-EntraOIDC`, {
       userPool: this.userPool,
@@ -298,8 +297,8 @@ export class ApiGatewayStack extends cdk.Stack {
           cognito.OAuthScope.EMAIL,
           cognito.OAuthScope.PROFILE,
         ],
-        callbackUrls: [amplifyCallbackUrl, "http://localhost:5173"],
-        logoutUrls: [amplifyCallbackUrl, "http://localhost:5173"],
+        callbackUrls: ["http://localhost:5173"],
+        logoutUrls: ["http://localhost:5173"],
       },
     });
     this.appClient.node.addDependency(entraOidcProvider);
@@ -438,7 +437,7 @@ export class ApiGatewayStack extends cdk.Stack {
               searchString: "/admin/ingestion/logs",
               fieldToMatch: { uriPath: {} },
               textTransformations: [{ priority: 0, type: "NONE" }],
-              positionalConstraint: "CONTAINS",
+              positionalConstraint: "STARTS_WITH",
             },
           },
           visibilityConfig: {
@@ -744,7 +743,7 @@ export class ApiGatewayStack extends cdk.Stack {
     const cwLogsPolicy = new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
-      resources: ["arn:aws:logs:*:*:*"],
+      resources: [`arn:aws:logs:${this.region}:${this.account}:*`],
     });
 
     const xrayPolicy = new iam.PolicyStatement({
@@ -850,7 +849,7 @@ export class ApiGatewayStack extends cdk.Stack {
           "logs:CreateLogStream",
           "logs:PutLogEvents",
         ],
-        resources: ["arn:aws:logs:*:*:*"],
+        resources: [`arn:aws:logs:${this.region}:${this.account}:*`],
       })
     );
 
@@ -873,7 +872,7 @@ export class ApiGatewayStack extends cdk.Stack {
     coglambdaRole.addToPolicy(
       new iam.PolicyStatement({
         actions: ["ssm:GetParameter"],
-        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/*`],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${this.allowedOriginsParamName}`],
       })
     );
 
@@ -895,6 +894,8 @@ export class ApiGatewayStack extends cdk.Stack {
         code: lambda.Code.fromAsset("lambda/adminAuthorizerFunction"),
         handler: "adminAuthorizerFunction.handler",
         timeout: Duration.seconds(30),
+        // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+        // before deploying. Verify in Lambda console → Account settings → Concurrency.
         reservedConcurrentExecutions: 10,
         environment: {
           SM_COGNITO_CREDENTIALS: this.secret.secretName,
@@ -934,6 +935,8 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "userAuthorizerFunction.handler",
         timeout: Duration.seconds(30),
         memorySize: 256,
+        // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+        // before deploying. Verify in Lambda console → Account settings → Concurrency.
         reservedConcurrentExecutions: 10,
         layers: [jwt],
         role: publicRole,
@@ -1024,6 +1027,8 @@ export class ApiGatewayStack extends cdk.Stack {
         code: lambda.Code.fromAsset("lambda/textGeneration"),
         timeout: cdk.Duration.seconds(60),
         role: textGenRole,
+        // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+        // before deploying. Verify in Lambda console → Account settings → Concurrency.
         reservedConcurrentExecutions: 20,
         layers: [psycopgLayer, powertoolsLayer],
         vpc: vpcStack.vpc,
@@ -1036,7 +1041,6 @@ export class ApiGatewayStack extends cdk.Stack {
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
           REGION: this.region,
           LLM_REGION: "us-west-2",
-          BEDROCK_MODEL_ID: `us.anthropic.claude-sonnet-4-6`,
         },
       }
     )
@@ -1204,6 +1208,8 @@ export class ApiGatewayStack extends cdk.Stack {
       },
       functionName: `${id}-userFunction`,
       memorySize: 512,
+      // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+      // before deploying. Verify in Lambda console → Account settings → Concurrency.
       reservedConcurrentExecutions: 20,
       layers: [postgres],
       role: publicRole,
@@ -1560,7 +1566,7 @@ export class ApiGatewayStack extends cdk.Stack {
     exportProcessorRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
-      resources: ["arn:aws:logs:*:*:*"],
+      resources: [`arn:aws:logs:${this.region}:${this.account}:*`],
     }));
     exportProcessorRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
@@ -1628,6 +1634,8 @@ export class ApiGatewayStack extends cdk.Stack {
       code: lambda.Code.fromAsset("lambda/websocket"),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
+      // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+      // before deploying. Verify in Lambda console → Account settings → Concurrency.
       reservedConcurrentExecutions: 20,
       tracing: lambda.Tracing.ACTIVE,
       vpc: vpcStack.vpc,
@@ -1687,6 +1695,8 @@ export class ApiGatewayStack extends cdk.Stack {
       code: lambda.Code.fromAsset("lambda/websocket"),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
+      // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+      // before deploying. Verify in Lambda console → Account settings → Concurrency.
       reservedConcurrentExecutions: 20,
       tracing: lambda.Tracing.ACTIVE,
       vpc: vpcStack.vpc,
@@ -1818,7 +1828,7 @@ export class ApiGatewayStack extends cdk.Stack {
     notificationDispatcherRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
-      resources: ["arn:aws:logs:*:*:*"],
+      resources: [`arn:aws:logs:${this.region}:${this.account}:*`],
     }));
     notificationDispatcherRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
@@ -1864,6 +1874,51 @@ export class ApiGatewayStack extends cdk.Stack {
       description: "WebSocket URL for real-time streaming",
       exportName: `${id}-WebSocketUrl`,
     });
+
+    // -- COGNITO ORIGIN SYNC --
+    // Listens for SSM PutParameter events on the AllowedOrigins param via EventBridge.
+    // When a custom domain is added to the param, this Lambda fires (push, no polling)
+    // and calls updateUserPoolClient to keep Cognito's callback/logout allowlist in sync.
+    // No VPC — only calls public AWS endpoints (SSM, Cognito); no RDS access needed.
+    const cognitoOriginSyncFn = new lambda.Function(this, `${id}-cognitoOriginSync`, {
+      functionName: `${id}-cognitoOriginSync`,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      handler: "utils/cognitoOriginSync.handler",
+      code: lambda.Code.fromAsset("lambda/handlers"),
+      timeout: Duration.seconds(30),
+      memorySize: 128,
+      logRetention: logs.RetentionDays.ONE_MONTH,
+      environment: {
+        USER_POOL_ID: this.userPool.userPoolId,
+        APP_CLIENT_ID: this.appClient.userPoolClientId,
+        ALLOWED_ORIGINS_PARAM: this.allowedOriginsParamName,
+      },
+    });
+
+    cognitoOriginSyncFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["ssm:GetParameter"],
+      resources: [
+        `arn:aws:ssm:${this.region}:${this.account}:parameter${this.allowedOriginsParamName}`,
+      ],
+    }));
+
+    cognitoOriginSyncFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["cognito-idp:UpdateUserPoolClient"],
+      resources: [this.userPool.userPoolArn],
+    }));
+
+    const originSyncRule = new events.Rule(this, `${id}-ssmOriginChangeRule`, {
+      eventPattern: {
+        source: ["aws.ssm"],
+        detailType: ["Parameter Store Change"],
+        detail: {
+          name: [this.allowedOriginsParamName],
+          operation: ["Update", "Create"],
+        },
+      },
+    });
+
+    originSyncRule.addTarget(new eventTargets.LambdaFunction(cognitoOriginSyncFn));
 
   }
 }

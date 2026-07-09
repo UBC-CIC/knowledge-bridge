@@ -48,7 +48,7 @@ export class DBFlowStack extends Stack {
           "logs:CreateLogStream",
           "logs:PutLogEvents",
         ],
-        resources: ["arn:aws:logs:*:*:*"],
+        resources: [`arn:aws:logs:${this.region}:${this.account}:*`],
       })
     );
 
@@ -81,7 +81,7 @@ export class DBFlowStack extends Stack {
     );
 
     new triggers.TriggerFunction(this, `${id}-triggerLambda`, {
-      description: `Database initializer and migration runner - ${new Date().toISOString()}`,
+      description: "Database initializer and migration runner",
       functionName: `${id}-initializerFunction`,
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: "index.handler",
