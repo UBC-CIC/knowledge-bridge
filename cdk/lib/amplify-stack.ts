@@ -118,9 +118,8 @@ export class AmplifyStack extends cdk.Stack {
           Name: props.allowedOriginsParamName,
           Value: amplifyUrl,
           Type: "String",
-          Overwrite: false,
+          Overwrite: true,
         },
-        ignoreErrorCodesMatching: "ParameterAlreadyExists",
         physicalResourceId: cdk.custom_resources.PhysicalResourceId.of("UpdateSSMAllowedOrigins"),
       },
       policy: cdk.custom_resources.AwsCustomResourcePolicy.fromSdkCalls({
