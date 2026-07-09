@@ -23,19 +23,9 @@ export class GlueStack extends cdk.Stack {
       path: "./glue/sharepoint_ingestion.py",
     });
 
-    // Security group for the Glue job — allows all outbound (NAT handles internet)
-    const glueSecurityGroup = new ec2.SecurityGroup(this, `${id}-GlueSG`, {
-      vpc: vpcStack.vpc,
-      description: "Security group for Glue SharePoint ingestion job",
-      allowAllOutbound: true,
-    });
-
-    // Glue requires a self-referencing rule for VPC connections
-    glueSecurityGroup.addIngressRule(
-      glueSecurityGroup,
-      ec2.Port.allTcp(),
-      "Glue self-referencing rule"
-    );
+    // Glue SG is owned by VpcStack so DatabaseStack can reference it without
+    // creating a cross-stack cycle (GlueStack → DatabaseStack already exists).
+    const glueSecurityGroup = vpcStack.glueSecurityGroup;
 
     // IAM role for the Glue job — least privilege
     const glueRole = new iam.Role(this, `${id}-GlueJobRole`, {

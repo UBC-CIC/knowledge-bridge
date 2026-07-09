@@ -13,6 +13,8 @@ export class VpcStack extends Stack {
   public readonly vpc: ec2.Vpc;
   public readonly vpcCidrString: string;
   public readonly privateSubnetsCidrStrings: string[];
+  public readonly appSecurityGroup: ec2.SecurityGroup;
+  public readonly glueSecurityGroup: ec2.SecurityGroup;
 
   constructor(
     scope: Construct,
@@ -76,6 +78,25 @@ export class VpcStack extends Stack {
         Fn.importValue(`${AWSControlTowerStackSet}-PrivateSubnet2ACIDR`),
         Fn.importValue(`${AWSControlTowerStackSet}-PrivateSubnet3ACIDR`),
       ];
+
+      this.appSecurityGroup = new ec2.SecurityGroup(this, "AppSecurityGroup", {
+        vpc: this.vpc,
+        description: "Shared SG for all application compute (Lambdas)",
+        allowAllOutbound: true,
+      });
+
+      this.glueSecurityGroup = new ec2.SecurityGroup(this, "GlueSecurityGroup", {
+        vpc: this.vpc,
+        description: "Security group for Glue SharePoint ingestion job",
+        allowAllOutbound: true,
+      });
+      // Required by AWS Glue for VPC connections — Glue workers communicate over
+      // all TCP ports. This SG is not reused by any other resource.
+      this.glueSecurityGroup.addIngressRule(
+        this.glueSecurityGroup,
+        ec2.Port.allTcp(),
+        "Glue self-referencing rule (Glue VPC connection requirement)"
+      );
 
       if (existingPublicSubnetID === "") {
         console.log(
@@ -166,6 +187,8 @@ export class VpcStack extends Stack {
             },
             physicalResourceId: PhysicalResourceId.of("igw-lookup"),
           },
+          // ec2:DescribeInternetGateways is a List/Describe action and does not
+          // support resource-level scoping in IAM — ANY_RESOURCE is required here.
           policy: AwsCustomResourcePolicy.fromSdkCalls({
             resources: AwsCustomResourcePolicy.ANY_RESOURCE,
           }),
@@ -266,6 +289,25 @@ export class VpcStack extends Stack {
           },
         ],
       });
+
+      this.appSecurityGroup = new ec2.SecurityGroup(this, "AppSecurityGroup", {
+        vpc: this.vpc,
+        description: "Shared SG for all application compute (Lambdas)",
+        allowAllOutbound: true,
+      });
+
+      this.glueSecurityGroup = new ec2.SecurityGroup(this, "GlueSecurityGroup", {
+        vpc: this.vpc,
+        description: "Security group for Glue SharePoint ingestion job",
+        allowAllOutbound: true,
+      });
+      // Required by AWS Glue for VPC connections — Glue workers communicate over
+      // all TCP ports. This SG is not reused by any other resource.
+      this.glueSecurityGroup.addIngressRule(
+        this.glueSecurityGroup,
+        ec2.Port.allTcp(),
+        "Glue self-referencing rule (Glue VPC connection requirement)"
+      );
 
       this.vpc.addFlowLog("kba-vpcFlowLog");
 

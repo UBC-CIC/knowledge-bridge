@@ -93,6 +93,7 @@ export class DBFlowStack extends Stack {
         DB_TABLE_CREATOR_SECRET_NAME: db.secretPathTableCreator.secretName,
       },
       vpc: db.dbInstance.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       code: lambda.Code.fromAsset("lambda/db_setup"),
       layers: [nodePgMigrateLayer],
       role: lambdaRole,

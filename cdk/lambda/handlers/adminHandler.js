@@ -11,6 +11,7 @@
  */
 
 const { getCorsHeaders } = require("./utils/cors.js");
+const { getAuthenticatedUserId } = require("./utils/handlerUtils.js");
 const { GlueClient, StartJobRunCommand, GetJobRunCommand, BatchStopJobRunCommand } = require("@aws-sdk/client-glue");
 const { CloudWatchLogsClient, GetLogEventsCommand, DescribeLogStreamsCommand } = require("@aws-sdk/client-cloudwatch-logs");
 const { SchedulerClient, GetScheduleCommand, CreateScheduleCommand, UpdateScheduleCommand, DeleteScheduleCommand } = require("@aws-sdk/client-scheduler");
@@ -269,7 +270,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const createdByUserId = event.requestContext?.authorizer?.userId ?? null;
+        const createdByUserId = getAuthenticatedUserId(event);
         if (!createdByUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
@@ -278,7 +279,7 @@ exports.handler = async (event) => {
 
         // Create new version, make it active, deactivate old
         try {
-          const created = await sqlConnection.begin(async (tx) => {
+          const created = await getSqlConnection().begin(async (tx) => {
             const [{ next_version }] = await tx`
               SELECT COALESCE(MAX(version), 0) + 1 AS next_version
               FROM system_messages
@@ -427,7 +428,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const callerUserId = event.requestContext?.authorizer?.userId ?? null;
+        const callerUserId = getAuthenticatedUserId(event);
         if (!callerUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
@@ -436,7 +437,7 @@ exports.handler = async (event) => {
 
 
         try {
-          const deleted = await sqlConnection.begin(async (tx) => {
+          const deleted = await getSqlConnection().begin(async (tx) => {
             const targetRows = await tx`
               SELECT id, type, version, is_active
               FROM system_messages
@@ -551,7 +552,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const callerUserId = event.requestContext?.authorizer?.userId ?? null;
+        const callerUserId = getAuthenticatedUserId(event);
         if (!callerUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
@@ -560,7 +561,7 @@ exports.handler = async (event) => {
 
 
         try {
-          const result = await sqlConnection.begin(async (tx) => {
+          const result = await getSqlConnection().begin(async (tx) => {
             // Lock target row and verify it exists + belongs to specified type
             const targetRows = await tx`
               SELECT id, type, version, is_active
@@ -1236,7 +1237,7 @@ exports.handler = async (event) => {
         }
 
         // validate user
-        const adminUserId = event.requestContext?.authorizer?.userId ?? null;
+        const adminUserId = getAuthenticatedUserId(event);
         if (!adminUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
@@ -1425,7 +1426,7 @@ exports.handler = async (event) => {
         }
 
         // Insert the DB row first to get its UUID, then start Glue passing that UUID
-        const ingestionAdminRows = [{ id: event.requestContext?.authorizer?.userId }].filter(r => r.id);
+        const ingestionAdminRows = [{ id: getAuthenticatedUserId(event) }].filter(r => r.id);
         const metadataJson = {
           force_full: forceFull === "true",
           job_name: jobName,
@@ -1677,7 +1678,7 @@ exports.handler = async (event) => {
           }
         }
 
-        const updatedByUserId = event.requestContext?.authorizer?.userId ?? null;
+        const updatedByUserId = getAuthenticatedUserId(event);
 
         // Upsert single row in ingestion_schedule
         await getSqlConnection()`
@@ -1741,7 +1742,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const exportAdminUserId = event.requestContext?.authorizer?.userId ?? null;
+        const exportAdminUserId = getAuthenticatedUserId(event);
         if (!exportAdminUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
@@ -1777,7 +1778,7 @@ exports.handler = async (event) => {
 
       // GET /admin/export/runs — list export jobs for the current admin
       case "GET /admin/export/runs": {
-        const adminUserId = event.requestContext?.authorizer?.userId ?? null;
+        const adminUserId = getAuthenticatedUserId(event);
         if (!adminUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
@@ -1864,7 +1865,7 @@ exports.handler = async (event) => {
 
       // GET /admin/notifications — list notifications for the current admin
       case "GET /admin/notifications": {
-        const notifUserId = event.requestContext?.authorizer?.userId ?? null;
+        const notifUserId = getAuthenticatedUserId(event);
         if (!notifUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
         const notifications = await getSqlConnection()`
@@ -1884,7 +1885,7 @@ exports.handler = async (event) => {
 
       // DELETE /admin/notifications — clear all notifications for the current admin
       case "DELETE /admin/notifications": {
-        const clearUserId = event.requestContext?.authorizer?.userId ?? null;
+        const clearUserId = getAuthenticatedUserId(event);
         if (!clearUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
         await getSqlConnection()`DELETE FROM notifications WHERE user_id::text = ${clearUserId}`;
@@ -1895,7 +1896,7 @@ exports.handler = async (event) => {
 
       // DELETE /admin/notifications/{notification_id} — dismiss a single notification
       case "DELETE /admin/notifications/{notification_id}": {
-        const dismissUserId = event.requestContext?.authorizer?.userId ?? null;
+        const dismissUserId = getAuthenticatedUserId(event);
         if (!dismissUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
         const notificationId = event.pathParameters?.notification_id;

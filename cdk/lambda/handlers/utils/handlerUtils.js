@@ -10,6 +10,9 @@ const initConnection = async () => {
   }
 };
 
+const getAuthenticatedUserId = (event) =>
+  event.requestContext?.authorizer?.userId;
+
 const createResponse = async (event) => ({
   statusCode: 200,
   headers: await getCorsHeaders(event),
@@ -30,14 +33,14 @@ const handleError = (error, response) => {
   response.body = JSON.stringify({ error: "Internal server error" });
 };
 
-const getAuthenticatedUserId = (event) =>
-  event.requestContext?.authorizer?.userId;
+const getSqlConnection = () => 
+  global.sqlConnection;
 
 module.exports = {
   initConnection,
   createResponse,
   parseBody,
   handleError,
-  getSqlConnection: () => global.sqlConnection,
-  getAuthenticatedUserId,
+  getSqlConnection,
+  getAuthenticatedUserId
 };

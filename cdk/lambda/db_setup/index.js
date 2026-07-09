@@ -148,11 +148,6 @@ async function createAppUsers(
 
     GRANT readwrite TO ${RW_NAME};
     GRANT tablecreator TO ${TC_NAME};
-
-    REVOKE DELETE ON system_settings FROM readwrite;
-    REVOKE DELETE ON system_messages FROM readwrite;
-    REVOKE INSERT, UPDATE, DELETE ON entra_groups FROM readwrite;
-    REVOKE INSERT, UPDATE, DELETE ON site_source_access FROM readwrite;
   `;
 
   await adminClient.query("BEGIN");

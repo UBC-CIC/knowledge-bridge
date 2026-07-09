@@ -616,6 +616,10 @@ export class ApiGatewayStack extends cdk.Stack {
       ],
     });
 
+    // Gateway error responses use '*' because these are static CloudFormation values
+    // and cannot reference the runtime SSM allowed-origins param. The Amplify stack
+    // updates the SSM param after deploy, but gateway responses are deploy-time only.
+
     // Custom Response for WAF Blocks (Returns 429 instead of 403)
     this.api.addGatewayResponse(`${id}-WafBlockResponse`, {
       type: apigateway.ResponseType.WAF_FILTERED,
@@ -990,6 +994,7 @@ export class ApiGatewayStack extends cdk.Stack {
           SHAREPOINT_SECRET_NAME: "KBA-SharePoint-Credentials",
         },
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         functionName: `${id}-addMemberOnSignUp`,
         memorySize: 256,
         layers: [postgres],
@@ -1022,6 +1027,7 @@ export class ApiGatewayStack extends cdk.Stack {
         reservedConcurrentExecutions: 20,
         layers: [psycopgLayer, powertoolsLayer],
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         tracing: lambda.Tracing.ACTIVE,
         memorySize: 512,
         logRetention: logs.RetentionDays.ONE_MONTH,
@@ -1190,6 +1196,7 @@ export class ApiGatewayStack extends cdk.Stack {
       handler: "handlers/userHandler.handler",
       timeout: Duration.seconds(30),
       vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       environment: {
         SM_DB_CREDENTIALS: db.secretPathUser.secretName,
         RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1241,6 +1248,7 @@ export class ApiGatewayStack extends cdk.Stack {
       handler: "handlers/systemMessagesHandler.handler",
       timeout: Duration.seconds(30),
       vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       environment: {
         SM_DB_CREDENTIALS: db.secretPathUser.secretName,
         RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1294,6 +1302,7 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "handlers/chatSessionHandler.handler",
         timeout: Duration.seconds(30),
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         environment: {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1335,6 +1344,7 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "handlers/adminHandler.handler",
         timeout: Duration.seconds(30),
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         environment: {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1440,6 +1450,7 @@ export class ApiGatewayStack extends cdk.Stack {
       handler: "handlers/sqlRunner.handler",
       timeout: Duration.seconds(30),
       vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       environment: {
         SM_DB_CREDENTIALS: db.secretPathTableCreator.secretName,
         RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1464,6 +1475,7 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "handlers/glueStatusSync.handler",
         timeout: Duration.seconds(60),
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         environment: {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1565,6 +1577,7 @@ export class ApiGatewayStack extends cdk.Stack {
       handler: "handlers/exportProcessorHandler.handler",
       timeout: Duration.seconds(900),
       vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       memorySize: 1024,
       layers: [postgres],
       role: exportProcessorRole,
@@ -1618,6 +1631,7 @@ export class ApiGatewayStack extends cdk.Stack {
       reservedConcurrentExecutions: 20,
       tracing: lambda.Tracing.ACTIVE,
       vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       environment: {
         SM_COGNITO_CREDENTIALS: this.secret.secretName,
         SM_DB_CREDENTIALS: db.secretPathUser.secretName,
@@ -1657,6 +1671,7 @@ export class ApiGatewayStack extends cdk.Stack {
         memorySize: 256,
         tracing: lambda.Tracing.ACTIVE,
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         environment: {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1675,6 +1690,7 @@ export class ApiGatewayStack extends cdk.Stack {
       reservedConcurrentExecutions: 20,
       tracing: lambda.Tracing.ACTIVE,
       vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       environment: {
         TEXT_GEN_FUNCTION_NAME: lambdaTextGen.functionName,
         SM_DB_CREDENTIALS: db.secretPathUser.secretName,
@@ -1821,6 +1837,7 @@ export class ApiGatewayStack extends cdk.Stack {
       timeout: Duration.seconds(30),
       memorySize: 256,
       vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       layers: [postgres],
       role: notificationDispatcherRole,
       environment: {
