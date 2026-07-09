@@ -103,7 +103,6 @@ export class GlueStack extends cdk.Stack {
       subnet: privateSubnet,
       securityGroups: [glueSecurityGroup],
     });
-    (glueConnection.node.defaultChild as cdk.CfnResource).overrideLogicalId("KBAGlueGlueConnection");
 
     this.jobName = `${id}-SharePointIngestion`;
 
@@ -132,7 +131,6 @@ export class GlueStack extends cdk.Stack {
       },
     });
 
-    (glueJob.node.defaultChild as cdk.CfnResource).overrideLogicalId("KBAGlueGlueJob");
     glueJob.node.addDependency(glueConnection);
 
     new cdk.CfnOutput(this, "GlueJobName", {
