@@ -11,7 +11,7 @@
  */
 
 const { getCorsHeaders } = require("./utils/cors.js");
-const { getAuthenticatedUserId } = require("./utils/handlerUtils.js");
+const { getAuthenticatedUserId, buildAuditEntry } = require("./utils/handlerUtils.js");
 const { GlueClient, StartJobRunCommand, GetJobRunCommand, BatchStopJobRunCommand } = require("@aws-sdk/client-glue");
 const { CloudWatchLogsClient, GetLogEventsCommand, DescribeLogStreamsCommand } = require("@aws-sdk/client-cloudwatch-logs");
 const { SchedulerClient, GetScheduleCommand, CreateScheduleCommand, UpdateScheduleCommand, DeleteScheduleCommand } = require("@aws-sdk/client-scheduler");
@@ -139,6 +139,7 @@ exports.handler = async (event) => {
         }
 
         const userId = body?.user_id;
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "promote_user", userId)));
         const email = (body?.email || "").trim().toLowerCase();
 
         if (!userId) {
@@ -276,6 +277,8 @@ exports.handler = async (event) => {
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
+
+        console.log(JSON.stringify(buildAuditEntry(createdByUserId, "create_system_message", messageType)));
 
         // Create new version, make it active, deactivate old
         try {
@@ -435,6 +438,7 @@ exports.handler = async (event) => {
           break;
         }
 
+        console.log(JSON.stringify(buildAuditEntry(callerUserId, "delete_system_message", versionId, { messageType })));
 
         try {
           const deleted = await getSqlConnection().begin(async (tx) => {
@@ -559,6 +563,7 @@ exports.handler = async (event) => {
           break;
         }
 
+        console.log(JSON.stringify(buildAuditEntry(callerUserId, "activate_system_message", versionId, { messageType })));
 
         try {
           const result = await getSqlConnection().begin(async (tx) => {
@@ -1343,8 +1348,8 @@ exports.handler = async (event) => {
           break;
         }
 
-        // get admin user ID and confirm role
         const updatedByUserId = adminUserId;
+        console.log(JSON.stringify(buildAuditEntry(updatedByUserId, "update_system_settings", null, { patch })));
 
         // Single UPDATE of the latest row (no â€œensure row existsâ€ step)
         const updated = await getSqlConnection()`
@@ -1413,6 +1418,8 @@ exports.handler = async (event) => {
           break;
         }
 
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "trigger_ingestion", null, { forceFull })));
+
         // Block if a run is already in-flight (status check against DB)
         const inFlight = await getSqlConnection()`
           SELECT id FROM ingestion_runs
@@ -1466,6 +1473,8 @@ exports.handler = async (event) => {
           response.body = JSON.stringify({ error: "GLUE_JOB_NAME not configured" });
           break;
         }
+
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "stop_ingestion")));
 
         const activeRuns = await getSqlConnection()`
           SELECT id, glue_run_id FROM ingestion_runs
@@ -1679,6 +1688,7 @@ exports.handler = async (event) => {
         }
 
         const updatedByUserId = getAuthenticatedUserId(event);
+        console.log(JSON.stringify(buildAuditEntry(updatedByUserId, "update_ingestion_schedule", null, { cron, timezone, enabled, force_full })));
 
         // Upsert single row in ingestion_schedule
         await getSqlConnection()`
@@ -1710,6 +1720,8 @@ exports.handler = async (event) => {
           response.body = JSON.stringify({ error: "SCHEDULE_NAME not configured" });
           break;
         }
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "delete_ingestion_schedule")));
+
         try {
           await schedulerClient.send(new DeleteScheduleCommand({ Name: scheduleName }));
           await getSqlConnection()`DELETE FROM ingestion_schedule`;
@@ -1748,6 +1760,8 @@ exports.handler = async (event) => {
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
+
+        console.log(JSON.stringify(buildAuditEntry(exportAdminUserId, "trigger_export", null, { scope, scope_id: body?.scope_id ?? null })));
 
         const exportMetadata = scope === 'analytics'
           ? { groupId: body?.groupId ?? null, timeRange: body?.timeRange ?? null }

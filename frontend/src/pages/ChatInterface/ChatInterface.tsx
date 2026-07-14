@@ -93,14 +93,7 @@ export default function AIChatPage() {
   const baseWebSocketUrl = useMemo(() => import.meta.env.VITE_WEBSOCKET_URL, []);
   const webSocketUrl = useMemo(() => {
     if (!baseWebSocketUrl || !webSocketToken) return null;
-    try {
-      const url = new URL(baseWebSocketUrl);
-      url.searchParams.set("token", webSocketToken);
-      return url.toString();
-    } catch (error) {
-      console.error("[WebSocket] Invalid base URL:", error);
-      return null;
-    }
+    return baseWebSocketUrl;
   }, [baseWebSocketUrl, webSocketToken]);
 
   // Fetch initial WebSocket token on mount
@@ -197,6 +190,7 @@ export default function AIChatPage() {
     connectionState,
     forceReconnect,
   } = useWebSocket(webSocketUrl, {
+    token: webSocketToken,
     onMessage: handleWebSocketMessage,
     onConnect: () => {
       console.log("[WebSocket] Connected");

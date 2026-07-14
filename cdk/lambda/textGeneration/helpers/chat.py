@@ -174,17 +174,16 @@ def get_response(
 
     try:
         # 1. Check message limit
-        if user_id:
-            is_under_limit, usage_info = check_limit(user_id, db_connection)
-            if not is_under_limit:
-                return {
-                    "response": "Daily message limit exceeded. Please try again tomorrow.",
-                    "sources_used": [],
-                    "sessionId": chat_session_id,
-                    "message_limit_exceeded": True,
-                    "message_usage": usage_info,
-                    "warning": None,
-                }
+        is_under_limit, usage_info = check_limit(user_id, db_connection)
+        if not is_under_limit:
+            return {
+                "response": "Daily message limit exceeded. Please try again tomorrow.",
+                "sources_used": [],
+                "sessionId": chat_session_id,
+                "message_limit_exceeded": True,
+                "message_usage": usage_info,
+                "warning": None,
+            }
 
         # 2. Handle intro message — no retrieval, no guardrails, just return the greeting
         if is_intro_message:
@@ -247,7 +246,7 @@ def get_response(
                 query = guardrail_result['text']
 
         # 3. Fetch user groups from DB
-        user_groups = get_user_groups(user_id, db_connection) if user_id else []
+        user_groups = get_user_groups(user_id, db_connection)
         logger.info(f"User {user_id} groups for retrieval: {user_groups}")
 
         # 4. Prepare conversation
@@ -261,7 +260,7 @@ def get_response(
             save_user_message=save_user_message,
         )
 
-        if user_id and save_user_message:
+        if save_user_message:
             usage_info = record_message_sent(user_id, db_connection)
 
     except ValueError as e:

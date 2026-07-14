@@ -77,7 +77,12 @@ exports.handler = async (event) => {
         SET user_id = EXCLUDED.user_id, connected_at = now()
     `;
 
-    return { statusCode: 200 };
+    // Echo the chosen subprotocol back so browsers complete the handshake
+    const headers = event.headers || {};
+    const protocol = headers["Sec-WebSocket-Protocol"] || headers["sec-websocket-protocol"];
+    const responseHeaders = protocol ? { "Sec-WebSocket-Protocol": protocol } : {};
+
+    return { statusCode: 200, headers: responseHeaders };
   } catch (error) {
     console.error("WebSocket connect rejected: invalid token", {
       connectionId, domainName, stage, timestamp,
@@ -89,15 +94,22 @@ exports.handler = async (event) => {
 
 function extractToken(event) {
   const headers = event.headers || {};
-  const authHeader = headers.Authorization || headers.authorization;
 
+  // Primary: standard Authorization header (future use / direct clients)
+  const authHeader = headers.Authorization || headers.authorization;
   if (authHeader?.startsWith("Bearer ")) {
     return authHeader.slice("Bearer ".length).trim();
   }
 
-  const queryParams = event.queryStringParameters || {};
-  if (queryParams.token) {
-    return queryParams.token;
+  // Secondary: Sec-WebSocket-Protocol header — browser WebSocket API sends the JWT
+  // as the second element of the subprotocol list: ["Bearer", "<token>"]
+  const protocol = headers["Sec-WebSocket-Protocol"] || headers["sec-websocket-protocol"];
+  if (protocol) {
+    const parts = protocol.split(",").map((s) => s.trim());
+    // Expect ["Bearer", "<token>"] — second part is the token
+    if (parts.length >= 2 && parts[0].toLowerCase() === "bearer") {
+      return parts[1];
+    }
   }
 
   return undefined;

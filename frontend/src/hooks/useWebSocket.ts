@@ -12,6 +12,7 @@ interface UseWebSocketOptions {
   onConnect?: () => void;
   onDisconnect?: () => void;
   onError?: (error: Event) => void;
+  token?: string | null;
 }
 
 export const useWebSocket = (
@@ -30,6 +31,8 @@ export const useWebSocket = (
   // Store callbacks in refs to avoid dependency issues
   const callbacksRef = useRef(options);
   callbacksRef.current = options;
+  const tokenRef = useRef(options.token);
+  tokenRef.current = options.token;
 
   const startHeartbeat = useCallback(() => {
     if (heartbeatIntervalRef.current) {
@@ -99,7 +102,10 @@ export const useWebSocket = (
     setConnectionState("connecting");
 
     try {
-      wsRef.current = new WebSocket(url);
+      // Pass the JWT as a Sec-WebSocket-Protocol subprotocol value so it never
+      // appears in the URL (which would be logged by API Gateway and browser history).
+      const protocols = tokenRef.current ? ["Bearer", tokenRef.current] : undefined;
+      wsRef.current = new WebSocket(url, protocols);
 
       wsRef.current.onopen = () => {
         console.log("[WebSocket] Connected successfully");
@@ -163,6 +169,7 @@ export const useWebSocket = (
       setConnectionState("error");
       scheduleReconnect();
     }
+  // token intentionally omitted — tokenRef always holds the latest value
   }, [url, startHeartbeat, stopHeartbeat, scheduleReconnect]);
 
   const disconnect = useCallback(() => {

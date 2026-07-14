@@ -307,7 +307,7 @@ export class ApiGatewayStack extends cdk.Stack {
       this,
       `${id}-identity-pool`,
       {
-        allowUnauthenticatedIdentities: true,
+        allowUnauthenticatedIdentities: false,
         identityPoolName: `${id}IdentityPool`,
         cognitoIdentityProviders: [
           {
