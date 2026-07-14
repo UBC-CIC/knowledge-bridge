@@ -35,7 +35,7 @@ export function useNotifications(role?: string | null) {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
     try {
       const token = await AuthService.getIdToken();
-      const ws = new WebSocket(WS_URL, ["Bearer", token]);
+      const ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
