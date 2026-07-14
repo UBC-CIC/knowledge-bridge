@@ -41,7 +41,20 @@ def handler(event, context=None):
     if not chat_session_id and 'pathParameters' in event and event['pathParameters']:
         chat_session_id = event['pathParameters'].get('chat_session_id') or event['pathParameters'].get('id')
 
-    user_id = body.get('user_id')
+    # REST path: authorizer injects verified identity; WebSocket path: default.js already
+    # validated user_id against ws_connections by connectionId before invoking this Lambda.
+    ws_connection_id = event.get('requestContext', {}).get('connectionId')
+    user_id = event.get('requestContext', {}).get('authorizer', {}).get('userId')
+    if not user_id:
+        if ws_connection_id:
+            # Synthetic event from default.js — user_id was server-derived, safe to trust
+            user_id = body.get('user_id')
+        if not user_id:
+            return {
+                'statusCode': 401,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'Unauthorized'})
+            }
     logger.info(f"Request: user_id={user_id}, chat_session_id={chat_session_id}, is_intro={is_intro_message}")
 
     if not query or not chat_session_id:
@@ -70,13 +83,12 @@ def handler(event, context=None):
     try:
         conn = get_db_connection()
 
-        # Validate the session ownership before doing anything with the session 
-        if user_id: 
-            if not validate_session_ownership(conn, chat_session_id, user_id): 
-                return {
-                    'statusCode': 403,
-                    'body': json.dumps({'error': 'Unauthorized access to chat session'})
-                }
+        # Validate the session ownership before doing anything with the session
+        if not validate_session_ownership(conn, chat_session_id, user_id):
+            return {
+                'statusCode': 403,
+                'body': json.dumps({'error': 'Unauthorized access to chat session'})
+            }
         
         # Load dynamic configuration from DB
         config.load_config(conn)

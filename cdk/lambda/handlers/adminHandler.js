@@ -11,7 +11,7 @@
  */
 
 const { getCorsHeaders } = require("./utils/cors.js");
-const { getAuthenticatedUserId } = require("./utils/handlerUtils.js");
+const { getAuthenticatedUserId, buildAuditEntry } = require("./utils/handlerUtils.js");
 const { GlueClient, StartJobRunCommand, GetJobRunCommand, BatchStopJobRunCommand } = require("@aws-sdk/client-glue");
 const { CloudWatchLogsClient, GetLogEventsCommand, DescribeLogStreamsCommand } = require("@aws-sdk/client-cloudwatch-logs");
 const { SchedulerClient, GetScheduleCommand, CreateScheduleCommand, UpdateScheduleCommand, DeleteScheduleCommand } = require("@aws-sdk/client-scheduler");
@@ -140,6 +140,8 @@ exports.handler = async (event) => {
 
         const userId = body?.user_id;
         const email = (body?.email || "").trim().toLowerCase();
+
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "promote_user", userId)));
 
         if (!userId) {
           response.statusCode = 400;
@@ -276,6 +278,8 @@ exports.handler = async (event) => {
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
+
+        console.log(JSON.stringify(buildAuditEntry(createdByUserId, "create_system_message", messageType)));
 
         // Create new version, make it active, deactivate old
         try {
@@ -435,6 +439,7 @@ exports.handler = async (event) => {
           break;
         }
 
+        console.log(JSON.stringify(buildAuditEntry(callerUserId, "delete_system_message", versionId, { messageType })));
 
         try {
           const deleted = await getSqlConnection().begin(async (tx) => {
@@ -559,6 +564,7 @@ exports.handler = async (event) => {
           break;
         }
 
+        console.log(JSON.stringify(buildAuditEntry(callerUserId, "activate_system_message", versionId, { messageType })));
 
         try {
           const result = await getSqlConnection().begin(async (tx) => {
@@ -1244,6 +1250,8 @@ exports.handler = async (event) => {
           break;
         }
 
+        console.log(JSON.stringify(buildAuditEntry(adminUserId, "update_system_settings", null, { patch })));
+
         if (
           patch.max_messages_per_day !== undefined &&
           (!isFiniteInt(patch.max_messages_per_day) ||
@@ -1405,6 +1413,7 @@ exports.handler = async (event) => {
       case "POST /admin/ingestion/trigger": {
         let body = {};
         try { body = parseBody(event.body); } catch (_) {}
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "trigger_ingestion")));
         const forceFull = body?.force_full === true ? "true" : "false";
         const jobName = process.env.GLUE_JOB_NAME;
         if (!jobName) {
@@ -1460,6 +1469,7 @@ exports.handler = async (event) => {
 
       // POST /admin/ingestion/stop — request cancellation of the active Glue job run
       case "POST /admin/ingestion/stop": {
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "stop_ingestion")));
         const jobName = process.env.GLUE_JOB_NAME;
         if (!jobName) {
           response.statusCode = 500;
@@ -1651,6 +1661,7 @@ exports.handler = async (event) => {
           response.body = JSON.stringify({ error: "cron and timezone are required" });
           break;
         }
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "update_ingestion_schedule", null, { cron, timezone, enabled, force_full })));
 
         const scheduleParams = {
           Name: scheduleName,
@@ -1704,6 +1715,7 @@ exports.handler = async (event) => {
 
       // DELETE /admin/ingestion/schedule — remove the EventBridge schedule
       case "DELETE /admin/ingestion/schedule": {
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "delete_ingestion_schedule")));
         const scheduleName = process.env.SCHEDULE_NAME;
         if (!scheduleName) {
           response.statusCode = 500;
@@ -1731,6 +1743,7 @@ exports.handler = async (event) => {
         try { body = parseBody(event.body); } catch (_) {}
 
         const scope = body?.scope;
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "trigger_export", null, { scope, scope_id: body?.scope_id ?? null })));
         if (!['all', 'group', 'user', 'analytics'].includes(scope)) {
           response.statusCode = 400;
           response.body = JSON.stringify({ error: "scope must be 'all', 'group', 'user', or 'analytics'" });
