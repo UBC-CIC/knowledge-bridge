@@ -24,7 +24,6 @@ type ChatSessionActionsMenuProps = {
   chatSessionId: string;
   chatSessionName: string;
   displayName: string;
-  userId: string;
   isActive: boolean;
   onDeleted: () => void;
 };
@@ -33,7 +32,6 @@ export default function ChatSessionActionsMenu({
   chatSessionId,
   chatSessionName,
   displayName,
-  userId,
   isActive,
   onDeleted,
 }: ChatSessionActionsMenuProps) {
