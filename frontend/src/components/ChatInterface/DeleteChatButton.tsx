@@ -5,11 +5,10 @@ import { AuthService } from "@/functions/authService";
 
 type DeleteChatButtonProps = {
   chatSessionId: string;
-  userId?: string;
   onDeleted?: () => void;
 };
 
-export default function DeleteChatButton({ chatSessionId, userId, onDeleted }: DeleteChatButtonProps) {
+export default function DeleteChatButton({ chatSessionId, onDeleted }: DeleteChatButtonProps) {
   const handleDelete = async (e?: React.MouseEvent) => {
     try { e?.stopPropagation(); } catch { }
     if (!confirm("Are you sure you want to delete this chat session?")) return;

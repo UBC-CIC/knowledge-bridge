@@ -204,7 +204,6 @@ function SidebarContent({ setMobileOpen }: SidebarContentProps) {
                   chatSessionId={session.id}
                   chatSessionName={session.name || ""}
                   displayName={session.name || `Chat ${chatSessions.length - index}`}
-                  userId={session.user_id}
                   isActive={activeChatSessionId === session.id}
                   onDeleted={async () => {
                     removeChatSession(session.id);

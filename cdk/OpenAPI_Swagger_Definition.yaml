@@ -1617,13 +1617,6 @@ paths:
           schema:
             type: string
             format: uuid
-        - name: user_id
-          in: query
-          required: true
-          description: User UUID used to verify ownership when renaming
-          schema:
-            type: string
-            format: uuid
       requestBody:
         required: true
         content:
@@ -1667,13 +1660,6 @@ paths:
           in: path
           required: true
           description: Chat session UUID
-          schema:
-            type: string
-            format: uuid
-        - name: user_id
-          in: query
-          required: true
-          description: User UUID used to verify ownership when deleting
           schema:
             type: string
             format: uuid
