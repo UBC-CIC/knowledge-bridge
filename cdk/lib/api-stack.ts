@@ -381,7 +381,7 @@ export class ApiGatewayStack extends cdk.Stack {
       deployOptions: {
         stageName: "prod",
         tracingEnabled: true,
-        description: "Deployment with flashcard support - Nov 18 2025",
+        description: `${id} — KBA REST API with Cognito auth, pgvector RAG, and SharePoint ingestion`,
         loggingLevel: apigateway.MethodLoggingLevel.INFO,
         dataTraceEnabled: false, // TODO: enable temporarily for debugging only, never in long-running prod
         metricsEnabled: true,
@@ -853,17 +853,6 @@ export class ApiGatewayStack extends cdk.Stack {
       })
     );
 
-    // Grant permission to add users to an IAM group
-    coglambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["iam:AddUserToGroup"],
-        resources: [
-          `arn:aws:iam::${this.account}:user/*`,
-          `arn:aws:iam::${this.account}:group/*`,
-        ],
-      })
-    );
 
     // Redundant secrets manager access block removed
 
