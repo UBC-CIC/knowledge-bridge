@@ -93,7 +93,7 @@ export class GlueStack extends cdk.Stack {
     }));
 
     const privateSubnet = vpcStack.vpc.privateSubnets[0];
-    const connectionName = `${id}-VpcConnection`;
+    const connectionName = `${id}-VpcConnection-v2`;
 
     // Glue VPC connection — uses private-with-egress subnet so NAT is available
     // for Microsoft Graph API calls while still being able to reach RDS Proxy
@@ -103,8 +103,9 @@ export class GlueStack extends cdk.Stack {
       subnet: privateSubnet,
       securityGroups: [glueSecurityGroup],
     });
+    (glueConnection.node.defaultChild as cdk.CfnResource).overrideLogicalId("KBAGlueGlueConnection");
 
-    this.jobName = `${id}-SharePointIngestion`;
+    this.jobName = `${id}-SharePointIngestion-v2`;
 
     const glueJob = new glue.PythonShellJob(this, `${id}-GlueJob`, {
       jobName: this.jobName,
@@ -131,6 +132,7 @@ export class GlueStack extends cdk.Stack {
       },
     });
 
+    (glueJob.node.defaultChild as cdk.CfnResource).overrideLogicalId("KBAGlueGlueJob");
     glueJob.node.addDependency(glueConnection);
 
     new cdk.CfnOutput(this, "GlueJobName", {
