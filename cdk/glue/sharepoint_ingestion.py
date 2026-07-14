@@ -621,10 +621,8 @@ async def get_site_backing_group_id(site_id: str) -> Optional[str]:
     try:
         site_url = await resolve_site_url(site_id)
         headers = get_sharepoint_headers(site_url)
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(f"{site_url}/_api/web/allproperties", headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await http_get_with_retry(f"{site_url}/_api/web/allproperties", headers)
+        data = resp.json()
         gid = data.get("GroupId") or data.get("groupId")
         return gid.lower() if gid else None
     except Exception as e:
@@ -640,13 +638,11 @@ async def expand_sharepoint_group(site_id: str, sp_group_id: int, visited=None) 
     headers = get_sharepoint_headers(site_url)
     found = set()
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                f"{site_url}/_api/web/SiteGroups/GetById({sp_group_id})/Users",
-                headers=headers,
-            )
-            resp.raise_for_status()
-            members = resp.json().get("value", [])
+        resp = await http_get_with_retry(
+            f"{site_url}/_api/web/SiteGroups/GetById({sp_group_id})/Users",
+            headers,
+        )
+        members = resp.json().get("value", [])
         for m in members:
             login = m.get("LoginName", "")
             guids = GUID_RE.findall(login)
@@ -668,10 +664,8 @@ async def list_inherits_permissions(site_id: str, list_id: str) -> bool:
     site_url = await resolve_site_url(site_id)
     headers = get_sharepoint_headers(site_url)
     url = f"{site_url}/_api/web/lists(guid'{list_id}')?$select=HasUniqueRoleAssignments"
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(url, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
+    resp = await http_get_with_retry(url, headers)
+    data = resp.json()
     # HasUniqueRoleAssignments=True means the list has broken inheritance (does NOT inherit from site)
     return not data.get("HasUniqueRoleAssignments", False)
 
@@ -684,11 +678,8 @@ async def get_list_authorized_groups(site_id: str, list_id: str) -> list:
             url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/permissions"
         else:
             url = f"https://graph.microsoft.com/beta/sites/{site_id}/lists/{list_id}/permissions"
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            perm_resp = resp.json()
-        permissions = perm_resp.get("value", [])
+        resp = await http_get_with_retry(url, headers)
+        permissions = resp.json().get("value", [])
         authorized: set = set()
         for perm in permissions:
             granted = perm.get("grantedToV2", {})
@@ -721,19 +712,17 @@ async def upsert_entra_groups(group_ids: list) -> None:
         return
     headers = get_graph_headers()
     rows = []
-    async with httpx.AsyncClient(timeout=30) as client:
-        for gid in group_ids:
-            try:
-                resp = await client.get(
-                    f"https://graph.microsoft.com/v1.0/groups/{gid}?$select=id,displayName",
-                    headers=headers,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                rows.append((gid, data.get("displayName") or gid))
-            except Exception as e:
-                logger.warning(f"[AUTH] Could not fetch display name for group {gid}: {e}")
-                rows.append((gid, gid))
+    for gid in group_ids:
+        try:
+            resp = await http_get_with_retry(
+                f"https://graph.microsoft.com/v1.0/groups/{gid}?$select=id,displayName",
+                headers,
+            )
+            data = resp.json()
+            rows.append((gid, data.get("displayName") or gid))
+        except Exception as e:
+            logger.warning(f"[AUTH] Could not fetch display name for group {gid}: {e}")
+            rows.append((gid, gid))
     if not rows:
         return
     try:
