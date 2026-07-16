@@ -1,5 +1,4 @@
 const { getCorsHeaders } = require("./utils/cors.js");
-const crypto = require("crypto");
 const { initConnection, getSqlConnection } = require("./initializeConnection.js");
 
 const createResponse = async (event) => ({
@@ -7,14 +6,6 @@ const createResponse = async (event) => ({
     headers: await getCorsHeaders(event),
     body: "",
 });
-
-const parseBody = (body) => {
-    try {
-        return JSON.parse(body || "{}");
-    } catch {
-        throw new Error("Invalid JSON body");
-    }
-};
 
 const handleError = (error, response) => {
     response.statusCode = 500;
@@ -24,8 +15,6 @@ const handleError = (error, response) => {
 
 exports.handler = async (event) => {
     const response = await createResponse(event);
-    let data;
-
     try {
         // Ensure connection is initialized before proceeding
         await initConnection();

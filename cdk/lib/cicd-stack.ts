@@ -5,7 +5,6 @@ import * as codebuild from "aws-cdk-lib/aws-codebuild";
 import * as codepipeline from "aws-cdk-lib/aws-codepipeline";
 import * as codepipeline_actions from "aws-cdk-lib/aws-codepipeline-actions";
 import * as iam from "aws-cdk-lib/aws-iam";
-import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as codeconnections from "aws-cdk-lib/aws-codeconnections";
 import * as s3 from "aws-cdk-lib/aws-s3";
 

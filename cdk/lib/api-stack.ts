@@ -6,7 +6,6 @@ import * as appsync from "aws-cdk-lib/aws-appsync";
 import { Construct } from "constructs";
 import { Duration } from "aws-cdk-lib";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
-import { Code, LayerVersion, Runtime } from "aws-cdk-lib/aws-lambda";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import { VpcStack } from "./vpc-stack";
 import { DatabaseStack } from "./database-stack";
@@ -15,7 +14,6 @@ import { WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integra
 import { Fn } from "aws-cdk-lib";
 import { Asset } from "aws-cdk-lib/aws-s3-assets";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
-import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as bedrock from "aws-cdk-lib/aws-bedrock";
 import * as cr from "aws-cdk-lib/custom-resources";
@@ -715,7 +713,7 @@ export class ApiGatewayStack extends cdk.Stack {
       }
     );
 
-    const adminGroup = new cognito.CfnUserPoolGroup(this, `${id}-AdminGroup`, {
+    new cognito.CfnUserPoolGroup(this, `${id}-AdminGroup`, {
       groupName: "admin",
       userPoolId: this.userPool.userPoolId,
       roleArn: adminRole.roleArn,

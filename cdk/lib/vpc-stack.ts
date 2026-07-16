@@ -1,7 +1,6 @@
 import { Stack, StackProps } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
-import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { Fn } from "aws-cdk-lib";
 import {
   AwsCustomResource,
@@ -257,12 +256,6 @@ export class VpcStack extends Stack {
         ],
       });
 
-      // Get default security group for VPC
-      const defaultSecurityGroup = ec2.SecurityGroup.fromSecurityGroupId(
-        this,
-        id,
-        this.vpc.vpcDefaultSecurityGroup
-      );
     } else {
       this.vpcCidrString = "10.0.0.0/16";
 

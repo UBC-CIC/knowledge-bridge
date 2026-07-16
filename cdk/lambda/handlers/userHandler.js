@@ -1,5 +1,4 @@
 const { getCorsHeaders } = require("./utils/cors.js");
-const crypto = require("crypto");
 const { validateUUID } = require("./utils/validation.js");
 const { initConnection, getSqlConnection } = require("./initializeConnection.js");
 const { getAuthenticatedUserId } = require("./utils/handlerUtils.js");
