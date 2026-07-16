@@ -113,7 +113,6 @@ export function AiChatInput({
       const nextCharCount = charCount + textNode.length;
 
       if (
-        !foundPosition &&
         position >= charCount &&
         position <= nextCharCount
       ) {

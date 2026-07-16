@@ -395,7 +395,7 @@ export default function AIChatPage() {
           )
         );
 
-        if (data.session_name && activeChatSessionId) {
+        if (data.session_name) {
           updateChatSessionName(activeChatSessionId, data.session_name);
         }
       } catch (error) {
@@ -532,7 +532,7 @@ export default function AIChatPage() {
         )
       );
 
-      if (data.session_name && activeChatSessionId) {
+      if (data.session_name) {
         updateChatSessionName(activeChatSessionId, data.session_name);
       }
     } catch (error) {
