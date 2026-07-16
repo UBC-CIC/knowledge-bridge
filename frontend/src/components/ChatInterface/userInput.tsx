@@ -99,7 +99,6 @@ export function AiChatInput({
     if (!selection || !editableRef.current) return;
 
     let charCount = 0;
-    let foundPosition = false;
 
     // Use a tree walker for more efficient traversal
     const walker = document.createTreeWalker(
@@ -124,7 +123,6 @@ export function AiChatInput({
         range.collapse(true);
         selection.removeAllRanges();
         selection.addRange(range);
-        foundPosition = true;
         break;
       }
 

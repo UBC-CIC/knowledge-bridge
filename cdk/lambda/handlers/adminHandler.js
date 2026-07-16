@@ -392,9 +392,8 @@ exports.handler = async (event) => {
 
       // Delete a non-active system message version
       case "DELETE /admin/system-messages/{system_message_type}/{version_id}": {
-        let body;
         try {
-          body = parseBody(event.body);
+          parseBody(event.body);
         } catch (error) {
           response.statusCode = 400;
           response.body = JSON.stringify({ error: error.message });
@@ -517,9 +516,8 @@ exports.handler = async (event) => {
 
       // Activate a historical version
       case "POST /admin/system-messages/{system_message_type}/{version_id}/activate": {
-        let body;
         try {
-          body = parseBody(event.body);
+          parseBody(event.body);
         } catch (error) {
           response.statusCode = 400;
           response.body = JSON.stringify({ error: error.message });
