@@ -111,7 +111,7 @@ def load_config(db_connection):
     Uses caching to avoid DB hits on every request if container is warm.
     """
     
-    global _CONFIG_LOADED
+    global _CONFIG_LOADED  # must be global so the cache flag persists across warm container calls
     global MAX_MESSAGES_PER_DAY, MAX_CHARACTERS_PER_USER_MESSAGE, MAX_CHARACTERS_PER_AI_MESSAGE
     global TEMPERATURE, MAX_CONTEXT_CHUNKS, MAX_HISTORY_MESSAGES
     global SUPPORT_SCORE_THRESHOLD, SCOPE_ALIGNMENT_SCORE_THRESHOLD
