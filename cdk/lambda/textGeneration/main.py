@@ -1,9 +1,7 @@
-
 import boto3.exceptions
 import json
 from helpers.cors import get_cors_headers
 import logging
-import os
 import boto3
 from helpers.chat import get_response
 from helpers.db_connection import get_db_connection
