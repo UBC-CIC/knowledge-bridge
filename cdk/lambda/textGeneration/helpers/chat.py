@@ -347,7 +347,7 @@ def get_response(
                 try:
                     cited_indices = [int(x.strip()) for x in indices_str.split(',')]
                 except ValueError:
-                    pass
+                    pass  # malformed indices — keep cited_indices as default empty list
 
     except Exception as e:
         logger.error(f"Generation failed: {e}")

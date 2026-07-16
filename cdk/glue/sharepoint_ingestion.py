@@ -568,7 +568,7 @@ def clean_list_url(raw_url: str) -> str:
             idx = parts.index("Lists")
             clean_url = "/".join(parts[: idx + 2])
         except ValueError:
-            pass
+            pass  # fallback: return url unchanged if Lists segment not found
     return clean_url
 
 def is_eligible_sharepoint_list(sp_list) -> bool:
@@ -655,7 +655,7 @@ async def expand_sharepoint_group(site_id: str, sp_group_id: int, visited=None) 
                         nested = await expand_sharepoint_group(site_id, int(nested_guids[-1]), visited)
                         found.update(nested)
                     except Exception:
-                        pass
+                        pass  # nested group expansion is best-effort; outer caller logs overall failure
     except Exception as e:
         logger.warning(f"expand_sharepoint_group failed for group {sp_group_id}: {e}")
     return found
