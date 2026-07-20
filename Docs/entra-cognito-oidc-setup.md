@@ -1,6 +1,12 @@
 # Microsoft Entra ID + Amazon Cognito OIDC Federation Setup
 
-This document explains how to set up "Sign in with Microsoft" for this application. It covers everything from Azure Portal configuration to CDK deployment. Written for someone doing this for the first time.
+> **This document is superseded by [`ENTRA_SETUP.md`](./ENTRA_SETUP.md).** The new guide is accurate against the current CDK code and includes screenshot placeholders. Use that document instead.
+>
+> Known discrepancies in this file (do not use):
+> - Attribute mapping shows `email: cognito.ProviderAttribute.other("upn")` — the code actually maps `upn → custom:upn`
+> - Secrets delivery shows `-c entraClientId=...` context flags — the code reads from Secrets Manager directly; no context flags are needed
+
+---
 
 ---
 

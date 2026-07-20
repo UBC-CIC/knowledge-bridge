@@ -243,7 +243,7 @@ export class ApiGatewayStack extends cdk.Stack {
     // Callback URLs are bootstrapped with localhost only. AmplifyStack adds the real
     // Amplify URL via UpdateCognitoCallbackUrls custom resource after deploy.
     this.userPool.addDomain(`${id}-CognitoDomain`, {
-      cognitoDomain: { domainPrefix: "cic-kba" },
+      cognitoDomain: { domainPrefix: id.replace(/-Api$/, '').toLowerCase() },
     });
 
     // Microsoft Entra ID OIDC identity provider
