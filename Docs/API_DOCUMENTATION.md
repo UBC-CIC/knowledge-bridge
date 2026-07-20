@@ -554,6 +554,8 @@ Update an existing user's email and role.
 }
 ```
 
+
+
 **Parameters:**
 
 - `user_id` (string, required): UUID of the user to update
