@@ -7,6 +7,7 @@
 - [Requirements](#requirements)
   - [Request Higher Bedrock LLM Invocation Quotas](#request-higher-bedrock-llm-invocation-quotas)
 - [Pre-Deployment](#pre-deployment)
+  - [Step 0: Complete Microsoft Entra ID Setup](#step-0-complete-microsoft-entra-id-setup)
   - [Create GitHub Personal Access Token](#create-github-personal-access-token)
 - [Deployment](#deployment)
   - [Step 1: Fork \& Clone The Repository](#step-1-fork--clone-the-repository)
@@ -16,6 +17,7 @@
   - [Step 1: Build AWS Amplify App](#step-1-build-aws-amplify-app)
   - [Step 2: Configure Admin User](#step-2-configure-admin-user)
   - [Step 3: Visit Web App](#step-3-visit-web-app)
+  - [Adding Custom Allowed Origins](#adding-custom-allowed-origins)
 - [Troubleshooting](#troubleshooting)
   - [Common Issues](#common-issues)
 - [Cleanup](#cleanup)
@@ -47,7 +49,7 @@ To request quota increases:
 3. Select the relevant LLM models you plan to use:
    - Anthropic Claude Haiku 4.5 (`us.anthropic.claude-haiku-4-5-20251001-v1:0`)
    - Anthropic Claude Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`)
-   - Cohere Embed V3
+   - Amazon Titan Embed Text V2 (`amazon.titan-embed-text-v2:0`)
 4. Request quota increases for "Requests per minute" based on your expected usage
 5. Submit the quota increase request and wait for AWS approval (this can take 24-48 hours)
 
@@ -55,11 +57,32 @@ _Note: Consider your expected concurrent users and document processing volume wh
 
 ## Pre-Deployment
 
+### Step 0: Complete Microsoft Entra ID Setup
+
+Before proceeding with any AWS steps, complete all steps in [`Docs/ENTRA_SETUP.md`](./ENTRA_SETUP.md). That guide covers:
+
+- Creating or locating the App Registration in Azure Portal
+- Configuring API permissions (Microsoft Graph + SharePoint)
+- Ensuring the `upn` claim is always present in tokens
+- Registering the Cognito redirect URI
+- Generating the client secret and SharePoint certificate
+- Storing all credentials in AWS Secrets Manager
+
+The following three secrets **must exist in Secrets Manager before running `cdk deploy`**:
+
+| Secret Name | Type | Contents |
+|---|---|---|
+| `KBA-SharePoint-Credentials` | Key/value | `tenant_id`, `client_id`, `client_secret`, `site_id` |
+| `Sharepoint-REST-Cert-Pfx-B64` | Plaintext | Base64-encoded PFX certificate |
+| `Sharepoint-REST-Cert-Pfx-Password` | Plaintext | Certificate password |
+
+See `Docs/ENTRA_SETUP.md` for step-by-step instructions on generating and storing each of these.
+
 ### Create GitHub Personal Access Token
 
 To deploy this solution, you will need to generate a GitHub personal access token. Please visit [here](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) for detailed instruction to create a personal access token.
 
-_Note: Make sure to give access to only the SpecEx repository. Enable Read-only for Contents, and Metadata. For webhooks and Commit statuses enable read and write permissions._
+_Note: Make sure to give access to only the repository you forked. Enable Read-only for Contents, and Metadata. For webhooks and Commit statuses enable read and write permissions._
 
 **Once you create a token, please note down its value as you will use it later in the deployment process.**
 
@@ -78,13 +101,13 @@ Now let's clone the GitHub repository onto your machine. To do this:
 3. Clone the GitHub repository by entering the following command. Be sure to replace `<YOUR-GITHUB-USERNAME>` with your own username.
 
 ```bash
-git clone https://github.com/<YOUR-GITHUB-USERNAME>/specialization-explorer.git
+git clone https://github.com/<YOUR-GITHUB-USERNAME>/knowledge-base-assistant.git
 ```
 
 The code should now be in the folder you created. Navigate into the root folder containing the entire codebase by running the command:
 
 ```bash
-cd specialization-explorer
+cd knowledge-base-assistant
 ```
 
 #### Install Dependencies
@@ -115,7 +138,11 @@ npm install
 
 ### Step 2: Upload Secrets & Parameters
 
-You would have to supply your GitHub personal access token you created earlier when deploying the solution. Run the following command and ensure you replace `<YOUR-GITHUB-TOKEN>` and `<YOUR-PROFILE-NAME>` with your actual GitHub token and the appropriate AWS profile name.
+All credentials required by the CDK stacks must be stored in AWS Secrets Manager and SSM Parameter Store before deployment. Entra credentials are covered in [Step 0](#step-0-complete-microsoft-entra-id-setup) — this section covers the remaining AWS-side prerequisites.
+
+#### GitHub Personal Access Token
+
+Store the GitHub token you created earlier. Replace `<YOUR-GITHUB-TOKEN>` and `<YOUR-PROFILE-NAME>` accordingly.
 
 <details>
 <summary>macOS/Linux</summary>
@@ -155,7 +182,9 @@ aws secretsmanager create-secret `
 
 &nbsp;
 
-You will need to upload your GitHub username to Amazon SSM Parameter Store. Replace `<YOUR-GITHUB-USERNAME>` and `<YOUR-PROFILE-NAME>` accordingly.
+#### SSM Parameters
+
+**GitHub owner name** — used by AmplifyStack to locate your forked repository. Replace `<YOUR-GITHUB-USERNAME>` and `<YOUR-PROFILE-NAME>` accordingly.
 
 <details>
 <summary>macOS/Linux</summary>
@@ -198,111 +227,7 @@ aws ssm put-parameter `
 
 &nbsp;
 
-You would have to supply a custom database username when deploying the solution to increase security. Run the following command and ensure you replace `<YOUR-DB-USERNAME>` with the custom name of your choice.
-
-<details>
-<summary>macOS/Linux</summary>
-
-```bash
-aws secretsmanager create-secret \
-  --name KBASecrets \
-  --secret-string "{\"DB_Username\":\"<YOUR-DB-USERNAME>\"}" \
-  --profile <YOUR-PROFILE-NAME>
-```
-
-</details>
-
-<details>
-<summary>Windows CMD</summary>
-
-```cmd
-aws secretsmanager create-secret ^
-  --name KBASecrets ^
-  --secret-string "{\"DB_Username\":\"<YOUR-DB-USERNAME>\"}" ^
-  --profile <YOUR-PROFILE-NAME>
-```
-
-</details>
-
-<details>
-<summary>PowerShell</summary>
-
-```powershell
-aws secretsmanager create-secret `
-  --name KBASecrets `
-  --secret-string '{\"DB_Username\": \"<YOUR-DB-USERNAME>\"}' `
-  --profile <YOUR-PROFILE-NAME>
-```
-
-</details>
-
-&nbsp;
-
-For example:
-
-```bash
-aws secretsmanager create-secret \
-  --name KBASecrets \
-  --secret-string '{"DB_Username":"KBADatabaseUser"}' \
-  --profile <YOUR-PROFILE-NAME>
-```
-
-In order to restrict user sign up to specific email domains, upload a comma-separated list of allowed email domains to Amazon SSM Parameter Store. Replace `<YOUR-ALLOWED-EMAIL-DOMAIN-LIST>` and `<YOUR-PROFILE-NAME>` accordingly.
-
-<details>
-<summary>macOS/Linux</summary>
-
-```bash
-aws ssm put-parameter \
-    --name "/KBA/AllowedEmailDomains" \
-    --value "<YOUR-ALLOWED-EMAIL-DOMAIN-LIST>" \
-    --type SecureString \
-    --profile <YOUR-PROFILE-NAME>
-```
-
-</details>
-
-<details>
-<summary>Windows CMD</summary>
-
-```cmd
-aws ssm put-parameter ^
-    --name "/KBA/AllowedEmailDomains" ^
-    --value "<YOUR-ALLOWED-EMAIL-DOMAIN-LIST>" ^
-    --type SecureString ^
-    --profile <YOUR-PROFILE-NAME>
-```
-
-</details>
-
-<details>
-<summary>PowerShell</summary>
-
-```powershell
-aws ssm put-parameter `
-    --name "/KBA/AllowedEmailDomains" `
-    --value "<YOUR-ALLOWED-EMAIL-DOMAIN-LIST>" `
-    --type SecureString `
-    --profile <YOUR-PROFILE-NAME>
-```
-
-</details>
-
-&nbsp;
-
-For example:
-
-```bash
-aws ssm put-parameter \
-    --name "/KBA/AllowedEmailDomains" \
-    --value "gmail.com,ubc.ca,student.ubc.ca" \
-    --type SecureString \
-    --profile <YOUR-PROFILE-NAME>
-```
-
-The application uses two Claude models for text generation, referenced via SSM parameters. You must create both parameters before deploying.
-
-**Haiku model** (used for lightweight/fast responses):
+**Haiku model ARN** (used for lightweight/fast responses):
 
 <details>
 <summary>macOS/Linux</summary>
@@ -345,60 +270,11 @@ aws ssm put-parameter `
 
 &nbsp;
 
-**Sonnet model** (used for higher-quality responses):
-
-<details>
-<summary>macOS/Linux</summary>
-
-```bash
-aws ssm put-parameter \
-    --name "/KBA/LLM/SonnetArn" \
-    --value "us.anthropic.claude-sonnet-4-6" \
-    --type String \
-    --profile <YOUR-PROFILE-NAME>
-```
-
-</details>
-
-<details>
-<summary>Windows CMD</summary>
-
-```cmd
-aws ssm put-parameter ^
-    --name "/KBA/LLM/SonnetArn" ^
-    --value "us.anthropic.claude-sonnet-4-6" ^
-    --type String ^
-    --profile <YOUR-PROFILE-NAME>
-```
-
-</details>
-
-<details>
-<summary>PowerShell</summary>
-
-```powershell
-aws ssm put-parameter `
-    --name "/KBA/LLM/SonnetArn" `
-    --value "us.anthropic.claude-sonnet-4-6" `
-    --type String `
-    --profile <YOUR-PROFILE-NAME>
-```
-
-</details>
-
-&nbsp;
-
-
-
-
-
 ### Step 3: CDK Deployment
 
 It's time to set up everything that goes on behind the scenes! For more information on how the backend works, feel free to refer to the Architecture documentation, but an understanding of the backend is not necessary for deployment.
 
 If you are new to CDK, note that the AWS Cloud Development Kit (CDK) lets you define cloud infrastructure using code. Review the [AWS CDK Documentation](https://docs.aws.amazon.com/cdk/) for a quick primer before proceeding.
-
-Note: Guardrails (Bedrock) are created as part of the CDK deployment. For operational guidance and advanced customization of guardrails and Bedrock configuration, see `Docs/BEDROCK_GUARDRAILS.md`.
 
 Open a terminal in the `/cdk` directory.
 
@@ -480,42 +356,35 @@ For example, if existing subnets use `172.31.0.0/20` and `172.31.16.0/20`, use `
 
 ```bash
 cdk synth \
-  --profile <YOUR-PROFILE-NAME> \
-  --context githubRepo=specialization-explorer
+  --context StackPrefix=<YOUR-STACK-PREFIX> \
+  --context environment=dev \
+  --context versionNumber=1.0.0 \
+  --context githubRepo=knowledge-base-assistant \
+  --context githubBranch=main \
+  --profile <YOUR-PROFILE-NAME>
 
 cdk bootstrap \
   aws://<YOUR_AWS_ACCOUNT_ID>/<YOUR_ACCOUNT_REGION> \
-  --profile <YOUR-PROFILE-NAME> \
-  --context githubRepo=specialization-explorer
-```
-
-**Deploy CDK stack**
-
-You may run the following command to deploy the stacks all at once. Again, replace `<YOUR-PROFILE-NAME>` with the appropriate AWS profile used earlier. Also replace `<YOUR-STACK-PREFIX>` with the appropriate stack prefix.
-
-The stack prefix will be prefixed onto the physical names of the resources created during deployment. The `environment` parameter specifies the deployment environment (dev, test, prod), the `version` parameter indicates the application version being deployed, and the `githubRepo` parameter should match your forked repository name.
-
-```bash
-cdk deploy --all \
-  --context StackPrefix=<YOUR-STACK-PREFIX> \
-  --context environment=dev \
-  --context version=1.0.0 \
-  --context githubRepo=specialization-explorer \
   --profile <YOUR-PROFILE-NAME>
 ```
 
-For example:
+#### Deploy CDK stack
+
+You may run the following command to deploy the stacks all at once. Replace `<YOUR-PROFILE-NAME>` with the appropriate AWS profile and `<YOUR-STACK-PREFIX>` with your chosen stack prefix.
+
+> **StackPrefix note:** The prefix is lowercased and used as the Cognito hosted UI domain (e.g. `StackPrefix=CUCCIO` → `cuccio.auth.ca-central-1.amazoncognito.com`). It must be **globally unique** across all AWS Cognito deployments. Use the same prefix you registered in Entra's redirect URI in `Docs/ENTRA_SETUP.md` Section 4.
 
 ```bash
 cdk deploy --all \
   --context StackPrefix=<YOUR-STACK-PREFIX> \
   --context environment=dev \
-  --context version=1.0.0 \
-  --context githubRepo=specialization-explorer \
-  --profile my-aws-profile
+  --context versionNumber=1.0.0 \
+  --context githubRepo=knowledge-base-assistant \
+  --context githubBranch=main \
+  --profile <YOUR-PROFILE-NAME>
 ```
 
-**Note:** The deployment process may take 15-30 minutes to complete. You will be prompted to approve IAM changes and security group modifications during deployment.
+**Note:** The deployment process may take 15-30 minutes to complete.
 
 #### Stacks Deployed
 
@@ -523,12 +392,12 @@ The CDK deployment creates the following stacks in dependency order:
 
 | Stack | Description |
 |---|---|
-| `<PREFIX>-VpcStack` | VPC, subnets, security groups, and VPC endpoints |
-| `<PREFIX>-Database` | RDS PostgreSQL instance and RDS Proxy |
-| `<PREFIX>-DBFlow` | Database migration Lambda and schema setup |
-| `<PREFIX>-CICD` | CodePipeline and ECR repositories for Docker image builds |
-| `<PREFIX>-KnowledgeBase` | Amazon Bedrock Knowledge Base, OpenSearch Serverless collection, and S3 data source bucket |
-| `<PREFIX>-Api` | API Gateway (REST + WebSocket), all Lambda functions, and Cognito User Pool |
+| `<PREFIX>-VpcStack` | VPC, subnets, NAT gateway, and VPC endpoints |
+| `<PREFIX>-Database` | RDS PostgreSQL 17 instance and RDS Proxy |
+| `<PREFIX>-DBFlow` | Database migration Lambda and schema setup (runs on deploy) |
+| `<PREFIX>-Glue` | AWS Glue job for SharePoint ingestion pipeline |
+| `<PREFIX>-CICD` | CodePipeline and CodeBuild for CI/CD |
+| `<PREFIX>-Api` | API Gateway (REST + WebSocket), Lambda functions, Cognito User Pool, WAF |
 | `<PREFIX>-Amplify` | AWS Amplify app connected to your GitHub repository |
 
 ### Authorize the GitHub Connection (Required After First Deploy)
@@ -538,59 +407,12 @@ The CICD stack creates a GitHub connection via AWS CodeConnections to allow Code
 1. After CDK deployment completes, go to **AWS Console → Developer Tools → Settings → Connections** (or search "CodeConnections").
 2. Find the connection named `<STACK-PREFIX>-CICD-github-conn` with status `Pending`.
 3. Click on it, then click **Update pending connection**.
-4. Follow the prompts to authorize access to your GitHub account and the `specialization-explorer` repository.
+4. Follow the prompts to authorize access to your GitHub account and your forked repository.
 5. Once authorized, the connection status will change to `Available`.
 
 _Note: The CDK output `GitHubConnectionArn` shows the ARN of this connection for reference._
 
-### CodePipeline & ECR Image Bootstrapping (First-Time Deployment)
-
-The CICD stack builds and pushes the Docker image for the `vectorIndexManagerSigV4` Lambda to ECR via CodePipeline. The KnowledgeBase stack depends on this image being present before it can create the vector index manager Lambda.
-
-**How it works automatically:**
-
-The KnowledgeBase stack includes an `ecrImageWaiter` custom resource that:
-1. Checks ECR for the `latest` image tag on the `vectorIndexManagerSigV4` repository.
-2. If the image is not found, it **automatically triggers the CodePipeline** to start a build.
-3. It then polls ECR every 30 seconds for up to ~14 minutes waiting for the image to appear.
-4. Once the image is available, the KnowledgeBase stack deployment continues.
-
-This means in most cases you do not need to manually trigger the pipeline — it is triggered automatically during deployment. However, the GitHub connection **must be authorized** (see above) before the pipeline can successfully pull source code and build the image.
-
-**If the KnowledgeBase stack times out waiting for the image:**
-
-1. Go to **AWS Console → CodePipeline** → select `<STACK-PREFIX>-CICD-DockerImagePipeline`.
-2. Check if the pipeline failed — a common cause is the GitHub connection not being authorized yet.
-3. Authorize the connection (see above), then click **Release change** to re-run the pipeline.
-4. Once the pipeline completes and the image is in ECR, redeploy: `cdk deploy <STACK-PREFIX>-KnowledgeBase --profile <YOUR-PROFILE-NAME>`.
-
-**Notes:**
-
-- Verify the ECR repository names and tags in the AWS Console or CDK outputs to ensure they match the expected values.
-- After the pipeline successfully completes and the images are pushed, the KnowledgeBase stack should deploy successfully.
-
-**Troubleshooting:**
-
-- Check the CodePipeline and CodeBuild logs for any errors during the build process.
-- Verify that the required images and tags are present in ECR.
-- Ensure that the IAM roles for CodePipeline and CodeBuild have the necessary permissions to push images to ECR.
-
-> **Tip:** The KnowledgeBase stack waits for a Docker image to exist in ECR before it can complete. To avoid a long wait, authorize the GitHub connection and trigger the pipeline **as soon as the CICD stack finishes** — before the KnowledgeBase stack starts deploying. This is only required for the first deployment; subsequent deploys will automatically trigger a new build if the relevant source code has changed.
->
-> **1. Authorize the GitHub connection (first deployment only):**
-> - Follow the same steps as above to authorize the connection.
->
-> **2. Trigger the CodePipeline build:**
-> - Go to AWS Console → **CodePipeline**
-> - Find `<PREFIX>-CICD-DockerImagePipeline`
-> - Click **Release change** to start the pipeline manually
-> - This kicks off CodeBuild, which builds and pushes the Docker image to ECR
->
-> Once the image is in ECR, the KnowledgeBase stack will detect it and continue deploying without waiting.
-
 ---
-
-
 
 ## Post-Deployment
 
@@ -598,28 +420,25 @@ This means in most cases you do not need to manually trigger the pipeline — it
 
 1. Log in to AWS console, and navigate to **AWS Amplify**. You can do so by typing `Amplify` in the search bar at the top.
 2. From `All apps`, click `<STACK-PREFIX>-amplify`.
-3. You will see multiple branches listed (`main`, `dev`, `api_endpoint_setup`). Click on the branch that corresponds to your GitHub repository's default branch (typically `main`).
-4. Click `Redeploy this version` to trigger a build
-5. Wait for the build to complete (this may take 5-10 minutes)
+3. Click on the `main` branch.
+4. Click `Redeploy this version` to trigger a build.
+5. Wait for the build to complete (this may take 5-10 minutes).
 6. You now have access to the `Amplify App ID` and the public domain name to use the web app.
 
 ### Step 2: Configure Admin User
 
-To create an admin user for accessing the admin dashboard:
+Admin sign-in is handled entirely through Microsoft Entra SSO — users are created automatically in Cognito on first login. There are no manual Cognito user creation steps.
 
-1. Navigate to **AWS Cognito** in the AWS Console
-2. Find the User Pool named `<STACK-PREFIX>-UserPool`
-3. Click on "Users" in the left sidebar
-4. Click "Create user"
-5. Fill in the required information:
-   - Username: your email address
-   - Email: same as username
-   - Temporary password: create a secure password
-6. Click "Don't send an email invitation"
-7. Click "Create user"
-8. After creation, select the user and click "Add user to group"
-9. Select the "admin" group
-10. On first login, you'll be prompted to change your password
+**To grant admin access to a user:**
+
+1. Have the user sign in to the app at least once using their Microsoft account. This creates their Cognito profile automatically.
+2. Navigate to **AWS Cognito** in the AWS Console.
+3. Find the User Pool named `<STACK-PREFIX>-UserPool`.
+4. Click **Users** in the left sidebar and locate the user by their email or username.
+5. Select the user → **Group memberships** → **Add user to group** → select `admin` → **Add**.
+6. The user must **sign out and sign back in** for the admin group membership to take effect in their session token.
+
+> All users who successfully authenticate via Entra are automatically added to the `users` group. Only users explicitly added to the `admin` group can access admin dashboard endpoints.
 
 ### Step 3: Visit Web App
 
@@ -629,7 +448,9 @@ You can now navigate to the web app URL (found in the Amplify console) to see yo
 
 ### Adding Custom Allowed Origins
 
-The application stores allowed CORS origins in an SSM parameter (`/<STACK-PREFIX>-Api/API/AllowedOrigins`). The Amplify URL is added automatically during deployment. If you need to allow additional origins (e.g., a custom domain or localhost for development), update the parameter manually:
+The application stores allowed CORS origins in an SSM parameter (`/<STACK-PREFIX>-Api/API/AllowedOrigins`). The Amplify URL is added automatically during deployment. When this parameter is updated, the `cognitoOriginSync` Lambda fires automatically via EventBridge and updates the Cognito callback/logout URLs to match.
+
+If you need to allow additional origins (e.g., a custom domain or localhost for development), update the parameter manually:
 
 <details>
 <summary>macOS/Linux</summary>
@@ -675,7 +496,7 @@ aws ssm put-parameter `
 
 &nbsp;
 
-_Note: Always read the current value first and append your new origin to avoid removing existing ones. Origins should not have trailing slashes. Subsequent CDK deployments will not duplicate existing origins._
+_Note: Always read the current value first and append your new origin to avoid removing existing ones. Origins must not have trailing slashes. Updating this parameter automatically triggers the `cognitoOriginSync` Lambda to update Cognito's allowed callback and logout URLs._
 
 ## Troubleshooting
 
@@ -688,7 +509,7 @@ _Note: Always read the current value first and append your new origin to avoid r
 **Issue: CloudFormation validation error during ResourceExistenceCheck referencing DataPipeline or CICD ARNs**
 
 - Symptoms: CloudFormation throws a validation error during the change set or deployment phase, related to a `ResourceExistenceCheck` for an ARN that appears to reference the `DataPipeline` or `CICD` resources.
-- Solution: This commonly occurs on first-time deployments when the pipeline and ECR resources are created by the deployment but are referenced in IAM policy statements before they exist. Authorize the GitHub connection and follow the [CodePipeline & ECR Image Bootstrapping](#codepipeline--ecr-image-bootstrapping-first-time-deployment) steps to manually trigger the pipeline build and redeploy.
+- Solution: This commonly occurs on first-time deployments when the pipeline resources are created but referenced in IAM policy statements before they exist. Authorize the GitHub connection (see [Authorize the GitHub Connection](#authorize-the-github-connection-required-after-first-deploy)) and redeploy.
 
 **Issue: Amplify build fails**
 
@@ -706,7 +527,7 @@ _Note: Always read the current value first and append your new origin to avoid r
 
 **Issue: CORS errors in browser**
 
-- Solution: Verify that the API Gateway CORS configuration includes your Amplify domain
+- Solution: Verify that the `/<STACK-PREFIX>-Api/API/AllowedOrigins` SSM parameter includes your Amplify domain. See [Adding Custom Allowed Origins](#adding-custom-allowed-origins).
 
 **Issue: WebSocket connection fails**
 
@@ -719,13 +540,20 @@ _Note: Always read the current value first and append your new origin to avoid r
 
 - Solution: Ensure the `/KBA/LLM/HaikuArn` and `/KBA/LLM/SonnetArn` SSM parameters were created before deployment. See [Step 2: Upload Secrets & Parameters](#step-2-upload-secrets--parameters).
 
-**Issue: Knowledge Base ingestion fails or returns no results**
+**Issue: Glue ingestion job fails**
 
 - Solution:
-  - Verify the `<PREFIX>-KnowledgeBase` stack deployed successfully in CloudFormation.
-  - Check that the S3 bucket for the knowledge base exists and contains your source documents.
-  - The web crawler data source is created with a `.*` exclusion filter by default — nothing is crawled until you add real URLs via the admin dashboard.
-  - Trigger a manual ingestion job from the Bedrock console under Knowledge Bases.
+  - Verify the three Entra secrets exist in Secrets Manager (`KBA-SharePoint-Credentials`, `Sharepoint-REST-Cert-Pfx-B64`, `Sharepoint-REST-Cert-Pfx-Password`).
+  - Check that admin consent was granted for all required API permissions (see `Docs/ENTRA_SETUP.md` Section 2).
+  - Check CloudWatch logs for the Glue job under `/aws-glue/jobs/`.
+  - Confirm the Glue job's IAM role has access to Secrets Manager, Bedrock (Titan), and the RDS VPC.
+
+**Issue: Admin login fails or redirect loop after Microsoft sign-in**
+
+- Solution:
+  - Verify the Cognito redirect URI registered in Entra exactly matches `https://<StackPrefix>.auth.<region>.amazoncognito.com/oauth2/idpresponse` (see `Docs/ENTRA_SETUP.md` Section 4).
+  - Confirm `upn` optional claim is configured in the App Registration (see `Docs/ENTRA_SETUP.md` Section 3).
+  - Check CloudWatch logs for `/aws/lambda/<STACK-PREFIX>-addMemberOnSignUp`.
 
 ## Cleanup
 
@@ -745,9 +573,9 @@ To take down the deployed stack for a fresh redeployment in the future, follow t
 2. **Delete CloudFormation Stacks:**
    Navigate to AWS CloudFormation console and delete stacks in this order:
    - `<STACK-PREFIX>-Amplify`
-   - `<STACK-PREFIX>-CICD`
    - `<STACK-PREFIX>-Api`
-   - `<STACK-PREFIX>-KnowledgeBase`
+   - `<STACK-PREFIX>-Glue`
+   - `<STACK-PREFIX>-CICD`
    - `<STACK-PREFIX>-DBFlow`
    - `<STACK-PREFIX>-Database`
    - `<STACK-PREFIX>-VpcStack`
@@ -756,29 +584,23 @@ To take down the deployed stack for a fresh redeployment in the future, follow t
    - Navigate to AWS Secrets Manager
    - Delete the following secrets:
      - `github-personal-access-token`
-     - `KBASecrets`
+     - `KBA-SharePoint-Credentials`
+     - `Sharepoint-REST-Cert-Pfx-B64`
+     - `Sharepoint-REST-Cert-Pfx-Password`
      - Any database credentials created by the stack
 
 4. **Delete SSM Parameters:**
    - Navigate to AWS Systems Manager → Parameter Store
    - Delete the following parameters:
      - `kba-owner-name`
-     - `/KBA/AllowedEmailDomains`
      - `/KBA/LLM/HaikuArn`
-     - `/KBA/LLM/SonnetArn`
-     - `/KBA/API/AllowedOrigins`
+     - `/<STACK-PREFIX>-Api/API/AllowedOrigins`
 
 5. **Delete ECR Repositories** (if any were created):
    - Navigate to Amazon ECR
-   - Delete repositories created by the stack (e.g. `<STACK-PREFIX>-vectorindexmanagersigv4`)
+   - Delete any repositories created by the CICD stack
 
-6. **Delete Knowledge Base Resources** (if not removed by CloudFormation):
-   - Navigate to **Amazon Bedrock** → Knowledge Bases
-   - Delete the knowledge base created by the stack
-   - Navigate to **Amazon OpenSearch Serverless** → Collections
-   - Delete the collection created by the stack
-
-7. **Verify Cleanup**:
+6. **Verify Cleanup**:
    - Check CloudWatch Logs for any remaining log groups
    - Check Lambda functions for any remaining functions
    - Check API Gateway for any remaining APIs
@@ -790,6 +612,4 @@ To take down the deployed stack for a fresh redeployment in the future, follow t
 - RDS instances
 - NAT Gateways
 - Elastic IPs
-- S3 storage
-- OpenSearch Serverless OCUs
 - CloudWatch Logs retention

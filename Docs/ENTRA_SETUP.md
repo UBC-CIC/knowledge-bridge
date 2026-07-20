@@ -372,9 +372,11 @@ The Graph token is cached in a module-level variable and reused across warm Lamb
 
 | Resource | URL |
 |---|---|
-| Hosted UI domain | `https://cic-kba.auth.ca-central-1.amazoncognito.com` |
-| OIDC callback (registered in Entra) | `https://cic-kba.auth.ca-central-1.amazoncognito.com/oauth2/idpresponse` |
+| Hosted UI domain | `https://<stackprefix>.auth.<region>.amazoncognito.com` |
+| OIDC callback (registered in Entra) | `https://<stackprefix>.auth.<region>.amazoncognito.com/oauth2/idpresponse` |
 | Entra issuer URL | `https://login.microsoftonline.com/<tenant_id>/v2.0` |
 | Entra authorization endpoint | `https://login.microsoftonline.com/<tenant_id>/oauth2/v2.0/authorize` |
 | Entra token endpoint | `https://login.microsoftonline.com/<tenant_id>/oauth2/v2.0/token` |
 | Entra JWKS URI | `https://login.microsoftonline.com/<tenant_id>/discovery/v2.0/keys` |
+
+`<stackprefix>` is your `StackPrefix` context value lowercased (e.g. `StackPrefix=CUCCIO` → `cuccio`). `<region>` is your AWS deployment region (e.g. `ca-central-1`).
