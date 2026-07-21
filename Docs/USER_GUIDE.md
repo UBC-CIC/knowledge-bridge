@@ -60,11 +60,6 @@ AI responses may include source references drawn from your SharePoint content. C
 
 ![image](./media/expanded-resources.png)
 
-### Hallucination Warnings
-
-If the assistant's response is partially or fully unsupported by the retrieved content, a warning banner appears below the message advising you to verify the information independently.
-
-![image](./media/suggestion-hallucination.png)
 
 ### Message Rating
 
