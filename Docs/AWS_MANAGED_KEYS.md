@@ -423,4 +423,4 @@ The `@aws-cdk/aws-glue-alpha` `PythonShellJob` does not expose `securityConfigur
 | S3 export buckets (×2) | `api-stack.ts` | `aws/s3` (SSE-S3) | `encryption: BucketEncryption.KMS` + `encryptionKey` on each `Bucket` |
 | SQS queues (×2) | `api-stack.ts` | `aws/sqs` (SSE-SQS) | `encryptionMasterKey` on each `Queue` |
 | SNS topic | `api-stack.ts` | `aws/sns` | `masterKey` on `Topic` |
-| Glue job data (S3, CloudWatch logs, bookmarks) | `glue-stack.ts` | none (unencrypted) | `CfnSecurityConfiguration` + L1 escape hatch override |
+| Glue job data (S3, CloudWatch logs, bookmarks) | `glue-stack.ts` | service defaults (`aws/s3`, `aws/logs`) | `CfnSecurityConfiguration` + L1 escape hatch override |
