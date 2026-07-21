@@ -215,8 +215,6 @@ Both the client secret (for Cognito OIDC + Graph API) and the SharePoint certifi
 
 Navigate there first: Azure Portal → Microsoft Entra ID → **App Registrations** → select your application → expand **Manage** → **Certificates & secrets**
 
-> 📸 **Screenshot:** Certificates & secrets page showing both tabs (Certificates and Client secrets)
-
 ---
 
 ### Part A — Generate a Client Secret
