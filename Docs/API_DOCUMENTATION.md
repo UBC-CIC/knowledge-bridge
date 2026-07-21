@@ -1,6 +1,6 @@
-# Specialization Explorer REST API Documentation
+# KBA REST API Documentation
 
-This document provides comprehensive documentation for the Specialization Explorer REST API, including endpoint descriptions, authentication requirements, request/response formats, and example usage.
+This document provides comprehensive documentation for the KBA REST API, including endpoint descriptions, authentication requirements, request/response formats, and example usage.
 
 ## Table of Contents
 
@@ -8,15 +8,23 @@ This document provides comprehensive documentation for the Specialization Explor
 - [Base URL](#base-url)
 - [Common Headers](#common-headers)
 - [Error Responses](#error-responses)
-- [Public Endpoints](#public-endpoints)
 - [User Endpoints](#user-endpoints)
 - [Chat Session Endpoints](#chat-session-endpoints)
 - [System Message Endpoints](#system-message-endpoints)
 - [Admin Endpoints](#admin-endpoints)
+  - [User Management](#user-management)
+  - [Entra Groups](#entra-groups)
+  - [Ingestion](#ingestion)
+  - [Export](#export)
+  - [Notifications](#notifications)
+  - [Feedback](#feedback)
+  - [System Settings](#system-settings)
+  - [System Messages](#system-messages)
+  - [Analytics](#analytics)
 
 ## Authentication
 
-All API endpoints (except public ones) require authentication using AWS Cognito JWT tokens passed in the `Authorization` header.
+All API endpoints require authentication using AWS Cognito JWT tokens passed in the `Authorization` header.
 
 ---
 
@@ -39,9 +47,7 @@ const token = session.tokens?.idToken?.toString();
 The API uses two custom Lambda authorizers:
 
 - **adminAuthorizer**: Validates the user has admin privileges. Required for all `/admin/*` endpoints.
-- **userAuthorizer**: Validates any authenticated user. Required for user, chat session, system message, and analytics endpoints.
-
-Public endpoints (`/user/publicToken`, `/public/*`) require no authentication.
+- **userAuthorizer**: Validates any authenticated user. Required for user, chat session, and system message endpoints.
 
 ## Base URL
 
@@ -70,89 +76,20 @@ Content-Type: application/json
 
 - `200` - Success
 - `201` - Created
+- `202` - Accepted
 - `204` - No Content
 - `400` - Bad Request
 - `401` - Unauthorized (missing or invalid token)
 - `403` - Forbidden (insufficient permissions)
 - `404` - Not Found
-- `409` - Conflict (e.g. duplicate resource)
+- `409` - Conflict (e.g. no running job to stop)
 - `500` - Internal Server Error
-
----
-
-# Public Endpoints
-
-These endpoints require no authentication.
-
-## Get Public Token
-
-Returns a JWT token for non-authenticated (guest) users.
-
-**Endpoint:** `GET /user/publicToken`
-
-**Response:**
-
-```json
-{ "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }
-```
-
-**Example (cURL):**
-
-```bash
-curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/user/publicToken"
-```
 
 ---
 
 # User Endpoints
 
 These endpoints require a valid Cognito token (`userAuthorizer`).
-
-## Create User
-
-Create a new user record (guest or student).
-
-**Endpoint:** `POST /user`
-
-**Request Body:**
-
-```json
-{
-  "role": "student",
-  "email": "student@example.com",
-  "display_name": "Jane Doe"
-}
-```
-
-**Parameters:**
-
-- `role` (string, optional): `student` or `admin` — defaults to `student`
-- `email` (string, optional): User email
-- `display_name` (string, optional): Display name
-
-**Response:**
-
-```json
-{
-  "userId": "uuid",
-  "role": "student",
-  "email": "student@example.com",
-  "display_name": "Jane Doe",
-  "created_at": "2024-01-15T10:30:00.000Z",
-  "last_seen_at": "2024-01-15T10:30:00.000Z"
-}
-```
-
-**Example (cURL):**
-
-```bash
-curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/user" \
-  -H "Authorization: eyJraWQiOiJ..." \
-  -H "Content-Type: application/json" \
-  -d '{"role": "student", "email": "student@example.com"}'
-```
-
----
 
 ## Get User
 
@@ -191,6 +128,10 @@ Update a user's email address.
 { "email": "newemail@example.com" }
 ```
 
+**Parameters:**
+
+- `email` (string, required): New email address
+
 **Response:** `200 OK`
 
 **Example (cURL):**
@@ -200,6 +141,27 @@ curl -X PUT "https://{api-id}.execute-api.{region}.amazonaws.com/prod/user/uuid"
   -H "Authorization: eyJraWQiOiJ..." \
   -H "Content-Type: application/json" \
   -d '{"email": "newemail@example.com"}'
+```
+
+---
+
+## Get Accessible Sources
+
+Get SharePoint lists accessible to a user based on their Entra group memberships.
+
+**Endpoint:** `GET /user/{user_id}/accessible_sources`
+
+**Path Parameters:**
+
+- `user_id` (uuid, required): The user's UUID
+
+**Response:** `200 OK` with list of accessible site sources
+
+**Example (cURL):**
+
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/user/uuid/accessible_sources" \
+  -H "Authorization: eyJraWQiOiJ..."
 ```
 
 ---
@@ -255,6 +217,47 @@ curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/user/uuid/
 
 ---
 
+## Rate AI Message
+
+Rate an AI message with a thumbs up or down. For thumbs down, a category and optional comment can be included.
+
+**Endpoint:** `POST /user/{user_id}/chat_sessions/{chat_session_id}/messages/{message_id}/rating`
+
+**Path Parameters:**
+
+- `user_id` (uuid, required): Owner's UUID
+- `chat_session_id` (uuid, required): Chat session UUID
+- `message_id` (uuid, required): Message UUID to rate
+
+**Request Body:**
+
+```json
+{
+  "is_positive": false,
+  "category": "Inaccurate",
+  "comment": "The answer was incorrect about program requirements."
+}
+```
+
+**Parameters:**
+
+- `is_positive` (boolean, required): `true` for thumbs up, `false` for thumbs down
+- `category` (string, optional): One of `Not helpful`, `Inaccurate`, `Off-topic`, `Other` — only for thumbs down
+- `comment` (string, optional): Free-text comment, max 2000 chars
+
+**Response:** `200 OK`
+
+**Example (cURL):**
+
+```bash
+curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/user/uuid/chat_sessions/uuid/messages/uuid/rating" \
+  -H "Authorization: eyJraWQiOiJ..." \
+  -H "Content-Type: application/json" \
+  -d '{"is_positive": false, "category": "Inaccurate"}'
+```
+
+---
+
 # Chat Session Endpoints
 
 These endpoints require a valid Cognito token (`userAuthorizer`).
@@ -265,11 +268,10 @@ Create a new chat session for a user.
 
 **Endpoint:** `POST /chat_sessions`
 
-**Request Body:**
+**Request Body (optional):**
 
 ```json
 {
-  "user_id": "uuid",
   "title": "My first chat",
   "metadata": {}
 }
@@ -277,11 +279,10 @@ Create a new chat session for a user.
 
 **Parameters:**
 
-- `user_id` (uuid, required): Owner's UUID
 - `title` (string, optional): Chat session title
 - `metadata` (object, optional): Arbitrary metadata
 
-**Response:**
+**Response:** `201 Created`
 
 ```json
 {
@@ -300,7 +301,7 @@ Create a new chat session for a user.
 curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/chat_sessions" \
   -H "Authorization: eyJraWQiOiJ..." \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "uuid", "title": "My first chat"}'
+  -d '{"title": "My first chat"}'
 ```
 
 ---
@@ -336,22 +337,22 @@ Rename a chat session. Only the owning user may update.
 
 - `chat_session_id` (uuid, required): Chat session UUID
 
-**Query Parameters:**
-
-- `user_id` (uuid, required): Owner's UUID (used to verify ownership)
-
 **Request Body:**
 
 ```json
 { "title": "Renamed session" }
 ```
 
+**Parameters:**
+
+- `title` (string, required): New title (min length 1)
+
 **Response:** `200 OK`
 
 **Example (cURL):**
 
 ```bash
-curl -X PUT "https://{api-id}.execute-api.{region}.amazonaws.com/prod/chat_sessions/uuid?user_id=uuid" \
+curl -X PUT "https://{api-id}.execute-api.{region}.amazonaws.com/prod/chat_sessions/uuid" \
   -H "Authorization: eyJraWQiOiJ..." \
   -H "Content-Type: application/json" \
   -d '{"title": "Renamed session"}'
@@ -369,16 +370,12 @@ Delete a chat session. Only the owning user may delete.
 
 - `chat_session_id` (uuid, required): Chat session UUID
 
-**Query Parameters:**
-
-- `user_id` (uuid, required): Owner's UUID (used to verify ownership)
-
 **Response:** `204 No Content`
 
 **Example (cURL):**
 
 ```bash
-curl -X DELETE "https://{api-id}.execute-api.{region}.amazonaws.com/prod/chat_sessions/uuid?user_id=uuid" \
+curl -X DELETE "https://{api-id}.execute-api.{region}.amazonaws.com/prod/chat_sessions/uuid" \
   -H "Authorization: eyJraWQiOiJ..."
 ```
 
@@ -398,7 +395,7 @@ Generate an AI response for a message in a chat session.
 
 ```json
 {
-  "query": "What specializations are available in Computer Science?",
+  "query": "What are the eligibility requirements for the CIO program?",
   "user_id": "uuid"
 }
 ```
@@ -412,7 +409,7 @@ Generate an AI response for a message in a chat session.
 
 ```json
 {
-  "response": "There are several specializations available...",
+  "response": "The eligibility requirements are...",
   "sources": []
 }
 ```
@@ -423,7 +420,7 @@ Generate an AI response for a message in a chat session.
 curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/chat_sessions/uuid/text_generation" \
   -H "Authorization: eyJraWQiOiJ..." \
   -H "Content-Type: application/json" \
-  -d '{"query": "What specializations are available?", "user_id": "uuid"}'
+  -d '{"query": "What are the eligibility requirements?", "user_id": "uuid"}'
 ```
 
 ---
@@ -443,7 +440,7 @@ Get the currently active version of a system message by type.
 - `message_type` (string, required): One of:
   - `disclaimer`, `guardrails`, `system_role`, `system_checklist`, `system_instructions`
   - `initial_prompt`, `detective_phase_prompt`, `suggestion_phase_prompt`
-  - `welcome_message`, `partial_hallucination_warning`, `full_hallucination_warning`
+  - `welcome_message`
 
 **Response:**
 
@@ -461,6 +458,27 @@ Get the currently active version of a system message by type.
 
 ```bash
 curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/system_message/disclaimer" \
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+## Get Max Characters Per User Message
+
+Get the currently configured maximum character limit for user messages.
+
+**Endpoint:** `GET /system-settings/max-characters-per-user-message`
+
+**Response:**
+
+```json
+{ "max_characters_per_user_message": 2000 }
+```
+
+**Example (cURL):**
+
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/system-settings/max-characters-per-user-message" \
   -H "Authorization: eyJraWQiOiJ..."
 ```
 
@@ -514,16 +532,17 @@ Create a new admin user.
 
 - `display_name` (string, required): Display name (max 255 chars)
 - `email` (string, required): Email address (max 255 chars)
-- `institution_id` (string, optional): Institution identifier
+- `institution_id` (string, optional): Institution identifier (max 255 chars)
 
-**Response:**
+**Response:** `201 Created`
 
 ```json
 {
   "id": "uuid",
   "display_name": "Jane Smith",
   "email": "jane.smith@example.com",
-  "role": "admin"
+  "institution_id": "ubc",
+  "created_at": "2024-01-15T10:30:00.000Z"
 }
 ```
 
@@ -538,9 +557,9 @@ curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/use
 
 ---
 
-### Update User Role
+### Update User Email
 
-Update an existing user's email and role.
+Update an existing user's email address.
 
 **Endpoint:** `POST /admin/promote_user`
 
@@ -549,18 +568,14 @@ Update an existing user's email and role.
 ```json
 {
   "user_id": "uuid",
-  "email": "user@example.com",
-  "role": "admin"
+  "email": "user@example.com"
 }
 ```
-
-
 
 **Parameters:**
 
 - `user_id` (string, required): UUID of the user to update
 - `email` (string, required): Updated email address
-- `role` (string, required): `student` or `admin`
 
 **Response:** `200 OK`
 
@@ -570,7 +585,7 @@ Update an existing user's email and role.
 curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/promote_user" \
   -H "Authorization: eyJraWQiOiJ..." \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "uuid", "email": "user@example.com", "role": "admin"}'
+  -d '{"user_id": "uuid", "email": "user@example.com"}'
 ```
 
 ---
@@ -613,283 +628,412 @@ Get all messages for a specific chat session.
 
 ---
 
-## Knowledge Base / Data Sources
+## Entra Groups
 
-### List Data Sources
+### List Entra Groups
 
-List all data sources with their latest ingestion run status.
+Get a paginated list of Entra groups with member counts.
 
-**Endpoint:** `GET /admin/data_sources`
+**Endpoint:** `GET /admin/entra_groups`
 
-**Response:**
+**Query Parameters:**
 
-```json
-{
-  "items": [
-    {
-      "data_source": {
-        "id": "uuid",
-        "name": "https://example.com",
-        "type": "website",
-        "created_at": "2024-01-15T10:30:00.000Z",
-        "metadata": {},
-        "include_patterns": null,
-        "exclude_patterns": null
-      },
-      "latest_ingestion_run": {
-        "id": "uuid",
-        "data_source_id": "uuid",
-        "status": "completed",
-        "error_message": null,
-        "created_at": "2024-01-15T10:30:00.000Z",
-        "completed_at": "2024-01-15T10:35:00.000Z"
-      }
-    }
-  ]
-}
-```
+- `limit` (integer, optional): Default 20
+- `offset` (integer, optional): Default 0
+
+**Response:** `200 OK` with paginated list of Entra groups
 
 **Example (cURL):**
 
 ```bash
-curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/data_sources" \
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/entra_groups?limit=20&offset=0" \
   -H "Authorization: eyJraWQiOiJ..."
 ```
 
 ---
 
-### Stage Data Sources
+### Get Users in Entra Group
 
-Stage a new data source (website or CSV) for future syncing.
+Get paginated users within a specific Entra group.
 
-**Endpoint:** `POST /admin/data_sources`
+**Endpoint:** `GET /admin/entra_groups/{groupId}/users`
 
-**Request Body (website):**
+**Path Parameters:**
 
-```json
-{
-  "type": "website",
-  "created_by": "admin@example.com",
-  "name": "https://example.com",
-  "include_patterns": ["/docs/*"],
-  "exclude_patterns": ["/blog/*"]
-}
-```
+- `groupId` (string, required): Entra group ID
 
-**Request Body (CSV):**
+**Query Parameters:**
 
-```json
-{
-  "type": "csv",
-  "created_by": "admin@example.com",
-  "csv_file_name": "data.csv",
-  "csv_s3_bucket": "my-kb-bucket",
-  "csv_s3_key": "uploads/csv/1712345678_data.csv",
-  "metadata_s3_key": "uploads/json/1712345678_data.csv.metadata.json"
-}
-```
+- `limit` (integer, optional): Default 10
+- `offset` (integer, optional): Default 0
 
-**Parameters:**
+**Response:** `200 OK` with paginated list of users in the group
 
-- `type` (string, required): `website` or `csv`
-- `created_by` (string, required): Admin email
-- `name` (string, optional): URL for website sources
-- `include_patterns` / `exclude_patterns` (array, optional): URL path filters for web crawling
-- `csv_file_name`, `csv_s3_bucket`, `csv_s3_key` (string): Required for CSV sources
-- `metadata_file_name`, `metadata_s3_bucket`, `metadata_s3_key` (string, optional): Metadata file for CSV sources
+**Example (cURL):**
 
-**Response:**
-
-```json
-{
-  "message": "Data source staged",
-  "action": "staged",
-  "type": "website",
-  "created_by": "admin@example.com",
-  "staged_data_source_ids": ["uuid"]
-}
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/entra_groups/group-id/users" \
+  -H "Authorization: eyJraWQiOiJ..."
 ```
 
 ---
 
-### Sync Data Sources
+### Get Unassigned Users
 
-Queue all pending data sources and begin ingestion.
+Get users with no Entra group memberships.
 
-**Endpoint:** `POST /admin/data_sources/sync`
+**Endpoint:** `GET /admin/entra_groups/unassigned/users`
+
+**Query Parameters:**
+
+- `limit` (integer, optional): Default 10
+- `offset` (integer, optional): Default 0
+
+**Response:** `200 OK` with paginated list of unassigned users
+
+**Example (cURL):**
+
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/entra_groups/unassigned/users" \
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+## Ingestion
+
+### Trigger Ingestion
+
+Trigger a SharePoint ingestion Glue job run.
+
+**Endpoint:** `POST /admin/ingestion/trigger`
 
 **Request Body (optional):**
 
 ```json
-{ "created_by": "admin@example.com" }
+{ "force_full": false }
 ```
 
-**Response:**
+**Parameters:**
 
-```json
-{
-  "message": "Sync started",
-  "action": "sync_started",
-  "sync_session_id": "uuid",
-  "queued_count": 3,
-  "s3_queued_count": 1,
-  "website_queued_count": 2
-}
-```
+- `force_full` (boolean, optional): Force a full re-ingestion instead of incremental (default: `false`)
+
+**Response:** `200 OK` — job started
 
 **Example (cURL):**
 
 ```bash
-curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/data_sources/sync" \
+curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/ingestion/trigger" \
   -H "Authorization: eyJraWQiOiJ..." \
   -H "Content-Type: application/json" \
-  -d '{"created_by": "admin@example.com"}'
+  -d '{"force_full": false}'
 ```
 
 ---
 
-### Generate Presigned Upload URL
+### Stop Ingestion
 
-Generate an S3 presigned URL for uploading a single knowledge base file.
+Stop the currently running ingestion Glue job.
 
-**Endpoint:** `GET /admin/generate-presigned-url`
-
-**Query Parameters:**
-
-- `file_name` (string, required): Name of the file to upload (max 255 chars)
-- `content_type` (string, optional): MIME type (default: `application/octet-stream`)
+**Endpoint:** `POST /admin/ingestion/stop`
 
 **Response:**
 
-```json
-{
-  "presignedUrl": "https://s3.amazonaws.com/bucket/path?...",
-  "key": "uploads/csv/1712345678_data.csv",
-  "bucket": "my-kb-bucket"
-}
-```
+- `200 OK` — stop requested
+- `409 Conflict` — no running job to stop
 
 **Example (cURL):**
 
 ```bash
-curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/generate-presigned-url?file_name=data.csv&content_type=text/csv" \
+curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/ingestion/stop" \
   -H "Authorization: eyJraWQiOiJ..."
 ```
 
 ---
 
-### Generate Presigned Upload URLs (Batch)
+### List Ingestion Runs
 
-Generate presigned S3 upload URLs for multiple files in a single request. Use this for zip uploads to avoid hitting WAF rate limits from calling the single-file endpoint in a loop.
+List recent site-level ingestion runs from the database.
 
-**Endpoint:** `POST /admin/generate-presigned-urls/batch`
+**Endpoint:** `GET /admin/ingestion/runs`
 
-**Request Body:**
+**Query Parameters:**
 
-```json
-{
-  "files": [
-    { "file_name": "alumni.csv", "content_type": "text/csv" },
-    { "file_name": "alumni.csv.metadata.json", "content_type": "application/json" },
-    { "file_name": "courses.md", "content_type": "text/markdown" },
-    { "file_name": "courses.md.metadata.json", "content_type": "application/json" }
-  ]
-}
-```
+- `limit` (integer, optional): Number of runs to return (default: 5, max: 50)
+- `offset` (integer, optional): Default 0
 
-**Parameters:**
-
-- `files` (array, required): Up to 200 file descriptors
-  - `file_name` (string, required): File name (max 255 chars)
-  - `content_type` (string, optional): MIME type (default: `application/octet-stream`)
-
-**Response:**
-
-```json
-{
-  "presigned_urls": [
-    {
-      "file_name": "alumni.csv",
-      "presigned_url": "https://s3.amazonaws.com/bucket/path?...",
-      "key": "uploads/csv/1712345678_alumni.csv",
-      "bucket": "my-kb-bucket"
-    }
-  ]
-}
-```
-
-**Notes:**
-- Presigned URLs expire after 10 minutes
-- S3 uploads go directly to S3 and do not pass through WAF
-- Supported content types: `text/csv`, `text/markdown`, `application/json`, `text/json`, `application/octet-stream`
+**Response:** `200 OK` with list of ingestion run objects
 
 **Example (cURL):**
 
 ```bash
-curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/generate-presigned-urls/batch" \
-  -H "Authorization: eyJraWQiOiJ..." \
-  -H "Content-Type: application/json" \
-  -d '{"files": [{"file_name": "alumni.csv", "content_type": "text/csv"}]}'
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/ingestion/runs?limit=10" \
+  -H "Authorization: eyJraWQiOiJ..."
 ```
 
 ---
 
-### Stage Data Sources (Batch)
+### Get Ingestion Logs
 
-Stage multiple CSV/Markdown + metadata JSON file pairs in a single request. Designed for zip uploads. Duplicates are silently skipped.
+Get logs for a Glue job run (streamed from CloudWatch).
 
-**Endpoint:** `POST /admin/data_sources/batch`
+**Endpoint:** `GET /admin/ingestion/logs`
+
+**Query Parameters:**
+
+- `jobRunId` (string, required): Glue job run ID
+- `nextToken` (string, optional): Pagination token from a previous response
+- `logType` (string, optional): `output` or `error` (default: `output`)
+
+**Response:** `200 OK` with log lines and a pagination token
+
+**Example (cURL):**
+
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/ingestion/logs?jobRunId=jr_abc123" \
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+### Get Ingestion Schedule
+
+Get the current EventBridge ingestion schedule.
+
+**Endpoint:** `GET /admin/ingestion/schedule`
+
+**Response:** `200 OK` — schedule config, or `{ "exists": false }` if no schedule is set
+
+**Example (cURL):**
+
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/ingestion/schedule" \
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+### Create or Update Ingestion Schedule
+
+Create or update the EventBridge ingestion schedule.
+
+**Endpoint:** `PUT /admin/ingestion/schedule`
 
 **Request Body:**
 
 ```json
 {
-  "created_by": "admin@example.com",
-  "items": [
-    {
-      "type": "csv",
-      "primary_file_name": "alumni.csv",
-      "primary_s3_bucket": "my-kb-bucket",
-      "primary_s3_key": "uploads/csv/1712345678_alumni.csv",
-      "metadata_file_name": "alumni.csv.metadata.json",
-      "metadata_s3_bucket": "my-kb-bucket",
-      "metadata_s3_key": "uploads/json/1712345678_alumni.csv.metadata.json"
-    }
-  ]
+  "cron": "0 2 * * ? *",
+  "timezone": "America/Vancouver",
+  "enabled": true,
+  "force_full": false
 }
 ```
 
 **Parameters:**
 
-- `created_by` (string, required): Admin email
-- `items` (array, required): Up to 100 file pairs
-  - `type` (string, required): `csv` or `markdown`
-  - `primary_file_name` (string, required): CSV or Markdown file name
-  - `primary_s3_bucket` / `primary_s3_key` (string, required): S3 location of the primary file
-  - `metadata_file_name` (string, required): Must match `{primary_file_name}.metadata.json`
-  - `metadata_s3_bucket` / `metadata_s3_key` (string, required): S3 location of the metadata file
+- `cron` (string, required): Cron expression for the schedule
+- `timezone` (string, required): IANA timezone string
+- `enabled` (boolean, optional): Whether the schedule is active (default: `true`)
+- `force_full` (boolean, optional): Force full re-ingestion on each scheduled run (default: `false`)
 
-**Response:**
-
-```json
-{
-  "message": "Batch staging complete. 2 staged, 1 skipped, 0 failed.",
-  "staged_count": 2,
-  "skipped_count": 1,
-  "error_count": 0,
-  "staged": [{ "index": 0, "file": "alumni.csv", "data_source_ids": ["uuid", "uuid"] }],
-  "skipped": [{ "index": 1, "file": "courses.csv", "reason": "already_staged" }],
-  "errors": []
-}
-```
+**Response:** `200 OK` — schedule created or updated
 
 **Example (cURL):**
 
 ```bash
-curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/data_sources/batch" \
+curl -X PUT "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/ingestion/schedule" \
   -H "Authorization: eyJraWQiOiJ..." \
   -H "Content-Type: application/json" \
-  -d '{"created_by": "admin@example.com", "items": [...]}'
+  -d '{"cron": "0 2 * * ? *", "timezone": "America/Vancouver"}'
+```
+
+---
+
+### Delete Ingestion Schedule
+
+Delete the EventBridge ingestion schedule.
+
+**Endpoint:** `DELETE /admin/ingestion/schedule`
+
+**Response:**
+
+- `200 OK` — schedule deleted
+- `404 Not Found` — no schedule exists
+
+**Example (cURL):**
+
+```bash
+curl -X DELETE "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/ingestion/schedule" \
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+## Export
+
+### Trigger Export
+
+Trigger a new chat export job.
+
+**Endpoint:** `POST /admin/export/trigger`
+
+**Request Body:**
+
+```json
+{
+  "scope": "group",
+  "scope_id": "uuid"
+}
+```
+
+**Parameters:**
+
+- `scope` (string, required): `all`, `group`, `user`, or `analytics`
+- `scope_id` (uuid, optional): Required when `scope` is `group` or `user`
+- `groupId` (string, optional): Entra group ID filter — used when `scope` is `analytics`
+- `timeRange` (string, optional): Time range filter — used when `scope` is `analytics`
+
+**Response:** `202 Accepted`
+
+**Example (cURL):**
+
+```bash
+curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/export/trigger" \
+  -H "Authorization: eyJraWQiOiJ..." \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "all"}'
+```
+
+---
+
+### List Export Runs
+
+List export job runs for the current admin.
+
+**Endpoint:** `GET /admin/export/runs`
+
+**Query Parameters:**
+
+- `offset` (integer, optional): Default 0
+- `export_type` (string, optional): Filter by type — `chat` or `analytics`
+
+**Response:** `200 OK` with paginated list of export runs
+
+**Example (cURL):**
+
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/export/runs" \
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+## Notifications
+
+### List Notifications
+
+List notifications for the current admin.
+
+**Endpoint:** `GET /admin/notifications`
+
+**Response:** `200 OK` with notifications list and total count
+
+**Example (cURL):**
+
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/notifications" \
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+### Clear All Notifications
+
+Clear all notifications for the current admin.
+
+**Endpoint:** `DELETE /admin/notifications`
+
+**Response:** `200 OK`
+
+**Example (cURL):**
+
+```bash
+curl -X DELETE "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/notifications" \
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+### Dismiss Notification
+
+Dismiss a single notification by ID.
+
+**Endpoint:** `DELETE /admin/notifications/{notification_id}`
+
+**Path Parameters:**
+
+- `notification_id` (string, required): Notification ID
+
+**Response:**
+
+- `200 OK` — notification dismissed
+- `404 Not Found` — notification not found
+
+**Example (cURL):**
+
+```bash
+curl -X DELETE "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/notifications/notif-id" \
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+## Feedback
+
+### List Feedback
+
+List dislike feedback entries with message context.
+
+**Endpoint:** `GET /admin/feedback`
+
+**Query Parameters:**
+
+- `from` (ISO datetime, optional): Return only feedback at or after this timestamp
+- `to` (ISO datetime, optional): Return only feedback at or before this timestamp
+- `category` (string, optional): Filter by category — one of `Not helpful`, `Inaccurate`, `Off-topic`, `Other`
+- `limit` (integer, optional): Default 50
+- `offset` (integer, optional): Default 0
+
+**Response:** `200 OK` with paginated feedback list
+
+**Example (cURL):**
+
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/feedback?limit=50" \
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+### Get Feedback Summary
+
+Get daily dislike trend and per-category counts.
+
+**Endpoint:** `GET /admin/feedback/summary`
+
+**Query Parameters:**
+
+- `from` (ISO datetime, optional): Include data at or after this timestamp
+- `to` (ISO datetime, optional): Include data at or before this timestamp
+
+**Response:** `200 OK` with trend data and category counts
+
+**Example (cURL):**
+
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/feedback/summary" \
+  -H "Authorization: eyJraWQiOiJ..."
 ```
 
 ---
@@ -908,16 +1052,16 @@ Retrieve the latest system configuration settings.
 {
   "id": "uuid",
   "max_messages_per_day": 45,
-  "min_messages_before_suggest": 3,
-  "max_chatacters_per_user_message": 2000,
-  "max_chatacters_per_ai_message": 4000,
-  "temperature": 0.7,
-  "top_p": 0.9,
-  "support_score_threshold": 0.5,
-  "scope_alignment_score_threshold": 0.5,
-  "grounded_threshold": 0.8,
+  "max_characters_per_user_message": 2000,
+  "max_characters_per_ai_message": 5000,
+  "temperature": 0.2,
+  "support_score_threshold": 0.25,
+  "scope_alignment_score_threshold": 0.25,
+  "grounded_threshold": 0.75,
   "partially_grounded_threshold": 0.5,
-  "updated_by": null,
+  "max_context_chunks": 10,
+  "max_history_messages": 20,
+  "updated_by_email": null,
   "updated_at": "2024-01-15T10:30:00.000Z"
 }
 ```
@@ -949,16 +1093,16 @@ Update one or more system configuration settings (partial update).
 
 **Parameters (all optional):**
 
-- `max_messages_per_day` (integer): Max messages per user per day
-- `min_messages_before_suggest` (integer): Messages before AI suggestions appear
-- `max_chatacters_per_user_message` (integer): Max user message length
-- `max_chatacters_per_ai_message` (integer): Max AI response length
-- `temperature` (number): LLM temperature (0.0–1.0)
-- `top_p` (number): LLM top-p (0.0–1.0)
-- `support_score_threshold` (number): Threshold for support scoring
-- `scope_alignment_score_threshold` (number): Threshold for scope alignment
-- `grounded_threshold` (number): Threshold for grounded responses
-- `partially_grounded_threshold` (number): Threshold for partially grounded responses
+- `max_messages_per_day` (integer, 1–1000): Max messages per user per day
+- `max_characters_per_user_message` (integer, 1–200000): Max user message length
+- `max_characters_per_ai_message` (integer, 1–200000): Max AI response length
+- `temperature` (number, 0–2): LLM temperature
+- `support_score_threshold` (number, 0–1): Threshold for support scoring
+- `scope_alignment_score_threshold` (number, 0–1): Threshold for scope alignment
+- `grounded_threshold` (number, 0–1): Threshold for grounded responses
+- `partially_grounded_threshold` (number, 0–1): Threshold for partially grounded responses
+- `max_context_chunks` (integer, 1–50): Max RAG chunks included in context
+- `max_history_messages` (integer, 1–100): Max chat history messages passed to LLM
 
 **Response:** `200 OK` with updated settings object
 
@@ -969,48 +1113,6 @@ curl -X PUT "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/syst
   -H "Authorization: eyJraWQiOiJ..." \
   -H "Content-Type: application/json" \
   -d '{"max_messages_per_day": 50, "temperature": 0.8}'
-```
-
----
-
-## Analytics
-
-### Get Analytics
-
-Get usage analytics time series and totals.
-
-**Endpoint:** `GET /admin/analytics`
-
-**Query Parameters:**
-
-- `timeRange` (string, optional): Time range — `7d`, `30d`, `90d`, `6m`, `1y` (default: `90d`)
-
-**Response:**
-
-```json
-{
-  "totals": {
-    "users": 120,
-    "chat_sessions": 450,
-    "messages": 3200,
-    "questions": 1800
-  },
-  "timeSeries": [
-    {
-      "date": "2024-01-20",
-      "users": 12,
-      "questions": 45,
-      "chat_sessions": 18
-    }
-  ]
-}
-```
-
-**Example (cURL):**
-
-```bash
-curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/analytics?timeRange=30d" \
-  -H "Authorization: eyJraWQiOiJ..."
 ```
 
 ---
@@ -1078,23 +1180,21 @@ Create a new version of a system message and set it as active.
 
 **Path Parameters:**
 
-- `system_message_type` (string, required): One of the types listed above
+- `system_message_type` (string, required): One of the types listed in the table above
 
 **Request Body:**
 
 ```json
 {
-  "content": "AI can make mistakes. Always verify important information.",
-  "adminEmail": "admin@example.com"
+  "content": "AI can make mistakes. Always verify important information."
 }
 ```
 
 **Parameters:**
 
 - `content` (string, required): The full message content
-- `adminEmail` (string, required): Email of the admin creating this version
 
-**Response:** `200 OK` with the newly created version object (is_active: true)
+**Response:** `200 OK` with the newly created version object (`is_active: true`)
 
 **Example (cURL):**
 
@@ -1102,7 +1202,7 @@ Create a new version of a system message and set it as active.
 curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/system-messages/disclaimer" \
   -H "Authorization: eyJraWQiOiJ..." \
   -H "Content-Type: application/json" \
-  -d '{"content": "AI can make mistakes.", "adminEmail": "admin@example.com"}'
+  -d '{"content": "AI can make mistakes."}'
 ```
 
 ---
@@ -1118,19 +1218,13 @@ Set a specific version as the active version for its type.
 - `system_message_type` (string, required): Message type
 - `version_id` (uuid, required): UUID of the version to activate
 
-**Request Body:**
-
-```json
-{ "adminEmail": "admin@example.com" }
-```
-
 **Response:**
 
 ```json
 {
   "success": true,
   "status": "activated",
-  "activated": { "id": "uuid", "type": "disclaimer", "version": 2, "is_active": true, "..." : "..." },
+  "activated": { "id": "uuid", "type": "disclaimer", "version": 2, "is_active": true },
   "previous_active": { "id": "uuid", "version": 1 }
 }
 ```
@@ -1139,9 +1233,7 @@ Set a specific version as the active version for its type.
 
 ```bash
 curl -X POST "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/system-messages/disclaimer/uuid/activate" \
-  -H "Authorization: eyJraWQiOiJ..." \
-  -H "Content-Type: application/json" \
-  -d '{"adminEmail": "admin@example.com"}'
+  -H "Authorization: eyJraWQiOiJ..."
 ```
 
 ---
@@ -1157,12 +1249,6 @@ Delete a non-active system message version. Active versions cannot be deleted.
 - `system_message_type` (string, required): Message type
 - `version_id` (uuid, required): UUID of the version to delete
 
-**Request Body:**
-
-```json
-{ "adminEmail": "admin@example.com" }
-```
-
 **Response:**
 
 ```json
@@ -1176,9 +1262,50 @@ Delete a non-active system message version. Active versions cannot be deleted.
 
 ```bash
 curl -X DELETE "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/system-messages/disclaimer/uuid" \
-  -H "Authorization: eyJraWQiOiJ..." \
-  -H "Content-Type: application/json" \
-  -d '{"adminEmail": "admin@example.com"}'
+  -H "Authorization: eyJraWQiOiJ..."
+```
+
+---
+
+## Analytics
+
+### Get Analytics
+
+Get usage analytics time series and totals.
+
+**Endpoint:** `GET /admin/analytics`
+
+**Query Parameters:**
+
+- `timeRange` (string, optional): Time range — `7d`, `30d`, `90d`, `6m`, `1y`, `all` (default: `90d`)
+- `groupId` (string, optional): Entra group ID to filter by. Omit or pass `all` for all groups.
+
+**Response:**
+
+```json
+{
+  "totals": {
+    "users": 120,
+    "chat_sessions": 450,
+    "messages": 3200,
+    "questions": 1800
+  },
+  "timeSeries": [
+    {
+      "date": "2024-01-20",
+      "users": 12,
+      "questions": 45,
+      "chat_sessions": 18
+    }
+  ]
+}
+```
+
+**Example (cURL):**
+
+```bash
+curl -X GET "https://{api-id}.execute-api.{region}.amazonaws.com/prod/admin/analytics?timeRange=30d" \
+  -H "Authorization: eyJraWQiOiJ..."
 ```
 
 ---
@@ -1242,12 +1369,25 @@ const token = session.tokens?.idToken?.toString();
 
 ### 409 Conflict
 
+- For `POST /admin/ingestion/stop`: no job is currently running
 - A resource with the same identifier already exists (e.g. duplicate email on user creation)
 
 ### 500 Internal Server Error
 
 - Check CloudWatch logs for the relevant Lambda function for detailed error information
 - Verify the request body matches the expected schema
+
+---
+
+## Internal / Dev Endpoints
+
+### Example Endpoint
+
+Test/scaffold endpoint for verifying user Lambda connectivity. Not intended for production use.
+
+**Endpoint:** `GET /user/exampleEndpoint`
+
+**Response:** `200 OK` — `"Example endpoint invoked"`
 
 ---
 
