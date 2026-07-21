@@ -8,100 +8,159 @@ Once you have deployed the solution, the following user guide will help you navi
 
 | Index | Description |
 | ----- | ----------- |
-| [Getting Started](#getting-started) | Open the app and start a conversation |
-| [Student View](#student-view) | Chat with the UBC Specialization Explorer to learn about UBC Science specializations |
-| [Administrator View](#administrator-view) | Manage data sources, LLM settings, analytics, and chat history |
+| [Getting Started](#getting-started) | Sign in and open the app |
+| [User View](#user-view) | Chat with the Knowledge Base Assistant using your SharePoint content |
+| [Administrator View](#administrator-view) | Manage ingestion, system settings, analytics, and chat history |
 
 ---
 
 ## Getting Started
 
-Open the hosted Amplify URL provided during deployment, or run the frontend locally. No account is required — the chat interface is publicly accessible.
+Open the hosted Amplify URL provided during deployment. You will be taken to the login page. Click **Sign in with Microsoft** to authenticate via your organization's Microsoft Entra ID account.
+
+![image](./media/login-page.png)
+
+Once authenticated, you are redirected to the home page and can begin using the assistant.
 
 ---
 
-## Student View
-
-The student-facing interface is a chat assistant that helps users explore UBC Faculty of Science specializations.
+## User View
 
 ### Home Page
 
-Users are immediately greeted with a welcome message and prompted to start a new conversation.
+After signing in, you are greeted with a welcome message and a **Start a new conversation** button. The left sidebar is visible immediately — it shows your accessible SharePoint Lists at the top and your previous chat sessions below.
 
-![image](./media/home-page.png)
+![image](./media/home-page-sidebar.png)
 
-### Anonymous Pop-up
+### SharePoint Lists
 
-If the user has not signed in, a pop-up may appear explaining the anonymous session behaviour.
+The top section of the left sidebar lists the SharePoint sources you have access to. Each entry shows the source name with a folder icon. 
 
-![image](./media/anonymous-pop-up.png)
-
-### Chat Interface
-
-Each new chat starts with the assistant greeting the user and asking a series of questions to learn about their interests, study preferences, and goals. Once it has enough to go on, it switches to making recommendations.
-
-![image](./media/first-interaction.png)
-
-### Specialization Details
-
-After a recommendation is made, users can ask follow-up questions. The assistant can provide specialization course requirements, averages, and other program details sourced from the knowledge base.
-
-![image](./media/requirements-averages.png)
-
-### Hallucination Warnings
-
-If the AI's response is partially or fully unsupported by the knowledge base, a warning banner appears below the message advising the user to verify the information against the UBC calendar.
-
-![image](./media/suggestion-hallucination.png)
-
-### Expanded Sources
-
-AI responses may include source references. Users can expand these to see the original documents or web pages the answer was drawn from.
-
-![image](./media/expanded-resources.png)
+Use this panel to see which content the assistant can draw from when answering your questions.
 
 ### Chat Sessions
 
-The left sidebar lists all previous chat sessions. Users can start a new chat with the `+` button, switch between sessions, or delete sessions via the actions menu on each session item.
+Below the SharePoint Lists, the sidebar lists all your previous chat sessions. You can:
+
+- Start a new chat with the **+** button at the top.
+- Click any session to switch to it and continue the conversation.
+- Use the actions menu on a session item to **rename** or **delete** it.
+
+### Chat Interface
+
+Click **Start a new conversation** (or the **+** button) to open a new chat. The assistant greets you automatically and is ready for your questions.
+
+Type your message in the input box at the bottom and press **Enter** to send (use **Shift + Enter** for a new line). The assistant streams its response token-by-token as it generates.
+
+![image](./media/first-interaction.png)
+
+### Sources and Citations
+
+AI responses may include source references drawn from your SharePoint content. Click **Show sources (N)** below a message to expand the list of cited documents or pages.
+
+![image](./media/expanded-resources.png)
+
+### Hallucination Warnings
+
+If the assistant's response is partially or fully unsupported by the retrieved content, a warning banner appears below the message advising you to verify the information independently.
+
+![image](./media/suggestion-hallucination.png)
+
+### Message Rating
+
+On the most recent assistant message, you can rate the response:
+
+- **Thumbs up** — submits a positive rating immediately.
+- **Thumbs down** — opens a reason selector. Choose one or more of: *Not helpful*, *Inaccurate*, *Off-topic*, or *Other*, and optionally add a comment before submitting.
+
+![image](./media/message-rating.png)
 
 ---
 
 ## Administrator View
 
-Administrators log in via Cognito and access the admin dashboard from the header. The sidebar provides navigation between four sections: Dashboard, System Settings, Analytics, and Chat History.
+### Accessing the Admin Panel
 
-If the administrator has just been given access, they will not have the mode dragdown option on the top right. They will manually have to add `/admin/login` to the end of the URL to login for the first time. After this, they will be able to see the mode dragdown option and will seamlessly be able to switch between the student and administrator view.
+Administrators are members of the `admin` Cognito group. Once signed in, admin users see a **Mode** dropdown in the top-right of the header. Switch between **User** and **Admin** mode at any time using this dropdown.
 
-![image](./media/admin-log-in.png)
+The admin dashboard has a left sidebar with six sections: **Dashboard & Management**, **Analytics**, **System Settings**, **Chat History**, **Export Jobs**, and **Feedback**.
 
-### Dashboard
+Admins also see a **notification bell** icon in the header that surfaces alerts for completed export jobs.
 
-The dashboard shows platform-wide metrics (total users, chat sessions, and messages) and manages the knowledge base data sources.
+### Dashboard & Management
+
+The dashboard shows three platform-wide metric cards at the top: **Total Users**, **Total Chat Sessions**, and **Total Messages**.
+
+Below the metrics is the **SharePoint Ingestion** panel.
 
 ![image](./media/admin-dashboard.png)
 
-#### Adding a Website
+#### Running an Ingestion Job
 
-Click "Add Web URL" to stage a website for ingestion. Optionally provide include/exclude URL regex patterns to control which pages are crawled.
+- Click **Run Ingestion** to start a new ingestion job. The job pulls content from SharePoint, chunks and embeds it, and upserts it into the vector store.
+- Check **Force full re-ingest** to delete all existing vectors and rebuild from scratch. A confirmation dialog appears before the job starts.
+- While a job is `running`, a **Stop** button is available to cancel it.
 
-![image](./media/admin-add-website.png)
+![image](./media/ingestion-panel.png)
 
-#### Adding a File
+#### Automated Schedule
 
-Click "Add Alumni Data (CSV or Markdown)" to upload a CSV/Markdown file and its corresponding metadata JSON. Both files are uploaded to S3 and staged for the next sync.
+Expand the **Automated Schedule** sub-panel to configure recurring ingestion runs without manual triggering.
 
-![image](./media/admin-add-file.png)
+- Choose a preset frequency: **Daily**, **Weekly**, **Monthly**, or **Custom** (cron expression).
+- Set the time (hour and minute) and, for Weekly/Monthly, the day of week or day of month.
+- Select a timezone from the searchable dropdown.
+- Toggle the schedule **Enabled** or **Disabled**.
+- Optionally enable **Force full re-ingest** for scheduled runs (confirmation required).
+- Click **Save** to activate, or **Remove schedule** to delete the recurring rule.
+- The panel header shows the current schedule status, next run time, and who last updated it.
 
-#### Syncing Data Sources
+![image](./media/ingestion-schedule.png)
 
-Once data sources are staged, click "Sync" to kick off an ingestion job. The table shows each source's type, name, and latest ingestion run status (Pending, Queued, Running, Completed, or Failed).
+#### Run History and Logs
 
+The **Run History** table below the ingestion panel lists all past and current ingestion jobs.
+
+| Column | Description |
+| ------ | ----------- |
+| # | Sequential run number |
+| Status | Color-coded badge: Pending, Running, Stopping, Completed, Failed |
+| Started | Timestamp; tagged with "full re-ingest" if applicable |
+| Duration | Elapsed time |
+| Items Ingested | Counts of ingested / skipped / failed documents |
+| Logs | Expand button to view log output |
+
+The table auto-refreshes every 10 seconds while a job is in progress. Click the **Logs** button on any row to open an inline log viewer that streams CloudWatch output. The viewer has **Output** and **Error** tabs and color-codes `ERROR` and `WARNING` lines.
+
+![image](./media/run-history-logs.png)
+
+---
 
 ### Analytics
 
-The Analytics page shows time-series charts for users, chat sessions, and questions asked. Use the "Last N Days" input to adjust the date range (1–365 days).
+The Analytics page shows three time-series line charts: **Total Users**, **Total Chat Sessions**, and **Total Questions Asked**.
+
+#### Default View
+
+By default, the charts show activity across all users for the last 90 days. Use the **Last N days** input (1–365) or toggle **All time** to change the date range.
 
 ![image](./media/admin-analytics.png)
+
+#### Filtering by a Single Group
+
+Use the **Group** dropdown to filter all three charts to a specific Entra group. Only activity from users in that group is shown. This is useful for seeing how a particular team or department is using the assistant.
+
+#### Comparing Groups
+
+Enable **Compare groups** mode to select multiple groups and overlay them on each chart at once. Each group gets its own colour (up to 8 groups, colorblind-safe palette), so you can directly compare usage patterns side by side.
+
+![image](./media/analytics-group-compare.png)
+
+#### Exporting Data
+
+Click **Export CSV** to trigger an async export of the currently filtered analytics data. A notification appears in the header bell when the file is ready — download it from the **Export Jobs** page.
+
+---
 
 ### System Settings
 
@@ -109,59 +168,113 @@ The System Settings page controls global platform behaviour and AI prompt config
 
 ![image](./media/admin-system-settings.png)
 
-#### General Settings
+| Setting | Description |
+| ------- | ----------- |
+| Max messages per day | Daily cap on messages a user can send before being rate-limited |
+| Max context chunks | Maximum number of retrieved document chunks passed to the AI |
+| Max history messages | Maximum number of prior conversation turns included in each prompt |
+| Max characters per user message | Character limit on user input |
+| Max characters per AI message | Character limit on AI responses |
+| Temperature | Controls response creativity (0.0–1.0). Lower = more consistent |
 
-Admins can configure:
-- Max messages per day per user — daily cap on how many messages a student can send before being rate-limited.
-- Min exchanges before suggestion phase activates — how many back-and-forth turns must happen before the AI is allowed to recommend specializations.
-- Max characters per user and AI message — caps the length of both student inputs and AI responses.
-- Temperature — controls how "creative" the AI sounds (0.0–1.0). Lower values produce more consistent, predictable answers; higher values produce more varied responses.
-- Top-p — works alongside temperature to fine-tune response variety (0.0–1.0). In most cases the default value works well and doesn't need to be changed.
-- Support score threshold — minimum score (0.0–1.0) for the AI's claims to be considered backed by the retrieved sources. Responses falling below this are immediately flagged as unsupported.
-- Scope alignment score threshold — minimum score (0.0–1.0) for the retrieved sources to be considered relevant to the user's question. Falling below this also forces an unsupported label.
-- Grounded threshold — score (0.0–1.0) above which a response is considered fully grounded and no warning is shown.
-- Partially grounded threshold — score above which (but below the grounded threshold) a partial hallucination warning is shown. Responses below this receive a full warning.
-- Allowed specializations list — the explicit list of specializations the AI is permitted to recommend.
+The panel shows the timestamp and email of the last admin who saved settings.
 
 #### System Messages — Affects Text Generation
 
-These messages are injected into the AI prompt and directly influence how the assistant responds. Each message type has version history — admins can save new versions, activate a previous version, or delete inactive versions.
+These messages are injected into the AI prompt and directly shape how the assistant responds. Each message type has full version history — admins can save new versions, activate a previous version, or delete inactive versions.
 
-![image](./media/admin-messages-that-affect-text-gen.png)
+![image](./media/admin-system-instructions.png)
+![image](./media/admin-output-format.png)
 
-Message types that affect text generation:
+Message types injected into the prompt:
 
-- Initial Prompt — the opening message sent to the AI to kick off each conversation, setting the tone and first questions asked.
-- System Role — defines who the assistant is and what it specializes in (e.g. UBC Science Specialization Explorer).
-- Detective Phase Prompt — instructs the AI on how to gather missing information from the user before making any recommendations.
-- Suggestion Phase Prompt — instructs the AI on how to transition into making specialization recommendations once enough context is collected.
-- System Checklist — the list of key data points (subject area, career goal, work style, etc.) the AI must collect before suggesting a specialization.
-- System Instructions — formatting and behavioral rules for how the AI structures and delivers its responses.
-- Guardrails — hard boundaries that keep the AI on-topic, prevent jailbreaks, and block harmful or out-of-scope content.
+- **System Role** — defines who the assistant is and what it specializes in.
+- **Guardrails** — hard boundaries that keep the AI on-topic and block harmful content.
+- **System Instructions** — formatting and behavioural rules for how the AI structures responses.
+- **Output Format** — specifies the structure and style of the AI's output.
+- **Initial Prompt** — the opening message sent to start each new conversation.
 
 #### System Messages — UI Only
 
-These messages appear in the interface but are not sent to the AI model. They include the Welcome Message, Disclaimer, and hallucination warning text.
+These messages appear in the interface but are not sent to the AI model.
 
-![image](./media/admin-messages-that-do-not-affect-text-gen.png)
+![image](./media/admin-welcome-message.png)
+![image](./media/admin-disclaimer.png)
+
+- **Welcome Message** — shown to users on the home page before they start a chat.
+- **Disclaimer** — displayed below the welcome message as a caveat or usage note.
 
 #### Message Versioning
 
-Each system message supports full version history. Admins can navigate between versions using Prev/Next or the version chips, activate an older version, or delete unused versions.
+Each system message maintains a full version history. Navigate between versions using **Prev/Next** or the version chips, activate an older version to make it live, or delete unused versions.
 
 ![image](./media/admin-message-versioning.png)
 
 #### Prompt Stack Viewer
 
-The "How the Prompt Is Built" card shows a visual breakdown of how the active message blocks are assembled into the final AI prompt, with a toggle to preview the Detective vs. Suggestion phase layout.
+The **How the Prompt Is Built** card shows a visual breakdown of how the active message blocks are assembled into the final AI prompt at runtime: System Role → Guardrails → System Instructions → Output Format → Retrieved Context.
 
 ![image](./media/admin-system-settings-stack.png)
 
+---
+
 ### Chat History
 
-The Chat History page lets admins review all user conversations. Expand a user row to see their sessions, then click a session to view the full message transcript on the right, including any sources the AI cited.
+The Chat History page lets admins review all user conversations.
+
+- The **left panel** shows a tree of Entra groups → users → sessions (all paginated). An **Unassigned** group collects users not in any group.
+- Click a session to load the full transcript in the **right panel**.
+- AI messages are rendered as Markdown; user messages as plain text.
+- Each message shows any **source citations** (expandable inline) and any **rating** the user submitted (thumbs up/down, category, comment).
+- Use the **Export** buttons at the group, user, or "Export All" level to trigger an async export job. Download the file from the **Export Jobs** page when it completes.
 
 ![image](./media/admin-chat-history.png)
+
+---
+
+### Export Jobs
+
+The Export Jobs page tracks all asynchronous exports triggered from Chat History and Analytics.
+
+| Column | Description |
+| ------ | ----------- |
+| Requested | When the export was triggered |
+| Type | Chat or Analytics |
+| Scope | What was exported (all, group name, or user) |
+| Status | Pending / Processing / Completed / Failed |
+| Completed | Timestamp when finished |
+| Download | Presigned S3 link (valid 7 days); shows "Link expired" after expiry |
+
+Use the **Type** filter to narrow the list, and the **Refresh** button to check for updates. The table is paginated at 10 entries per page.
+
+![image](./media/admin-export-jobs.png)
+
+---
+
+### Feedback
+
+The Feedback dashboard surfaces user ratings on AI responses.
+
+**Summary section:**
+
+- **Total Likes** and **Total Dislikes** count cards.
+- A **Dislike Reasons** pie chart breaking down categories: Not helpful, Inaccurate, Off-topic, Other.
+- A **line chart** showing likes and dislikes over time.
+
+**Date range filter:** Last 7 days / Last 30 days / All time / Custom range (calendar date picker).
+
+![image](./media/admin-feedback-dashboard.png)
+
+**Feedback list:** Paginated (5 per page) with category chip filters. Each item shows:
+
+- The user's question and the AI's response (truncated, rendered as Markdown).
+- An optional comment left by the user.
+- The user's identity, category badge, and timestamp.
+
+Click any feedback item to navigate directly to that message in **Chat History**, with the conversation auto-scrolled and highlighted.
+
+![image](./media/admin-feedback-category.png)
+
 
 ---
 
