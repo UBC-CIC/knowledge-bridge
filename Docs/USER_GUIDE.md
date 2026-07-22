@@ -172,11 +172,11 @@ The System Settings page controls global platform behaviour and AI prompt config
 | Max characters per AI message | Character limit on AI responses |
 | Temperature | Controls response creativity (0.0–1.0). Lower = more consistent |
 
-The panel shows the timestamp and email of the last admin who saved settings.
+The panel shows the timestamp and email of the last admin who saved system settings.
 
 #### System Messages — Affects Text Generation
 
-These messages are injected into the AI prompt and directly shape how the assistant responds. Each message type has full version history — admins can save new versions, activate a previous version, or delete inactive versions.
+These messages are injected into the AI prompt and directly shape how the assistant responds. This impacts how the assistant retrieves, delivers, and formats responses. Each message type has full version history — admins can save new versions, activate a previous version, or delete inactive versions. The panel also shoes the timestamp and eamil of the last admin who updated the system prompt.
 
 ![image](./media/admin-system-instructions.png)
 ![image](./media/admin-output-format.png)
@@ -187,11 +187,11 @@ Message types injected into the prompt:
 - **Guardrails** — hard boundaries that keep the AI on-topic and block harmful content.
 - **System Instructions** — formatting and behavioural rules for how the AI structures responses.
 - **Output Format** — specifies the structure and style of the AI's output.
-- **Initial Prompt** — the opening message sent to start each new conversation.
+- **Initial Prompt** — the opening message sent to start each new conversation from the AI Assistant.
 
 #### System Messages — UI Only
 
-These messages appear in the interface but are not sent to the AI model.
+These messages appear in the user interface but are not sent to the AI model.
 
 ![image](./media/admin-welcome-message.png)
 ![image](./media/admin-disclaimer.png)
@@ -207,7 +207,7 @@ Each system message maintains a full version history. Navigate between versions 
 
 #### Prompt Stack Viewer
 
-The **How the Prompt Is Built** card shows a visual breakdown of how the active message blocks are assembled into the final AI prompt at runtime: System Role → Guardrails → System Instructions → Output Format → Retrieved Context.
+The **How the Prompt Is Built** card, located in System Settings, shows a visual breakdown of how the active message blocks are assembled into the final AI prompt at runtime: System Role → Guardrails → System Instructions → Output Format → Retrieved Context.
 
 ![image](./media/admin-system-settings-stack.png)
 
