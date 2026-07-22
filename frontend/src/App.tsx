@@ -23,7 +23,7 @@ Amplify.configure({
       userPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID,
       loginWith: {
         oauth: {
-          domain: "cic-kba.auth.ca-central-1.amazoncognito.com",
+          domain: import.meta.env.VITE_COGNITO_DOMAIN,
           scopes: ["openid", "email", "profile"],
           redirectSignIn: [window.location.origin],
           redirectSignOut: [window.location.origin],

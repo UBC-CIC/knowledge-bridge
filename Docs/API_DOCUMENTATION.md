@@ -193,7 +193,7 @@ Get paginated message history for a chat session owned by a user.
       "id": "uuid",
       "chat_session_id": "uuid",
       "sender": "user",
-      "content": "What programs are available?",
+      "content": "What SharePoint lists do I have access to?",
       "sources": null,
       "warning": null,
       "created_at": "2024-01-20T14:22:00.000Z"
@@ -235,7 +235,7 @@ Rate an AI message with a thumbs up or down. For thumbs down, a category and opt
 {
   "is_positive": false,
   "category": "Inaccurate",
-  "comment": "The answer was incorrect about program requirements."
+  "comment": "The answer was not helpful."
 }
 ```
 
@@ -524,7 +524,7 @@ Create a new admin user.
 {
   "display_name": "Jane Smith",
   "email": "jane.smith@example.com",
-  "institution_id": "ubc"
+  "institution_id": "example-org"
 }
 ```
 
@@ -541,7 +541,7 @@ Create a new admin user.
   "id": "uuid",
   "display_name": "Jane Smith",
   "email": "jane.smith@example.com",
-  "institution_id": "ubc",
+  "institution_id": "example-org",
   "created_at": "2024-01-15T10:30:00.000Z"
 }
 ```

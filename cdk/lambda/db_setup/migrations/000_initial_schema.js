@@ -428,7 +428,7 @@ exports.up = (pgm) => {
       ),
       (
         'welcome_message',
-        'Together we will try to find the right program for you. Click below to start a new conversation.',
+        'Welcome to the CUCCIO Knowledge Base Assistant. Click below to start a new conversation.',
         700, 1, TRUE, FALSE, NULL, now()
       ),
       (

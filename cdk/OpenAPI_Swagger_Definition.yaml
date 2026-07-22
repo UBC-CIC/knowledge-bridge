@@ -304,7 +304,7 @@ paths:
                   type: string
                 role:
                   type: string
-                  enum: [student, admin]
+                  enum: [user, admin]
       responses:
         "200":
           description: Updated user
@@ -1027,7 +1027,7 @@ paths:
                     welcome_message:
                       - id: "6bda6a51-2af0-4312-8d47-89f6169ae4ad"
                         type: "welcome_message"
-                        content: "Together we will try to find the right program for you. Click below to start a new conversation."
+                        content: "Welcome to the CUCCIO Knowledge Base Assistant. Click below to start a new conversation."
                         character_limit: 400
                         version: 1
                         is_active: true
@@ -1798,7 +1798,7 @@ paths:
                 email:
                   type: string
                   format: email
-                  example: student@example.com
+                  example: user@example.com
       responses:
         "200":
           description: User updated successfully

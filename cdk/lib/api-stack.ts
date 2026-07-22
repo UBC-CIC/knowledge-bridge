@@ -44,11 +44,13 @@ export class ApiGatewayStack extends cdk.Stack {
   private eventApi: appsync.GraphqlApi;
   public readonly secret: secretsmanager.ISecret;
   public readonly allowedOriginsParamName: string;
+  private cognitoHostedUIDomain: string;
   public getEndpointUrl = () => this.api.url;
   public getUserPoolId = () => this.userPool.userPoolId;
   public getEventApiUrl = () => this.eventApi.graphqlUrl;
   public getUserPoolClientId = () => this.appClient.userPoolClientId;
   public getIdentityPoolId = () => this.identityPool.ref;
+  public getCognitoDomain = () => this.cognitoHostedUIDomain;
   public addLayer = (name: string, layer: lambda.ILayerVersion) =>
     (this.layerList[name] = layer);
   public getLayers = () => this.layerList;
@@ -242,9 +244,12 @@ export class ApiGatewayStack extends cdk.Stack {
     // Cognito hosted UI domain — required for OIDC federation
     // Callback URLs are bootstrapped with localhost only. AmplifyStack adds the real
     // Amplify URL via UpdateCognitoCallbackUrls custom resource after deploy.
+    const cognitoDomainPrefix = id.replace(/-Api$/, '').toLowerCase();
     this.userPool.addDomain(`${id}-CognitoDomain`, {
-      cognitoDomain: { domainPrefix: id.replace(/-Api$/, '').toLowerCase() },
+      cognitoDomain: { domainPrefix: cognitoDomainPrefix },
     });
+    this.cognitoHostedUIDomain = `${cognitoDomainPrefix}.auth.${this.region}.amazoncognito.com`;
+    const cognitoHostedUIDomain = this.cognitoHostedUIDomain;
 
     // Microsoft Entra ID OIDC identity provider
     // Credentials are read from the existing KBA-SharePoint-Credentials secret in Secrets Manager.
@@ -327,6 +332,7 @@ export class ApiGatewayStack extends cdk.Stack {
         VITE_COGNITO_USER_POOL_CLIENT_ID: cdk.SecretValue.unsafePlainText(
           this.appClient.userPoolClientId
         ),
+        VITE_COGNITO_DOMAIN: cdk.SecretValue.unsafePlainText(cognitoHostedUIDomain),
         VITE_AWS_REGION: cdk.SecretValue.unsafePlainText(this.region),
         VITE_IDENTITY_POOL_ID: cdk.SecretValue.unsafePlainText(
           this.identityPool.ref

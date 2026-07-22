@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
 
 const DEFAULT_WELCOME_MESSAGE =
-  "Together we will try to find the right program for you. Click below to start a new conversation:";
+  "Welcome to the CUCCIO Knowledge Base Assistant. Click below to start a new conversation.";
 const DEFAULT_DISCLAIMER = "AI can make mistakes. Check important info.";
 
 export default function HomePage() {
