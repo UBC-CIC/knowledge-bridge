@@ -237,7 +237,7 @@ The Glue ingestion job authenticates to the SharePoint REST API using a certific
 
 **Step 1 — Generate a self-signed certificate:**
 
-Run this on your local machine (requires OpenSSL):
+**Mac / Linux (requires OpenSSL):**
 
 ```bash
 # Generate private key and self-signed certificate
@@ -248,26 +248,52 @@ openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 730 -node
 openssl pkcs12 -export -out cert.pfx -inkey key.pem -in cert.pem -passout pass:YourPasswordHere
 ```
 
+**Windows (PowerShell — no OpenSSL required):**
+
+```powershell
+$password = ConvertTo-SecureString -String "YourPasswordHere" -Force -AsPlainText
+
+# Generate certificate and export PFX (contains private key — goes to Secrets Manager)
+$cert = New-SelfSignedCertificate -Subject "CN=KBA-SharePoint" -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddDays(730) -KeyExportPolicy Exportable
+Export-PfxCertificate -Cert $cert -FilePath "C:\Users\YourUsername\cert.pfx" -Password $password
+
+# Export public certificate for upload to Entra (public key only — goes to Azure Portal)
+Export-Certificate -Cert $cert -FilePath "C:\Users\YourUsername\cert.cer" -Type CERT
+```
+
+> ⚠️ Use absolute paths in the `-FilePath` arguments (e.g. `C:\Users\YourUsername\cert.pfx`). Relative paths can silently write to a different directory and cause "file not found" errors in the next step.
+
 Note the password you used — you will need it in Section 6.
+
+> **Two files, two destinations:**
+> - `cert.pfx` (or `cert.pfx` on Mac/Linux) — contains the **private key**. This is base64-encoded and stored in Secrets Manager. Never upload this to Entra.
+> - `cert.cer` (Windows) / `cert.pem` (Mac/Linux) — contains the **public key only**. This is uploaded to Entra. It is safe to share.
 
 **Step 2 — Upload the public certificate to Entra:**
 
 1. On the **Certificates & secrets** page, click the **Certificates** tab
 2. Click **Upload certificate**
-3. Select `cert.pem` (the public certificate)
+3. Select `cert.cer` (Windows) or `cert.pem` (Mac/Linux) — the public certificate
 4. Click **Add**
 
 ![Certificates tab showing uploaded certificate](media/entra-certificate-redacted.png)
 
 **Step 3 — Base64-encode the PFX for Secrets Manager:**
 
-```bash
-# Mac/Linux
-base64 -i cert.pfx | tr -d '\n'
+> ⚠️ Base64-encode the **`.pfx` file only** — not the `.cer` or `.pem`. The `.pfx` contains the private key that the Glue job needs to authenticate.
 
-# Windows (PowerShell)
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.pfx"))
+**Mac / Linux:**
+```bash
+base64 -i cert.pfx | tr -d '\n'
 ```
+
+**Windows (PowerShell):**
+```powershell
+# Replace with the absolute path where cert.pfx was saved in Step 1
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\Users\YourUsername\cert.pfx"))
+```
+
+> ⚠️ On Windows, always use the **absolute path** (e.g. `C:\Users\YourUsername\cert.pfx`). Using just `"cert.pfx"` will fail with a file not found error unless your terminal happens to be in the same directory.
 
 Copy the output — this is the value you will store as `Sharepoint-REST-Cert-Pfx-B64` in Section 6.
 
