@@ -1851,8 +1851,14 @@ exports.handler = async (event) => {
           }
           const { _scope_base, _meta_group_name, metadata, s3_key, ...rest } = r;
 
+          const EXPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+          const url_expires_at = r.completed_at
+            ? new Date(new Date(r.completed_at).getTime() + EXPORT_TTL_MS).toISOString()
+            : null;
+          const linkExpired = url_expires_at ? new Date(url_expires_at) < new Date() : false;
+
           let presigned_url = null;
-          if (r.status === 'completed' && s3_key) {
+          if (r.status === 'completed' && s3_key && !linkExpired) {
             presigned_url = await getSignedUrl(
               s3Client,
               new GetObjectCommand({ Bucket: process.env.EXPORT_BUCKET_NAME, Key: s3_key }),
@@ -1860,7 +1866,7 @@ exports.handler = async (event) => {
             );
           }
 
-          return { ...rest, scope_label, presigned_url };
+          return { ...rest, scope_label, presigned_url, url_expires_at };
         }));
 
         const [{ total }] = await getSqlConnection()`
