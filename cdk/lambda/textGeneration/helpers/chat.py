@@ -51,7 +51,7 @@ Output ONLY the search query — no explanation, no quotes, no preamble.
     try:
         bedrock_runtime = get_bedrock_llm_client(llm_region)
         response = bedrock_runtime.converse(
-            modelId=config.HAIKU_ARN,
+            modelId=config.MODEL_ARN,
             messages=[{"role": "user", "content": [{"text": user_message}]}],
             system=[{"text": rewrite_system_prompt}],
             inferenceConfig={"maxTokens": 60, "temperature": 0.0}
@@ -271,7 +271,7 @@ def get_response(
 
     # 5. Build request payload with prompt caching on static system prompt
     request_payload = {
-        "modelId": config.HAIKU_ARN,
+        "modelId": config.MODEL_ARN,
         "messages": bedrock_messages,
         "system": [
             {"text": static_system_prompt},

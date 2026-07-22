@@ -1043,14 +1043,12 @@ export class ApiGatewayStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["ssm:GetParameter", "ssm:GetParameters"],
         resources: [
-          `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/HaikuArn`,
-          `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/SonnetArn`,
+          `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/ModelArn`,
         ],
       })
     );
 
-    lambdaTextGen.addEnvironment("HAIKU_ARN", "/KBA/LLM/HaikuArn");
-    lambdaTextGen.addEnvironment("SONNET_ARN", "/KBA/LLM/SonnetArn");
+    lambdaTextGen.addEnvironment("MODEL_ARN", "/KBA/LLM/ModelArn");
 
     // --- Bedrock Input Guardrail ---
     const guardrailConfig = {

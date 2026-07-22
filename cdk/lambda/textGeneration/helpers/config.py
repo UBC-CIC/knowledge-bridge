@@ -12,8 +12,7 @@ _CONFIG_LOADED = False
 # DEFAULT VALUES (Fallbacks)
 # ------------------------------------------------------------------
 
-HAIKU_ARN = None
-SONNET_ARN = None
+MODEL_ARN = None
 
 REGION = os.getenv("REGION", "ca-central-1")
 LLM_REGION = os.getenv("LLM_REGION", "us-west-2")
@@ -117,7 +116,7 @@ def load_config(db_connection):
     global SUPPORT_SCORE_THRESHOLD, SCOPE_ALIGNMENT_SCORE_THRESHOLD
     global GROUNDED_THRESHOLD, PARTIALLY_GROUNDED_THRESHOLD
     global ROLE, GUARDRAILS, INSTRUCTIONS, OUTPUT_FORMAT, INITIAL_PROMPT
-    global HAIKU_ARN, SONNET_ARN
+    global MODEL_ARN
     global GUARDRAIL_ID, GUARDRAIL_VERSION
 
     if _CONFIG_LOADED:
@@ -125,23 +124,13 @@ def load_config(db_connection):
 
     logger.info("Loading system config from DB and SSM...")
 
-    if not HAIKU_ARN:
-        ssm_param = os.environ.get("HAIKU_ARN")
+    if not MODEL_ARN:
+        ssm_param = os.environ.get("MODEL_ARN")
         if not ssm_param:
-            raise RuntimeError("Missing environment variable for HAIKU_ARN")
+            raise RuntimeError("Missing environment variable for MODEL_ARN")
         ssm = boto3.client("ssm")
         try:
-            HAIKU_ARN = ssm.get_parameter(Name=ssm_param)["Parameter"]["Value"]
-        except Exception as e:
-            raise RuntimeError(f"Failed to fetch SSM parameter {ssm_param}: {e}")
-
-    if not SONNET_ARN:
-        ssm_param = os.environ.get("SONNET_ARN")
-        if not ssm_param:
-            raise RuntimeError("Missing environment variable for SONNET_ARN")
-        ssm = boto3.client("ssm")
-        try:
-            SONNET_ARN = ssm.get_parameter(Name=ssm_param)["Parameter"]["Value"]
+            MODEL_ARN = ssm.get_parameter(Name=ssm_param)["Parameter"]["Value"]
         except Exception as e:
             raise RuntimeError(f"Failed to fetch SSM parameter {ssm_param}: {e}")
 

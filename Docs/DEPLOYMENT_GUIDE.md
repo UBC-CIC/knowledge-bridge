@@ -234,7 +234,7 @@ aws ssm put-parameter `
 
 ```bash
 aws ssm put-parameter \
-    --name "/KBA/LLM/HaikuArn" \
+    --name "/KBA/LLM/ModelArn" \
     --value "us.anthropic.claude-haiku-4-5-20251001-v1:0" \
     --type String \
     --profile <YOUR-PROFILE-NAME>
@@ -247,7 +247,7 @@ aws ssm put-parameter \
 
 ```cmd
 aws ssm put-parameter ^
-    --name "/KBA/LLM/HaikuArn" ^
+    --name "/KBA/LLM/ModelArn" ^
     --value "us.anthropic.claude-haiku-4-5-20251001-v1:0" ^
     --type String ^
     --profile <YOUR-PROFILE-NAME>
@@ -260,7 +260,7 @@ aws ssm put-parameter ^
 
 ```powershell
 aws ssm put-parameter `
-    --name "/KBA/LLM/HaikuArn" `
+    --name "/KBA/LLM/ModelArn" `
     --value "us.anthropic.claude-haiku-4-5-20251001-v1:0" `
     --type String `
     --profile <YOUR-PROFILE-NAME>
@@ -538,7 +538,7 @@ _Note: Always read the current value first and append your new origin to avoid r
 
 **Issue: Text generation Lambda fails with parameter not found error**
 
-- Solution: Ensure the `/KBA/LLM/HaikuArn` and `/KBA/LLM/SonnetArn` SSM parameters were created before deployment. See [Step 2: Upload Secrets & Parameters](#step-2-upload-secrets--parameters).
+- Solution: Ensure the `/KBA/LLM/ModelArn` SSM parameter was created before deployment. See [Step 2: Upload Secrets & Parameters](#step-2-upload-secrets--parameters).
 
 **Issue: Glue ingestion job fails**
 
@@ -593,7 +593,7 @@ To take down the deployed stack for a fresh redeployment in the future, follow t
    - Navigate to AWS Systems Manager → Parameter Store
    - Delete the following parameters:
      - `kba-owner-name`
-     - `/KBA/LLM/HaikuArn`
+     - `/KBA/LLM/ModelArn`
      - `/<STACK-PREFIX>-Api/API/AllowedOrigins`
 
 5. **Delete ECR Repositories** (if any were created):

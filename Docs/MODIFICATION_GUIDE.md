@@ -150,25 +150,23 @@ Or use a Vite env variable to avoid rebuilding for content changes:
 
 ## Configuring LLM Models
 
-The text generation Lambda uses two models: **Haiku** (fast, used for query rewriting) and **Sonnet** (main chat model). Their ARNs are stored as SSM parameters:
+The text generation Lambda uses **Haiku** for fast operations (query rewriting, intervention checks). The model ARN is stored as an SSM parameter:
 
-- `/KBA/LLM/HaikuArn`
-- `/KBA/LLM/SonnetArn`
+- `/KBA/LLM/ModelArn`
 
-To update a model, change the SSM parameter value via the AWS Console or CLI:
+To update the model, change the SSM parameter value via the AWS Console or CLI:
 
 ```bash
 aws ssm put-parameter \
-  --name "/KBA/LLM/HaikuArn" \
+  --name "/KBA/LLM/ModelArn" \
   --value "us.anthropic.claude-haiku-4-5-20251001-v1:0" \
   --type String \
   --overwrite
 ```
 
 **Rules when updating:**
-- All ARNs must use the `us.` cross-region inference prefix (e.g., `us.anthropic.claude-...`).
-- Only update `SonnetArn` with a Sonnet-family model — it's used for the main chat flow and has specific prompt/output handling tied to it.
-- `HaikuArn` can be any fast, low-cost model suitable for query rewriting.
+- The ARN must use the `us.` cross-region inference prefix (e.g., `us.anthropic.claude-...`).
+- `ModelArn` should be a fast, low-cost model suitable for query rewriting and lightweight checks.
 
 > **Note:** If you switch to a different model family, you'll also need to update the IAM policy on the `lambdaTextGen` role to allow `bedrock:InvokeModel` for the new model ARN. This is configured in `cdk/lib/api-stack.ts` under `textGenBedrockPolicyStatement`.
 
