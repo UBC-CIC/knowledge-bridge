@@ -16,6 +16,7 @@ This guide covers practical modifications developers commonly need to make: styl
 - [Database Schema Changes (Migrations)](#database-schema-changes-migrations)
 - [Message/Token Limit Management](#messagetoken-limit-management)
 - [Data Ingestion Modifications](#data-ingestion-modifications)
+- [Adding Re-Ranking to Retrieval](#adding-re-ranking-to-retrieval)
 - [Deployment & Testing](#deployment--testing)
 - [Encryption & KMS Keys](#encryption--kms-keys)
 - [Troubleshooting & Best Practices](#troubleshooting--best-practices)
@@ -215,6 +216,65 @@ The ingestion pipeline is an AWS Glue Python Shell job at `cdk/glue/sharepoint_i
 - **Schema changes**: If new metadata columns are needed, add a migration in `cdk/lambda/db_setup/migrations/` and redeploy `DBFlowStack` before the next ingestion run.
 
 To trigger a run manually, use the **Run Ingestion** button in the admin dashboard or call `POST /admin/ingestion/trigger`.
+
+---
+
+## Adding Re-Ranking to Retrieval
+
+The current retrieval pipeline embeds the user query, runs a cosine similarity search against `document_vectors`, and passes the top-N chunks directly to the LLM. As the knowledge base grows to cover many topic areas, chunks that are semantically similar to the query but not actually relevant to the specific question can start slipping into that top-N. Adding a re-ranking step between retrieval and generation filters those out and can significantly improve answer quality.
+
+**When to consider this:** When the number of ingested documents grows large enough that retrieval precision drops noticeably — i.e. the LLM is receiving off-topic chunks and hedging or hallucinating more often.
+
+**The only file that needs to change is `cdk/lambda/textGeneration/helpers/bedrock.py`**, specifically the `retrieve_documents` function. No other files need modification — `chat.py` calls `retrieve_documents()` and receives the same return shape regardless.
+
+The change is two steps:
+
+1. **Fetch a larger candidate set from pgvector** — increase the SQL `LIMIT` to e.g. 3× your `max_context_chunks` so the re-ranker has candidates to work with:
+
+```python
+# Before
+ORDER BY v.embedding <=> %s::vector
+LIMIT %s
+# ...
+_vector_literal(embedding),
+max_context_chunks,
+
+# After — fetch a wider candidate pool
+CANDIDATE_MULTIPLIER = 3
+ORDER BY v.embedding <=> %s::vector
+LIMIT %s
+# ...
+_vector_literal(embedding),
+max_context_chunks * CANDIDATE_MULTIPLIER,
+```
+
+2. **Call Bedrock Rerank and slice the top-N** — add this after the pgvector query returns `results`:
+
+```python
+if results:
+    rerank_response = bedrock_client.rerank(
+        rerankingConfiguration={
+            "type": "BEDROCK_RERANKING_MODEL",
+            "bedrockRerankingConfiguration": {
+                "modelConfiguration": {
+                    "modelArn": f"arn:aws:bedrock:{os.environ['AWS_REGION']}::foundation-model/amazon.rerank-v1:0"
+                },
+                "numberOfResults": max_context_chunks,
+            },
+        },
+        sources=[
+            {"type": "INLINE", "inlineDocumentSource": {"type": "TEXT", "textDocument": {"text": r["content"]}}}
+            for r in results
+        ],
+        textSources=[{"type": "QUERY", "textQuery": {"text": query}}],
+    )
+    reranked_indices = [item["index"] for item in rerank_response["rerankingResults"]]
+    results = [results[i] for i in reranked_indices]
+```
+
+**IAM**: The Lambda execution role needs `bedrock:Rerank` added to its Bedrock policy in `cdk/lib/api-stack.ts`.
+
+**Cost**: Bedrock Rerank (`amazon.rerank-v1:0`) charges per 1,000 tokens reranked — small relative to the generation call, and available in `ca-central-1`.
 
 ---
 
