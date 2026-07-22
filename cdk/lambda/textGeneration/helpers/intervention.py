@@ -77,7 +77,7 @@ def _build_verifier_prompt(
     sources_block = _format_sources_for_verifier(sources)
 
     prompt = f"""
-You are a strict grounding verifier for a retrieval-augmented university advising chatbot.
+You are a strict grounding verifier for a retrieval-augmented knowledge base assistant.
 
 Your job is to judge whether the ANSWER is actually supported by the RETRIEVED SOURCES for the USER QUESTION.
 
@@ -88,18 +88,18 @@ How well does the answer address the user's question?
 
 2. support_score
 How well are the answer's concrete claims supported by the retrieved sources?
-Lower this score when the answer introduces courses, requirements, specializations, or program details that do not appear in the sources.
+Lower this score when the answer introduces facts, details, or claims that do not appear in the sources.
 
 3. scope_alignment_score
-How well do the retrieved sources match the same program / specialization / subject area asked about by the user?
-Lower this score heavily if the sources are about a different specialization or different academic area than the question.
+How well do the retrieved sources match the same topic or subject area asked about by the user?
+Lower this score heavily if the sources are about a different topic or subject area than the question.
 
 Important rules:
 - Be strict.
 - Do NOT reward plausible outside knowledge.
 - The answer must be judged only against the retrieved sources.
 - If the answer says something not supported by the sources, reduce support_score.
-- If the retrieved sources are about the wrong specialization, reduce scope_alignment_score heavily.
+- If the retrieved sources are about the wrong topic, reduce scope_alignment_score heavily.
 - If sources are weak or mismatched, do not give a high score just because the answer sounds reasonable.
 - If the answer is relevant but unsupported, relevancy_score can be high while support_score stays low.
 
@@ -253,13 +253,13 @@ def _label_from_scores(
 def _warning_for_label(label: str) -> Optional[str]:
     if label == "partially_grounded":
         return (
-            "Warning: Parts of this answer may not be fully supported by the retrieved UBC source content. "
-            "Please verify the program details against the relevant UBC calendar page."
+            "Warning: Parts of this answer may not be fully supported by the retrieved source content. "
+            "Please verify the details against the original SharePoint documents."
         )
     if label == "unsupported":
         return (
-            "Warning: This answer may not be reliably grounded in the retrieved UBC source content and could contain "
-            "incorrect program details. Please verify against the relevant UBC calendar page."
+            "Warning: This answer may not be reliably grounded in the retrieved source content and could contain "
+            "inaccurate details. Please verify against the original SharePoint documents."
         )
     return None
 

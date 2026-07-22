@@ -423,7 +423,7 @@ exports.up = (pgm) => {
     VALUES
       (
         'disclaimer',
-        'The BSc Specialization Explorer strives for accuracy. However, AI-driven tools are not perfect and we encourage you to double check important information before making decisions.',
+        'The CUCCIO Knowledge Base Assistant strives for accuracy. However, AI-driven tools are not perfect and we encourage you to double check important information before making decisions.',
         700, 1, TRUE, FALSE, NULL, now()
       ),
       (
@@ -433,12 +433,12 @@ exports.up = (pgm) => {
       ),
       (
         'partial_hallucination_warning',
-        'Warning: The knowledge base powering the AI-driven BSc Specialization Explorer contains information from within and outside of UBC-governed sources. Given the nature of the Explorer''s LLM, parts of this answer may not be fully supported by the UBC source content and could contain inaccurate program or course details. Please verify against the relevant UBC calendar page.',
+        'Warning: Parts of this answer may not be fully supported by the retrieved SharePoint source content. Please verify the details against the original source documents.',
         700, 1, TRUE, FALSE, NULL, now()
       ),
       (
         'full_hallucination_warning',
-        'Warning: The knowledge base powering the AI-driven BSc Specialization Explorer contains information from within and outside of UBC-governed sources. Given the nature of the Explorer''s LLM, this answer may not be reliably grounded in the UBC source content and could contain incorrect program or course information. Please verify against the relevant UBC calendar page.',
+        'Warning: This answer may not be reliably grounded in the retrieved SharePoint source content and could contain inaccurate details. Please verify against the original source documents.',
         700, 1, TRUE, FALSE, NULL, now()
       ),
       (

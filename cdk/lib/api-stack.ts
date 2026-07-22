@@ -207,17 +207,17 @@ export class ApiGatewayStack extends cdk.Stack {
                         <body>
                             <div class="email-container">
                             <div class="header">
-                                <h1>Specialization Explorer</h1>
+                                <h1>CUCCIO Knowledge Base Assistant</h1>
                             </div>
                             <div class="main-content">
-                                <p>Thank you for signing up for Specialization Explorer!</p>
+                                <p>Thank you for signing up for CUCCIO Knowledge Base Assistant!</p>
                                 <p>Verify your email by using the code below:</p>
                                 <div class="code">{####}</div>
                                 <p>If you did not request this verification, please ignore this email.</p>
                             </div>
                             <div class="footer">
                                 <p>Please do not reply to this email.</p>
-                                <p>Specialization Explorer, 2025</p>
+                                <p>CUCCIO Knowledge Base Assistant, 2025</p>
                             </div>
                             </div>
                         </body>

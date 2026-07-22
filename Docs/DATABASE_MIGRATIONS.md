@@ -1,6 +1,6 @@
 # Database Migrations
 
-This document provides comprehensive information about the database migration system used in the Specialization Explorer project.
+This document provides comprehensive information about the database migration system used in the CUCCIO Knowledge Base Assistant project.
 
 ## Table of Contents
 
@@ -16,7 +16,7 @@ This document provides comprehensive information about the database migration sy
 
 ## Overview
 
-The Specialization Explorer project uses a `node-pg-migrate` system to manage database schema changes with numbered JavaScript files. This provides a reliable, trackable, and automated approach to database schema evolution throughout the project lifecycle.
+The CUCCIO Knowledge Base Assistant project uses a `node-pg-migrate` system to manage database schema changes with numbered JavaScript files. This provides a reliable, trackable, and automated approach to database schema evolution throughout the project lifecycle.
 
 ## Quick Start
 
@@ -602,4 +602,4 @@ exports.up = (pgm) => {
 - Ask team for review of complex migrations
 - Check PostgreSQL documentation for advanced SQL features
 
-This comprehensive migration system ensures safe, trackable, and reliable database schema evolution throughout the Specialization Explorer project lifecycle.
+This comprehensive migration system ensures safe, trackable, and reliable database schema evolution throughout the CUCCIO Knowledge Base Assistant project lifecycle.

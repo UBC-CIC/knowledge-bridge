@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
-  title: specEx API
-  description: Specialization Explorer API
+  title: CUCCIO KBA API
+  description: CUCCIO Knowledge Base Assistant API
   version: 1.0.0
 tags:
   - name: User
