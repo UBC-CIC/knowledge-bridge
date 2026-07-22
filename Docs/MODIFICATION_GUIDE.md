@@ -1,4 +1,4 @@
-# Specialization Explorer - Project Modification Guide
+# CUCCIO Knowledge Base Assistant - Project Modification Guide
 
 This guide covers practical modifications developers commonly need to make: styling, authentication, API extensions, frontend components, LLM configuration, database migrations, and deployment. For guardrail configuration, see `Docs/BEDROCK_GUARDRAILS.md`.
 
@@ -45,31 +45,32 @@ For component-specific overrides, search for hex codes or Tailwind classes direc
 
 ---
 
-## Admin & Public Token
+## Authentication & Authorization
 
-The project uses a dual access model:
+All users — both regular users and admins — authenticate via **Microsoft Entra ID** federated through AWS Cognito. There is no anonymous or public access.
 
-- **Admin users**: Authenticated via Cognito. Admin-only APIs require a Cognito token and are restricted by the admin authorizer in `OpenAPI_Swagger_Definition.yaml` and `cdk/lib/api-stack.ts`.
-- **Public users**: `lambda/publicTokenFunction/publicTokenFunction.js` generates a short-lived JWT for unauthenticated users. The frontend requests and caches this via `frontend/src/providers/UserSessionContext.tsx`.
+- **Regular users**: Sign in with Microsoft via the landing page (`frontend/src/pages/LandingPage.tsx`). Cognito issues a JWT which the frontend stores and passes on all API calls.
+- **Admin users**: Same Entra ID sign-in flow, but must be a member of the `admin` Cognito group. Admin-only APIs are restricted by the admin authorizer in `OpenAPI_Swagger_Definition.yaml` and `cdk/lib/api-stack.ts`. Once signed in, admins see a Mode switcher in the header to toggle between user and admin views.
 
 Key files:
-- `cdk/lib/api-stack.ts` — Cognito UserPool and API authorizer setup
-- `cdk/lambda/publicTokenFunction/publicTokenFunction.js` — public token generation and expiry
-- `frontend/src/components/ProtectedRoute.tsx` — admin route protection
+- `cdk/lib/api-stack.ts` — Cognito UserPool, Entra ID OIDC identity provider, and API authorizer setup
+- `frontend/src/functions/authService.js` — `signInWithRedirect` and session management
+- `frontend/src/components/ProtectedRoute.tsx` — route-level auth and admin group check
 
 ---
 
-## Using External Identity Providers (Enterprise SSO)
+## Customizing the Identity Provider
 
-Cognito supports federation with SAML 2.0 and OIDC providers (Okta, Azure AD, Keycloak, etc.), enabling SSO and centralized identity management.
+The application is pre-configured with Microsoft Entra ID as the sole identity provider. To swap it for a different OIDC/SAML provider (e.g., Okta, Google Workspace):
 
-- Configure an identity provider via the console or CDK (`CfnIdentityProvider`) and attach it to the user pool.
-- Map attributes (e.g., email, groups) so application roles like `admin` are correctly assigned.
-- Update redirect/callback URIs for the provider to include your Amplify/web app endpoints.
+1. In `cdk/lib/api-stack.ts`, find the `CfnUserPoolIdentityProvider` block for `EntraID` and update the `providerDetails` (issuer URL, client ID/secret) and `attributeMapping`.
+2. Update `frontend/src/functions/authService.js` — change the `custom` provider name passed to `signInWithRedirect` to match the new provider's name.
+3. Update redirect/callback URIs in the identity provider's app registration to include your Amplify URL.
+4. Redeploy: `cdk deploy`.
 
 AWS docs:
-- SAML: https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-saml-idp.html
 - OIDC: https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-oidc-idp.html
+- SAML: https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-saml-idp.html
 
 ---
 
@@ -141,7 +142,7 @@ Edit `frontend/src/components/Footer.tsx`:
 Or use a Vite env variable to avoid rebuilding for content changes:
 
 ```tsx
-© {new Date().getFullYear()} {import.meta.env.VITE_WEBSITE_NAME || 'Specialization Explorer'}.
+© {new Date().getFullYear()} {import.meta.env.VITE_WEBSITE_NAME || 'CUCCIO Knowledge Base Assistant'}.
 ```
 
 ---
@@ -206,7 +207,14 @@ For details on how to configure these via the admin dashboard, see the User Guid
 
 ## Data Ingestion Modifications
 
-The ingestion pipeline is handled by `cdk/lambda/knowledgeBase/` (Python Lambda). To add new file types or processing logic, modify `main.py` and the `helpers/` modules. Add a DB migration if new metadata tables are needed.
+The ingestion pipeline is an AWS Glue Python Shell job at `cdk/glue/sharepoint_ingestion.py`. Key areas to modify:
+
+- **SharePoint content source**: The job uses the Microsoft Graph API (via `msgraph-sdk`) to fetch list items. To change which SharePoint sites or lists are ingested, update the site/list IDs in the job or in the `sites` / `site_sources` database tables.
+- **Chunking logic**: Text splitting happens inside the job before embedding. Adjust chunk size and overlap directly in the script.
+- **Embedding**: Chunks are embedded by calling Amazon Bedrock (Cohere Embed English v3). To swap embedding models, update the model ID in the script and ensure the Glue IAM role has `bedrock:InvokeModel` permission for the new model ARN.
+- **Schema changes**: If new metadata columns are needed, add a migration in `cdk/lambda/db_setup/migrations/` and redeploy `DBFlowStack` before the next ingestion run.
+
+To trigger a run manually, use the **Run Ingestion** button in the admin dashboard or call `POST /admin/ingestion/trigger`.
 
 ---
 
@@ -221,7 +229,10 @@ cdk deploy
 ```
 
 **Python Lambda dependencies:**
-Python Lambdas (`textGeneration`, `knowledgeBase`) do not auto-install `requirements.txt` at deploy time — dependencies are either bundled manually or come from Lambda layers. If you add a new Python dependency, you'll need to either add a layer or set up a bundling step in CDK.
+The `textGeneration` Lambda does not auto-install `requirements.txt` at deploy time — dependencies come from Lambda layers (`psycopg2`, etc.). If you add a new Python dependency, you'll need to either add a layer or set up a bundling step in CDK.
+
+**Glue job dependencies:**
+Edit `cdk/glue/requirements.txt` and redeploy the `GlueStack`. The CDK stack uploads the file to S3 and passes it to the Glue job as `--additional-python-modules`. See `Docs/DEPENDENCY_MANAGEMENT.MD` for details.
 
 **Frontend:**
 ```bash
@@ -238,7 +249,7 @@ Run the dev server manually with `npm run dev` (Vite).
 
 ## Encryption & KMS Keys
 
-By default, all encrypted resources in this project (RDS, S3, Secrets Manager, OpenSearch Serverless) use AWS managed keys. No configuration is required to use them, but they offer limited control over key rotation, auditing, and cross-account access.
+By default, all encrypted resources in this project (RDS, S3, Secrets Manager) use AWS managed keys. No configuration is required to use them, but they offer limited control over key rotation, auditing, and cross-account access.
 
 If your organization requires customer-managed KMS keys (CMKs), see [`Docs/AWS_MANAGED_KEYS.md`](./AWS_MANAGED_KEYS.md) for a full list of affected resources and the exact CDK property changes needed in each stack.
 
