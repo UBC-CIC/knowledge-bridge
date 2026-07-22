@@ -301,7 +301,7 @@ Copy the output — this is the value you will store as `Sharepoint-REST-Cert-Pf
 
 ## Section 6 — Store Credentials in AWS Secrets Manager
 
-All three secrets below must exist in Secrets Manager **before** running `cdk deploy`. Navigate to AWS Console → Secrets Manager → **Store a new secret** for each one. Use secret type **Other type of secret** → **Key/value pairs**.
+All three secrets below must exist in Secrets Manager **before** running `cdk deploy`. You can create them via the AWS Console or using the CLI commands below. Replace all placeholder values before running.
 
 ---
 
@@ -316,17 +316,94 @@ All three secrets below must exist in Secrets Manager **before** running `cdk de
 
 This secret is used by both the Cognito OIDC flow and the Glue ingestion job.
 
+<details>
+<summary>macOS/Linux</summary>
+
+```bash
+aws secretsmanager create-secret \
+  --name "KBA-SharePoint-Credentials" \
+  --secret-string '{
+    "tenant_id": "<YOUR-TENANT-ID>",
+    "client_id": "<YOUR-CLIENT-ID>",
+    "client_secret": "<YOUR-CLIENT-SECRET>",
+    "site_id": "<YOUR-SHAREPOINT-SITE-ID>"
+  }' \
+  --profile <YOUR-PROFILE-NAME>
+```
+
+</details>
+
+<details>
+<summary>PowerShell</summary>
+
+```powershell
+aws secretsmanager create-secret `
+  --name "KBA-SharePoint-Credentials" `
+  --secret-string '{\"tenant_id\": \"<YOUR-TENANT-ID>\", \"client_id\": \"<YOUR-CLIENT-ID>\", \"client_secret\": \"<YOUR-CLIENT-SECRET>\", \"site_id\": \"<YOUR-SHAREPOINT-SITE-ID>\"}' `
+  --profile <YOUR-PROFILE-NAME>
+```
+
+</details>
+
 ---
 
 ### Secret 2 — `Sharepoint-REST-Cert-Pfx-B64`
 
-Store the base64-encoded PFX string from Section 5B as a **plaintext** secret (not key/value).
+Store the base64-encoded PFX string from Section 5B as a plaintext secret. Replace `<BASE64-PFX-STRING>` with the output of the base64 command from Section 5B Step 3.
+
+<details>
+<summary>macOS/Linux</summary>
+
+```bash
+aws secretsmanager create-secret \
+  --name "Sharepoint-REST-Cert-Pfx-B64" \
+  --secret-string "<BASE64-PFX-STRING>" \
+  --profile <YOUR-PROFILE-NAME>
+```
+
+</details>
+
+<details>
+<summary>PowerShell</summary>
+
+```powershell
+aws secretsmanager create-secret `
+  --name "Sharepoint-REST-Cert-Pfx-B64" `
+  --secret-string "<BASE64-PFX-STRING>" `
+  --profile <YOUR-PROFILE-NAME>
+```
+
+</details>
 
 ---
 
 ### Secret 3 — `Sharepoint-REST-Cert-Pfx-Password`
 
-Store the certificate password you used in Section 5B as a **plaintext** secret.
+Store the certificate password you used in Section 5B Step 1.
+
+<details>
+<summary>macOS/Linux</summary>
+
+```bash
+aws secretsmanager create-secret \
+  --name "Sharepoint-REST-Cert-Pfx-Password" \
+  --secret-string "<YOUR-CERTIFICATE-PASSWORD>" \
+  --profile <YOUR-PROFILE-NAME>
+```
+
+</details>
+
+<details>
+<summary>PowerShell</summary>
+
+```powershell
+aws secretsmanager create-secret `
+  --name "Sharepoint-REST-Cert-Pfx-Password" `
+  --secret-string "<YOUR-CERTIFICATE-PASSWORD>" `
+  --profile <YOUR-PROFILE-NAME>
+```
+
+</details>
 
 ---
 
