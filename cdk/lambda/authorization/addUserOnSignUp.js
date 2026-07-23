@@ -144,7 +144,10 @@ exports.handler = async (event) => {
       await cognitoClient.send(new AdminUpdateUserAttributesCommand({
         UserPoolId: userPoolId,
         Username: userName,
-        UserAttributes: [{ Name: "email", Value: email }],
+        UserAttributes: [
+          { Name: "email", Value: email },
+          { Name: "email_verified", Value: "true" },
+        ],
       }));
     } catch (attrErr) {
       console.warn("Could not update email attribute:", attrErr.message);
