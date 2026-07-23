@@ -182,6 +182,48 @@ aws secretsmanager create-secret `
 
 &nbsp;
 
+#### Database Credentials
+
+You must supply a custom database username before deploying. Replace `<YOUR-DB-USERNAME>` with a name of your choice (e.g. `kbaDbUser`) and `<YOUR-PROFILE-NAME>` accordingly.
+
+<details>
+<summary>macOS/Linux</summary>
+
+```bash
+aws secretsmanager create-secret \
+  --name KBASecrets \
+  --secret-string '{"DB_Username":"<YOUR-DB-USERNAME>"}' \
+  --profile <YOUR-PROFILE-NAME>
+```
+
+</details>
+
+<details>
+<summary>Windows CMD</summary>
+
+```cmd
+aws secretsmanager create-secret ^
+  --name KBASecrets ^
+  --secret-string "{\"DB_Username\":\"<YOUR-DB-USERNAME>\"}" ^
+  --profile <YOUR-PROFILE-NAME>
+```
+
+</details>
+
+<details>
+<summary>PowerShell</summary>
+
+```powershell
+aws secretsmanager create-secret `
+  --name KBASecrets `
+  --secret-string '{\"DB_Username\":\"<YOUR-DB-USERNAME>\"}' `
+  --profile <YOUR-PROFILE-NAME>
+```
+
+</details>
+
+&nbsp;
+
 #### SSM Parameters
 
 **GitHub owner name** — used by AmplifyStack to locate your forked repository. Replace `<YOUR-GITHUB-USERNAME>` and `<YOUR-PROFILE-NAME>` accordingly.
@@ -584,6 +626,7 @@ To take down the deployed stack for a fresh redeployment in the future, follow t
    - Navigate to AWS Secrets Manager
    - Delete the following secrets:
      - `github-personal-access-token`
+     - `KBASecrets`
      - `KBA-SharePoint-Credentials`
      - `Sharepoint-REST-Cert-Pfx-B64`
      - `Sharepoint-REST-Cert-Pfx-Password`
