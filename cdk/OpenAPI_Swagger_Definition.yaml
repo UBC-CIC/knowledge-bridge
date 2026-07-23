@@ -1082,16 +1082,11 @@ paths:
               type: object
               required:
                 - content
-                - adminEmail
               properties:
                 content:
                   type: string
                   description: The full message content for the new version
                   example: "AI can make mistakes. Check important info."
-                adminEmail:
-                  type: string
-                  description: Email of the admin creating this new version (used to populate created_by)
-                  example: "admin@example.com"
       responses:
         "200":
           description: Created a new system message version (active)
@@ -1141,7 +1136,7 @@ paths:
                     type: string
                     format: date-time
         "400":
-          description: Bad Request - Invalid type, missing/invalid content/adminEmail, or content exceeds character limit
+          description: Bad Request - Invalid type, missing/invalid content, or content exceeds character limit
         "401":
           description: Unauthorized
         "403":
@@ -1198,14 +1193,7 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - adminEmail
-              properties:
-                adminEmail:
-                  type: string
-                  format: email
-                  description: Email of the admin performing the delete (used to validate admin access)
-                  example: "admin@example.com"
+              properties: {}
       responses:
         "200":
           description: System message version deleted successfully
@@ -1256,7 +1244,7 @@ paths:
                       type: "disclaimer"
                       version: 2
         "400":
-          description: Bad Request - Invalid type/version_id/adminEmail, or attempted to delete active version
+          description: Bad Request - Invalid type/version_id, or attempted to delete active version
         "401":
           description: Unauthorized
         "403":
@@ -1313,14 +1301,7 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - adminEmail
-              properties:
-                adminEmail:
-                  type: string
-                  format: email
-                  description: Email of the admin performing the activation (used to validate admin access)
-                  example: "admin@example.com"
+              properties: {}
       responses:
         "200":
           description: Activation successful (or already active)
@@ -1436,7 +1417,7 @@ paths:
                       created_by_email: "admin@example.com"
                       created_at: "2026-02-18T19:21:18.406Z"
         "400":
-          description: Bad Request - Invalid type/version_id/adminEmail
+          description: Bad Request - Invalid type/version_id
         "401":
           description: Unauthorized
         "403":

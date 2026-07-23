@@ -2,6 +2,7 @@ const { initializeConnection } = require("./initializeConnection.js");
 const {
   CognitoIdentityProviderClient,
   AdminAddUserToGroupCommand,
+  AdminUpdateUserAttributesCommand,
 } = require("@aws-sdk/client-cognito-identity-provider");
 const {
   SecretsManagerClient,
@@ -136,6 +137,17 @@ exports.handler = async (event) => {
       }));
     } catch (groupErr) {
       console.warn("Could not add user to group (may already be a member):", groupErr.message);
+    }
+
+    // Write parsed email back to Cognito user profile so it appears in the ID token
+    try {
+      await cognitoClient.send(new AdminUpdateUserAttributesCommand({
+        UserPoolId: userPoolId,
+        Username: userName,
+        UserAttributes: [{ Name: "email", Value: email }],
+      }));
+    } catch (attrErr) {
+      console.warn("Could not update email attribute:", attrErr.message);
     }
 
     // Sync user's Entra group memberships — best effort, never blocks login

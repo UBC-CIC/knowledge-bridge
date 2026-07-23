@@ -806,6 +806,7 @@ export class ApiGatewayStack extends cdk.Stack {
               "cognito-idp:AdminRemoveUserFromGroup",
               "cognito-idp:AdminGetUser",
               "cognito-idp:AdminListGroupsForUser",
+              "cognito-idp:AdminUpdateUserAttributes",
             ],
             resources: [
               `arn:aws:cognito-idp:${this.region}:${this.account}:userpool/${this.userPool.userPoolId}`,
