@@ -5,6 +5,7 @@
 - [Deployment Guide](#deployment-guide)
 - [Table of Contents](#table-of-contents)
 - [Requirements](#requirements)
+  - [Enable and Verify Bedrock Model Access](#enable-and-verify-bedrock-model-access)
   - [Request Higher Bedrock LLM Invocation Quotas](#request-higher-bedrock-llm-invocation-quotas)
 - [Pre-Deployment](#pre-deployment)
   - [Step 0: Complete Microsoft Entra ID Setup](#step-0-complete-microsoft-entra-id-setup)
@@ -36,6 +37,97 @@ Before you deploy, you must have the following installed on your device:
 - [node](https://nodejs.org/en/learn/getting-started/how-to-install-nodejs) _(v22.7.9+ required)_
 - [Python](https://www.python.org/downloads/) _(v3.12+ required)_
 
+### Enable and Verify Bedrock Model Access
+
+This application uses two Bedrock models that must be explicitly enabled on your AWS account before deployment:
+
+- **Cohere Embed English v3** (`cohere.embed-english-v3`) — used by the Glue ingestion job to generate embeddings
+- **Anthropic Claude Haiku 4.5** (`us.anthropic.claude-haiku-4-5-20251001-v1:0`) — used by the text generation Lambda
+
+**Step 1: Enable model access**
+
+1. Navigate to **Amazon Bedrock** in the AWS Console
+2. Click **Model access** in the left sidebar
+3. Click **Modify model access**
+4. Enable both **Cohere Embed English v3** and **Anthropic Claude Haiku 4.5**
+5. Submit — Cohere and Anthropic models are typically approved within a few minutes
+
+**Step 2: Verify access before deploying**
+
+First-time model invocations on a new account can take a few minutes to activate after you enable access. Run the following commands to confirm both models are accessible. If you get an `AccessDeniedException`, wait 5 minutes and try again.
+
+_Verify Cohere embedding model:_
+
+<details>
+<summary>macOS/Linux</summary>
+
+```bash
+aws bedrock-runtime invoke-model \
+    --profile <YOUR-PROFILE-NAME> \
+    --region ca-central-1 \
+    --model-id cohere.embed-english-v3 \
+    --content-type application/json \
+    --accept application/json \
+    --cli-binary-format raw-in-base64-out \
+    --body '{"texts": ["Hello world"], "input_type": "search_document"}' \
+    test-embeddings.json && cat test-embeddings.json
+```
+
+</details>
+
+<details>
+<summary>PowerShell</summary>
+
+```powershell
+aws bedrock-runtime invoke-model `
+    --profile <YOUR-PROFILE-NAME> `
+    --region ca-central-1 `
+    --model-id cohere.embed-english-v3 `
+    --content-type application/json `
+    --accept application/json `
+    --cli-binary-format raw-in-base64-out `
+    --body "{`"texts`": [`"Hello world`"], `"input_type`": `"search_document`"}" `
+    test-embeddings.json
+```
+
+</details>
+
+&nbsp;
+
+_Verify Claude Haiku LLM:_
+
+<details>
+<summary>macOS/Linux</summary>
+
+```bash
+aws bedrock-runtime converse \
+    --profile <YOUR-PROFILE-NAME> \
+    --region ca-central-1 \
+    --model-id us.anthropic.claude-haiku-4-5-20251001-v1:0 \
+    --messages '[{"role": "user", "content": [{"text": "hi how are you"}]}]'
+```
+
+</details>
+
+<details>
+<summary>PowerShell</summary>
+
+```powershell
+aws bedrock-runtime converse `
+    --profile <YOUR-PROFILE-NAME> `
+    --region ca-central-1 `
+    --model-id us.anthropic.claude-haiku-4-5-20251001-v1:0 `
+    --messages "[{`"role`": `"user`", `"content`": [{`"text`": `"hi how are you`"}]}]"
+```
+
+</details>
+
+&nbsp;
+
+A successful response confirms model access is active. Only proceed to deployment once both commands succeed.
+
+---
+
 ### Request Higher Bedrock LLM Invocation Quotas
 
 For optimal performance, it is recommended to request higher invocation quotas for Bedrock LLM models before deployment. The default quotas may be insufficient for processing concurrent requests or high-volume usage.
@@ -46,10 +138,9 @@ To request quota increases:
 
 1. Navigate to the **AWS Service Quotas** console in your AWS account
 2. Search for "Bedrock" in the service quotas
-3. Select the relevant LLM models you plan to use:
+3. Select the relevant models you plan to use:
    - Anthropic Claude Haiku 4.5 (`us.anthropic.claude-haiku-4-5-20251001-v1:0`)
-   - Anthropic Claude Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`)
-   - Amazon Titan Embed Text V2 (`amazon.titan-embed-text-v2:0`)
+   - Cohere Embed English v3 (`cohere.embed-english-v3`)
 4. Request quota increases for "Requests per minute" based on your expected usage
 5. Submit the quota increase request and wait for AWS approval (this can take 24-48 hours)
 
@@ -588,7 +679,8 @@ _Note: Always read the current value first and append your new origin to avoid r
   - Verify the three Entra secrets exist in Secrets Manager (`KBA-SharePoint-Credentials`, `Sharepoint-REST-Cert-Pfx-B64`, `Sharepoint-REST-Cert-Pfx-Password`).
   - Check that admin consent was granted for all required API permissions (see `Docs/ENTRA_SETUP.md` Section 2).
   - Check CloudWatch logs for the Glue job under `/aws-glue/jobs/`.
-  - Confirm the Glue job's IAM role has access to Secrets Manager, Bedrock (Titan), and the RDS VPC.
+  - Confirm the Glue job's IAM role has access to Secrets Manager, Bedrock (Cohere Embed English v3), and the RDS VPC.
+  - Verify Cohere Embed English v3 model access is enabled in Bedrock (see [Enable and Verify Bedrock Model Access](#enable-and-verify-bedrock-model-access)).
 
 **Issue: Admin login fails or redirect loop after Microsoft sign-in**
 
