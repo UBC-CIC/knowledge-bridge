@@ -10,6 +10,26 @@ const initConnection = async () => {
   }
 };
 
+const getAuthenticatedUserId = (event) =>
+  event.requestContext?.authorizer?.userId;
+
+/**
+ * Build a structured audit log entry. Caller is responsible for logging/storing.
+ * @param {string} performedBy  - User ID of the actor
+ * @param {string} action       - Verb describing the operation, e.g. "promote_user"
+ * @param {*}      [target]     - Optional target identifier (user ID, message type, etc.)
+ * @param {Object} [extra]      - Optional additional context fields
+ * @returns {Object} Audit entry — pass to console.log, a DB insert, SNS, etc.
+ */
+const buildAuditEntry = (performedBy, action, target = null, extra = {}) => ({
+  audit: true,
+  performedBy,
+  action,
+  ...(target !== null ? { target } : {}),
+  ...extra,
+  timestamp: new Date().toISOString(),
+});
+
 const createResponse = async (event) => ({
   statusCode: 200,
   headers: await getCorsHeaders(event),
@@ -30,10 +50,15 @@ const handleError = (error, response) => {
   response.body = JSON.stringify({ error: "Internal server error" });
 };
 
+const getSqlConnection = () => 
+  global.sqlConnection;
+
 module.exports = {
   initConnection,
   createResponse,
   parseBody,
   handleError,
-  getSqlConnection: () => global.sqlConnection
+  getSqlConnection,
+  getAuthenticatedUserId,
+  buildAuditEntry,
 };

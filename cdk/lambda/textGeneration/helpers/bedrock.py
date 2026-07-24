@@ -11,12 +11,19 @@ logger.setLevel(logging.INFO)
 EMBEDDING_MODEL_ID = "cohere.embed-english-v3"
 
 _bedrock_ca = None
+_bedrock_llm = None
 
 def _get_bedrock_ca():
     global _bedrock_ca
     if _bedrock_ca is None:
         _bedrock_ca = boto3.client("bedrock-runtime", region_name=config.REGION)
     return _bedrock_ca
+
+def get_bedrock_llm_client(region: str):
+    global _bedrock_llm
+    if _bedrock_llm is None:
+        _bedrock_llm = boto3.client("bedrock-runtime", region_name=region)
+    return _bedrock_llm
 
 
 def _embed_text(text: str) -> List[float]:

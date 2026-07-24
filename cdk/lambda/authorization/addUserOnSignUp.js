@@ -2,6 +2,7 @@ const { initializeConnection } = require("./initializeConnection.js");
 const {
   CognitoIdentityProviderClient,
   AdminAddUserToGroupCommand,
+  AdminUpdateUserAttributesCommand,
 } = require("@aws-sdk/client-cognito-identity-provider");
 const {
   SecretsManagerClient,
@@ -28,7 +29,6 @@ async function getSharePointSecret() {
 async function getGraphToken(tenantId, clientId, clientSecret) {
   if (cachedToken && Date.now() < tokenExpiresAt - 60_000) return cachedToken;
 
-  const https = require("https");
   const tokenBody = new URLSearchParams({
     grant_type: "client_credentials",
     client_id: clientId,
@@ -36,21 +36,16 @@ async function getGraphToken(tenantId, clientId, clientSecret) {
     scope: "https://graph.microsoft.com/.default",
   }).toString();
 
-  const { access_token, expires_in } = await new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: "login.microsoftonline.com",
-      path: `/${tenantId}/oauth2/v2.0/token`,
+  const res = await fetch(
+    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    }, (res) => {
-      let data = "";
-      res.on("data", (chunk) => data += chunk);
-      res.on("end", () => { try { resolve(JSON.parse(data)); } catch (e) { reject(e); } });
-    });
-    req.on("error", reject);
-    req.write(tokenBody);
-    req.end();
-  });
+      body: tokenBody,
+      signal: AbortSignal.timeout(5000),
+    }
+  );
+  const { access_token, expires_in } = await res.json();
 
   cachedToken = access_token;
   tokenExpiresAt = Date.now() + (expires_in * 1000);
@@ -71,23 +66,18 @@ function parseGuestEmail(upn) {
 }
 
 async function getUserGroupIds(tenantUpn, tenantId, clientId, clientSecret) {
-  const https = require("https");
   const accessToken = await getGraphToken(tenantId, clientId, clientSecret);
 
-  const groups = await new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: "graph.microsoft.com",
-      path: `/v1.0/users/${encodeURIComponent(tenantUpn)}/transitiveMemberOf/microsoft.graph.group?$select=id`,
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tenantUpn)}/transitiveMemberOf/microsoft.graph.group?$select=id`,
+    {
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}` },
-    }, (res) => {
-      let data = "";
-      res.on("data", (chunk) => data += chunk);
-      res.on("end", () => { try { resolve(JSON.parse(data).value || []); } catch (e) { reject(e); } });
-    });
-    req.on("error", reject);
-    req.end();
-  });
+      signal: AbortSignal.timeout(5000),
+    }
+  );
+  const data = await res.json();
+  const groups = data.value || [];
 
   return [...new Set(groups.map((g) => g.id.toLowerCase()))];
 }
@@ -108,7 +98,7 @@ exports.handler = async (event) => {
 
   try {
     const userAttributes = request.userAttributes;
-    console.log("Raw event:", JSON.stringify({ userName, triggerSource: event.triggerSource, userAttributes }));
+    console.log("Post-auth trigger:", { userName, triggerSource: event.triggerSource });
 
     const sub = userAttributes.sub;
 
@@ -126,7 +116,7 @@ exports.handler = async (event) => {
     const familyName = userAttributes.family_name || "";
     const displayName = `${givenName} ${familyName}`.trim() || email;
 
-    console.log("Upserting user:", { sub, email, tenantUpn, displayName });
+    console.log("Upserting user:", { sub });
 
     await sqlConnection`
       INSERT INTO users (id, display_name, email, tenant_upn, created_at, last_seen_at)
@@ -147,6 +137,20 @@ exports.handler = async (event) => {
       }));
     } catch (groupErr) {
       console.warn("Could not add user to group (may already be a member):", groupErr.message);
+    }
+
+    // Write parsed email back to Cognito user profile so it appears in the ID token
+    try {
+      await cognitoClient.send(new AdminUpdateUserAttributesCommand({
+        UserPoolId: userPoolId,
+        Username: userName,
+        UserAttributes: [
+          { Name: "email", Value: email },
+          { Name: "email_verified", Value: "true" },
+        ],
+      }));
+    } catch (attrErr) {
+      console.warn("Could not update email attribute:", attrErr.message);
     }
 
     // Sync user's Entra group memberships — best effort, never blocks login

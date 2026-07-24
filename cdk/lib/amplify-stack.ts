@@ -59,10 +59,6 @@ export class AmplifyStack extends cdk.Stack {
 
     const branch = props.githubBranch ?? "main";
 
-    // TODO: fix cyclic dependency — VITE_APP_URL is hardcoded because amplifyApp.appId
-    // cannot be referenced inside its own constructor. appId is stable after first deploy.
-    const amplifyAppUrl = "https://main.d2ceee5eyalm6f.amplifyapp.com";
-
     const amplifyApp = new App(this, `${id}-amplifyApp`, {
       appName: `${id}-amplify`,
       sourceCodeProvider: new GitHubSourceCodeProvider({
@@ -79,11 +75,11 @@ export class AmplifyStack extends cdk.Stack {
         VITE_AWS_REGION: this.region,
         VITE_COGNITO_USER_POOL_ID: apiStack.getUserPoolId(),
         VITE_COGNITO_USER_POOL_CLIENT_ID: apiStack.getUserPoolClientId(),
+        VITE_COGNITO_DOMAIN: apiStack.getCognitoDomain(),
         VITE_API_ENDPOINT: apiStack.getEndpointUrl(),
         VITE_IDENTITY_POOL_ID: apiStack.getIdentityPoolId(),
         VITE_WEBSOCKET_URL: `${apiStack.getWebSocketUrl()}/${apiStack.getStageName() ?? ""
           }`,
-        VITE_APP_URL: amplifyAppUrl,
       },
       buildSpec: BuildSpec.fromObjectToYaml(amplifyYaml),
     });
@@ -102,12 +98,19 @@ export class AmplifyStack extends cdk.Stack {
       amplifyApp.addBranch(branch);
     }
 
-    // -- UPDATE THE SSM PARAMETER TO POINT TO THE AMPLIFY APP URL --
+    // Compute the Amplify URL from the app's stable appId.
+    // Note: this cannot be injected back into the Amplify app as an env var (VITE_APP_URL)
+    // because referencing amplifyApp.appId inside the same app creates a CloudFormation
+    // circular dependency. The frontend uses window.location.origin instead.
     const amplifyUrl = `https://${branch}.${amplifyApp.appId}.amplifyapp.com`;
 
     // Set the allowed origins to the Amplify URL.
     // To add additional origins (e.g. custom domains), update the SSM parameter manually.
     // See Docs/DEPLOYMENT_GUIDE.md for instructions.
+    // Writes the Amplify URL to SSM on first deploy only (Overwrite: false).
+    // If the param already exists (subsequent redeploy or stack teardown+redeploy),
+    // ParameterAlreadyExists is swallowed — SSM remains the single source of truth.
+    // Cognito is kept in sync by the cognitoOriginSync Lambda (EventBridge-triggered).
     new cdk.custom_resources.AwsCustomResource(this, "UpdateSSMAllowedOrigins", {
       onCreate: {
         service: "SSM",

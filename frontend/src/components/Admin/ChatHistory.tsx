@@ -542,16 +542,20 @@ export default function ChatHistory({ initialSessionId, initialMessageId, initia
                 {/* Right column: Conversation viewer */}
                 <Card className="md:col-span-2 border-gray-200 shadow-sm flex flex-col overflow-hidden h-full">
                     <CardHeader className="flex-shrink-0 border-b pb-4 bg-gray-50/50">
-                        <CardTitle className="text-lg flex items-center gap-2">
-                            <Bot className="h-5 w-5 text-primary" />
-                            Conversation
-                        </CardTitle>
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-lg flex items-center gap-2">
+                                <Bot className="h-5 w-5 text-primary" />
+                                Conversation
+                            </CardTitle>
+                            {selectedSessionId && initialUserLabel && (
+                                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 rounded-full text-xs text-gray-600">
+                                    <User className="h-3 w-3 text-gray-400" />
+                                    {initialUserLabel}
+                                </div>
+                            )}
+                        </div>
                         <CardDescription className="text-xs">
-                            {selectedSessionId
-                                ? initialUserLabel && !groups.length
-                                    ? <span>Session for <span className="font-medium text-gray-700">{initialUserLabel}</span></span>
-                                    : "Transcript of selected session."
-                                : "Select a session to view the transcript."}
+                            {selectedSessionId ? "Transcript of selected session." : "Select a session to view the transcript."}
                         </CardDescription>
                     </CardHeader>
 

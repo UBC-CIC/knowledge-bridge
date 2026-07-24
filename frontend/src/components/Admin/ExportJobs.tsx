@@ -5,16 +5,17 @@ import { AuthService } from "@/functions/authService";
 import { cn } from "@/lib/utils";
 
 type ExportStatus = "pending" | "processing" | "completed" | "failed";
+type ExportType = "chat" | "analytics";
 
 type ExportRun = {
     id: string;
     status: ExportStatus;
-    scope: "all" | "group" | "user";
+    scope: string;
+    export_type: ExportType;
     scope_label: string;
     presigned_url: string | null;
     url_expires_at: string | null;
     error_message: string | null;
-    row_count: number | null;
     requested_at: string;
     completed_at: string | null;
 };
@@ -26,6 +27,46 @@ const STATUS_STYLES: Record<ExportStatus, string> = {
     failed:     "bg-red-50 text-red-600 border-red-200",
 };
 
+const EXPORT_TYPE_STYLES: Record<ExportType, string> = {
+    chat:      "bg-violet-50 text-violet-700 border-violet-200",
+    analytics: "bg-amber-50 text-amber-700 border-amber-200",
+};
+
+const VISIBLE_GROUPS = 2;
+
+function ScopeCell({ label, type }: { label: string; type: ExportType }) {
+    if (type !== "analytics") {
+        return <span className="font-medium text-gray-800 text-sm">{label}</span>;
+    }
+    // Format: "Group A, Group B · Last 30d"
+    const [groupsPart, timePart] = label.split(" · ");
+    const groupNames = groupsPart ? groupsPart.split(", ").filter(Boolean) : [];
+    const visible = groupNames.slice(0, VISIBLE_GROUPS);
+    const overflow = groupNames.slice(VISIBLE_GROUPS);
+    return (
+        <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-1">
+                {visible.map(name => (
+                    <span key={name} className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-xs font-medium">
+                        {name}
+                    </span>
+                ))}
+                {overflow.length > 0 && (
+                    <span
+                        className="inline-flex items-center px-2 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-gray-500 text-xs font-medium cursor-default"
+                        title={overflow.join(", ")}
+                    >
+                        +{overflow.length} more
+                    </span>
+                )}
+            </div>
+            {timePart && (
+                <span className="text-xs text-gray-400">{timePart}</span>
+            )}
+        </div>
+    );
+}
+
 const LIMIT = 10;
 
 export default function ExportJobs() {
@@ -33,6 +74,7 @@ export default function ExportJobs() {
     const [total, setTotal] = useState(0);
     const [offset, setOffset] = useState(0);
     const [loading, setLoading] = useState(false);
+    const [typeFilter, setTypeFilter] = useState<ExportType | "all">("all");
 
     const getAuthHeaders = async () => ({
         Authorization: await AuthService.getIdToken(),
@@ -51,8 +93,9 @@ export default function ExportJobs() {
         setLoading(true);
         try {
             const headers = await getAuthHeaders();
+            const typeParam = typeFilter !== "all" ? `&export_type=${typeFilter}` : "";
             const res = await fetch(
-                `${import.meta.env.VITE_API_ENDPOINT}/admin/export/runs?limit=${LIMIT}&offset=${newOffset}`,
+                `${import.meta.env.VITE_API_ENDPOINT}/admin/export/runs?limit=${LIMIT}&offset=${newOffset}${typeParam}`,
                 { headers }
             );
             if (!res.ok) throw new Error("Failed to fetch export runs");
@@ -67,7 +110,7 @@ export default function ExportJobs() {
         }
     };
 
-    useEffect(() => { fetchRuns(0); }, []);
+    useEffect(() => { fetchRuns(0); }, [typeFilter]);
 
     return (
         <div className="space-y-6 max-w-5xl mx-auto animate-in fade-in duration-500">
@@ -75,7 +118,7 @@ export default function ExportJobs() {
                 <div>
                     <h2 className="text-3xl font-bold text-gray-900">Export Jobs</h2>
                     <p className="text-gray-500 mt-1">
-                        Track chat exports you've triggered. Download links are valid for 7 days.
+                        Track exports you've triggered. Download links are valid for 7 days.
                     </p>
                 </div>
                 <button
@@ -95,7 +138,7 @@ export default function ExportJobs() {
                         Export History
                     </CardTitle>
                     <CardDescription className="text-sm">
-                        Exports are triggered from Chat History. Each export is scoped to all chats, a group, or a specific user.
+                        Each export is scoped to all chats, a group, a specific user, or analytics data.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -106,7 +149,7 @@ export default function ExportJobs() {
                             <Download className="h-10 w-10 text-gray-200" />
                             <p className="text-base">No export jobs yet.</p>
                             <p className="text-sm text-gray-400">
-                                Trigger one from <span className="font-medium text-gray-600">Chat History</span> using the Export buttons.
+                                Trigger one from <span className="font-medium text-gray-600">Chat History</span> or <span className="font-medium text-gray-600">Analytics</span>.
                             </p>
                         </div>
                     ) : (
@@ -115,10 +158,23 @@ export default function ExportJobs() {
                                 <thead>
                                     <tr className="border-b bg-gray-50/60 text-sm text-gray-500 uppercase tracking-wide">
                                         <th className="px-6 py-3">Requested</th>
+                                        <th className="px-6 py-3">
+                                            <div className="flex items-center gap-2">
+                                                Export Type
+                                                <select
+                                                    value={typeFilter}
+                                                    onChange={e => setTypeFilter(e.target.value as ExportType | "all")}
+                                                    className="text-xs font-normal normal-case tracking-normal border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-primary"
+                                                >
+                                                    <option value="all">All</option>
+                                                    <option value="chat">Chat</option>
+                                                    <option value="analytics">Analytics</option>
+                                                </select>
+                                            </div>
+                                        </th>
                                         <th className="px-6 py-3">Scope</th>
                                         <th className="px-6 py-3">Status</th>
                                         <th className="px-6 py-3">Completed</th>
-                                        <th className="px-6 py-3">Messages</th>
                                         <th className="px-6 py-3">Download</th>
                                     </tr>
                                 </thead>
@@ -127,18 +183,22 @@ export default function ExportJobs() {
                                         const expired = run.url_expires_at
                                             ? new Date(run.url_expires_at) < new Date()
                                             : false;
+                                        const exportType: ExportType = run.export_type ?? (run.scope === "analytics" ? "analytics" : "chat");
                                         return (
                                             <tr key={run.id} className="hover:bg-gray-50/50 transition-colors">
                                                 <td className="px-6 py-4 text-gray-500 whitespace-nowrap text-sm">
                                                     {formatDate(run.requested_at)}
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <span className="font-medium text-gray-800 text-sm">
-                                                        {run.scope_label}
+                                                    <span className={cn(
+                                                        "inline-flex items-center px-2.5 py-1 rounded-full font-medium border text-xs",
+                                                        EXPORT_TYPE_STYLES[exportType]
+                                                    )}>
+                                                        {exportType === "analytics" ? "Analytics" : "Chat"}
                                                     </span>
-                                                    <span className="ml-2 text-xs text-gray-400 uppercase">
-                                                        {run.scope}
-                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <ScopeCell label={run.scope_label} type={exportType} />
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <span className={cn(
@@ -154,9 +214,6 @@ export default function ExportJobs() {
                                                 <td className="px-6 py-4 text-gray-500 whitespace-nowrap text-sm">
                                                     {formatDate(run.completed_at)}
                                                 </td>
-                                                <td className="px-6 py-4 text-gray-500 text-sm">
-                                                    {run.row_count != null ? run.row_count.toLocaleString() : "—"}
-                                                </td>
                                                 <td className="px-6 py-4">
                                                     {run.status === "completed" && run.presigned_url && !expired ? (
                                                         <a
@@ -165,7 +222,7 @@ export default function ExportJobs() {
                                                             className="inline-flex items-center gap-1.5 text-primary hover:underline font-medium text-sm"
                                                         >
                                                             <Download size={14} />
-                                                            Download JSON
+                                                            Download
                                                         </a>
                                                     ) : run.status === "completed" && expired ? (
                                                         <span className="text-gray-400 italic text-sm">Link expired</span>

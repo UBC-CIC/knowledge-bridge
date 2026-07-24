@@ -48,7 +48,7 @@ export class DBFlowStack extends Stack {
           "logs:CreateLogStream",
           "logs:PutLogEvents",
         ],
-        resources: ["arn:aws:logs:*:*:*"],
+        resources: [`arn:aws:logs:${this.region}:${this.account}:*`],
       })
     );
 
@@ -81,7 +81,7 @@ export class DBFlowStack extends Stack {
     );
 
     new triggers.TriggerFunction(this, `${id}-triggerLambda`, {
-      description: `Database initializer and migration runner - ${new Date().toISOString()}`,
+      description: "Database initializer and migration runner",
       functionName: `${id}-initializerFunction`,
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: "index.handler",
@@ -93,6 +93,7 @@ export class DBFlowStack extends Stack {
         DB_TABLE_CREATOR_SECRET_NAME: db.secretPathTableCreator.secretName,
       },
       vpc: db.dbInstance.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       code: lambda.Code.fromAsset("lambda/db_setup"),
       layers: [nodePgMigrateLayer],
       role: lambdaRole,

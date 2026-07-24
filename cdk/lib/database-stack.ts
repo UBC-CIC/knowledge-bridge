@@ -40,9 +40,14 @@ export class DatabaseStack extends Stack {
         ignoreErrorCodesMatching: "InvalidInput",
         physicalResourceId: cr.PhysicalResourceId.of("RDSServiceLinkedRole"),
       },
-      policy: cr.AwsCustomResourcePolicy.fromSdkCalls({
-        resources: cr.AwsCustomResourcePolicy.ANY_RESOURCE,
-      }),
+      policy: cr.AwsCustomResourcePolicy.fromStatements([
+        new iam.PolicyStatement({
+          actions: ["iam:CreateServiceLinkedRole"],
+          resources: [
+            `arn:aws:iam::${this.account}:role/aws-service-role/rds.amazonaws.com/AWSServiceRoleForRDS`,
+          ],
+        }),
+      ]),
       }
     );
     /**
@@ -89,7 +94,7 @@ export class DatabaseStack extends Stack {
       `${id}-rdsParameterGroup`,
       {
         engine: rds.DatabaseInstanceEngine.postgres({
-          version: rds.PostgresEngineVersion.VER_16_8,
+          version: rds.PostgresEngineVersion.VER_17_9,
         }),
         description: "Empty parameter group",
         parameters: {
@@ -107,7 +112,7 @@ export class DatabaseStack extends Stack {
         subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
       },
       engine: rds.DatabaseInstanceEngine.postgres({
-        version: rds.PostgresEngineVersion.VER_16_8,
+        version: rds.PostgresEngineVersion.VER_17_9,
       }),
       instanceType: ec2.InstanceType.of(
         ec2.InstanceClass.BURSTABLE4_GRAVITON,
@@ -120,8 +125,9 @@ export class DatabaseStack extends Stack {
         }
       ),
       multiAz: false,
+      storageType: rds.StorageType.GP3,
       allocatedStorage: 100,
-      maxAllocatedStorage: 150,
+      maxAllocatedStorage: 500,
       allowMajorVersionUpgrade: false,
       enablePerformanceInsights: true,
       performanceInsightRetention: rds.PerformanceInsightRetention.DEFAULT,
@@ -137,36 +143,19 @@ export class DatabaseStack extends Stack {
       parameterGroup: parameterGroup,
     });
 
-    // Add CIDR ranges of private subnets to inbound rules of RDS
+    // Allow Postgres only from the shared application SG — not from CIDR ranges.
+    // This is least-privilege and self-adjusting as Lambdas are added/removed.
     const dbSecurityGroup = this.dbInstance.connections.securityGroups[0];
-    if (
-      vpcStack.privateSubnetsCidrStrings &&
-      vpcStack.privateSubnetsCidrStrings.length > 0
-    ) {
-      vpcStack.privateSubnetsCidrStrings.forEach((cidr) => {
-        dbSecurityGroup.addIngressRule(
-          ec2.Peer.ipv4(cidr),
-          ec2.Port.tcp(5432),
-          `Allow PostgreSQL traffic from private subnet CIDR range ${cidr}`
-        );
-      });
-    } else {
-      console.log(
-        "Deploying with new VPC. No need to add private subnet CIDR ranges to inbound rules of RDS."
-      );
-    }
-
-    // Add CIDR ranges of public subnets to inbound rules of RDS
-    this.dbInstance.connections.securityGroups.forEach(function (
-      securityGroup
-    ) {
-      // Allow Postgres access in VPC
-      securityGroup.addIngressRule(
-        ec2.Peer.ipv4(vpcStack.vpcCidrString),
-        ec2.Port.tcp(5432),
-        "Allow PostgreSQL traffic from public subnets"
-      );
-    });
+    dbSecurityGroup.addIngressRule(
+      vpcStack.appSecurityGroup,
+      ec2.Port.tcp(5432),
+      "Postgres from application tier only"
+    );
+    dbSecurityGroup.addIngressRule(
+      vpcStack.glueSecurityGroup,
+      ec2.Port.tcp(5432),
+      "Postgres from Glue ingestion job"
+    );
 
     /**
      * Create IAM role for RDS Proxy
@@ -175,12 +164,6 @@ export class DatabaseStack extends Stack {
       assumedBy: new iam.ServicePrincipal("rds.amazonaws.com"),
     });
 
-    rdsProxyRole.addToPolicy(
-      new iam.PolicyStatement({
-        resources: ["*"],
-        actions: ["rds-db:connect"],
-      })
-    );
 
     /**
      * Create RDS Proxy for database connections with all secrets

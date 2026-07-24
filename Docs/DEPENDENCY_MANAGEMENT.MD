@@ -2,142 +2,59 @@
 
 ## Overview
 
-This document explains how Python dependencies are locked and managed across Lambda functions in this project to ensure reproducible builds and security.
+This document explains how Python dependencies are managed for the AWS Glue ingestion job — the only Python workload in this project that requires explicit dependency management.
 
-## Lambda Functions with Locked Dependencies
+The `textGeneration` Lambda (Python 3.12) relies on pre-built Lambda layers (`psycopg2`, etc.) and does not use a pip-tools workflow.
 
-The `vectorIndexManagerSigV4` function is the only Lambda deployed as a Docker image built by CodePipeline, so exact version pinning is critical for reproducible builds.
+---
 
-| Lambda Function           | Location                              | Approach                      |
-| ------------------------- | ------------------------------------- | ----------------------------- |
-| `vectorIndexManagerSigV4` | `cdk/lambda/vectorIndexManagerSigV4/` | Locked via pip-tools (Docker) |
+## Glue Ingestion Job
 
-## How Dependencies Were Locked
+**Location:** `cdk/glue/sharepoint_ingestion.py`
+**Runtime:** Python 3.9, Glue 3.0 Shell
 
-### 1. Requirements Structure
+The Glue job's dependencies are declared in `cdk/glue/requirements.txt`. At deploy time, the `GlueStack` CDK stack uploads this file to S3 and passes it to the Glue job via the `--additional-python-modules` job parameter. Glue installs the packages automatically before each run.
 
-The `vectorIndexManagerSigV4` function uses a two-file approach:
-
-- `requirements.in` — High-level direct dependencies
-- `requirements.txt` — All dependencies with exact pinned versions (generated from `requirements.in`)
-
-### 2. Current Direct Dependencies (`requirements.in`)
-
-```
-opensearch-py>=2.8.0
-requests-aws4auth>=1.3.1
-boto3>=1.35.0
-```
-
-### 3. Locking Process
-
-Dependencies are locked using pip-tools inside a locally built Docker container matching the Lambda runtime (`public.ecr.aws/lambda/python:3.12`).
-
-```bash
-# Navigate to the function directory
-cd cdk/lambda/vectorIndexManagerSigV4
-
-# Build the Docker image
-docker build -t vectorindexmanager-img .
-
-# Run pip-compile inside the container to generate requirements.txt
-docker run --rm -v ${PWD}:/app -w /app --entrypoint="" vectorindexmanager-img bash -c "
-  pip install pip-tools &&
-  pip-compile requirements.in
-"
-```
-
-### 4. Key Locked Dependencies
-
-The current `requirements.txt` pins the following (generated for Python 3.12):
+### Current Dependencies (`cdk/glue/requirements.txt`)
 
 | Package | Pinned Version | Purpose |
-|---|---|---|
-| `opensearch-py` | 2.8.0 | OpenSearch Serverless client |
-| `requests-aws4auth` | 1.3.1 | SigV4 request signing for AOSS |
-| `boto3` | 1.42.91 | AWS SDK |
-| `botocore` | 1.42.91 | AWS SDK core |
-| `requests` | 2.33.1 | HTTP client (transitive) |
-| `certifi` | 2026.2.25 | TLS certificates (transitive) |
-| `urllib3` | 2.6.3 | HTTP library (transitive) |
+|---------|---------------|---------|
+| `boto3` | 1.35.0 | AWS SDK (Bedrock, Secrets Manager, S3) |
+| `botocore` | 1.35.0 | AWS SDK core |
+| `azure-identity` | 1.21.0 | Entra ID credential provider for Graph API auth |
+| `msgraph-sdk` | 1.27.0 | Microsoft Graph API client (SharePoint access) |
+| `psycopg2-binary` | 2.9.9 | PostgreSQL driver for pgvector upserts |
+| `httpx` | 0.27.0 | HTTP client (required by msgraph-sdk) |
 
-## How to Modify Dependencies
+> **Note on boto3/botocore pinning:** Glue 3.0 ships with boto3 ~1.26.x, which predates `bedrock-runtime` (added in 1.28.57). Both are pinned to 1.35.0 to ensure Bedrock calls work correctly.
 
-### Adding New Dependencies
+---
 
-1. **Add to `requirements.in`:**
+## Adding a New Dependency
+
+1. Add the package and version to `cdk/glue/requirements.txt`:
 
    ```
-   # Example: add a new package
-   some-package>=1.0.0
+   some-package==1.2.3
    ```
 
-2. **Open Docker Desktop** and keep it running.
-
-3. **Build the Docker image:**
+2. Redeploy the GlueStack:
 
    ```bash
-   cd cdk/lambda/vectorIndexManagerSigV4
-   docker build -t vectorindexmanager-img .
+   cd cdk
+   cdk deploy GlueStack
    ```
 
-4. **Regenerate `requirements.txt`:**
+   The CDK stack uploads the updated `requirements.txt` to S3 and the next Glue job run will install the new package.
 
-   ```bash
-   docker run --rm -v ${PWD}:/app -w /app --entrypoint="" vectorindexmanager-img bash -c "
-     pip install pip-tools &&
-     pip-compile requirements.in
-   "
-   ```
+3. Verify by triggering a test ingestion run from the admin dashboard and checking the CloudWatch log group for the Glue job.
 
-5. **Commit and push the changes:**
+---
 
-   **Option 1: Terminal**
+## Updating an Existing Dependency
 
-   ```bash
-   git add requirements.in requirements.txt
-   git commit -m "Add new dependency to vectorIndexManagerSigV4"
-   git push origin <branch-name>
-   ```
+1. Update the pinned version in `cdk/glue/requirements.txt`.
+2. Redeploy: `cdk deploy GlueStack`.
+3. Test by triggering an ingestion run.
 
-   **Option 2: VS Code Source Control**
-
-   1. Go to the Source Control tab.
-   2. Stage `requirements.in` and `requirements.txt`.
-   3. Write a commit message and click ✓ Commit.
-   4. Click Push.
-
-Once pushed, CodePipeline detects the change, rebuilds the Docker image, and redeploys the Lambda.
-
-### Updating Existing Dependencies
-
-1. **Update the version constraint in `requirements.in`:**
-
-   ```
-   # Change from:
-   opensearch-py>=2.8.0
-   # To:
-   opensearch-py>=2.9.0
-   ```
-
-2. **Open Docker Desktop.**
-
-3. **Build the Docker image:**
-
-   ```bash
-   cd cdk/lambda/vectorIndexManagerSigV4
-   docker build -t vectorindexmanager-img .
-   ```
-
-4. **Regenerate `requirements.txt`:**
-
-   ```bash
-   docker run --rm -v ${PWD}:/app -w /app --entrypoint="" vectorindexmanager-img bash -c "
-     pip install pip-tools &&
-     pip-compile requirements.in
-   "
-   ```
-
-5. **Commit and push** the updated `requirements.in` and `requirements.txt` to trigger the CI/CD pipeline.
-
-
+> Always pin to an exact version (`==`) rather than a range (`>=`). Glue 3.0 has a fixed Python 3.9 runtime and dependencies are resolved fresh on each run — unpinned versions can silently introduce regressions if a new release is published between runs.

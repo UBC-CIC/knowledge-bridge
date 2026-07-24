@@ -10,52 +10,23 @@
  * Only authenticated admin users can access these endpoints.
  */
 
-const postgres = require("postgres");
 const { getCorsHeaders } = require("./utils/cors.js");
-const {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} = require("@aws-sdk/client-secrets-manager");
+const { getAuthenticatedUserId, buildAuditEntry } = require("./utils/handlerUtils.js");
 const { GlueClient, StartJobRunCommand, GetJobRunCommand, BatchStopJobRunCommand } = require("@aws-sdk/client-glue");
 const { CloudWatchLogsClient, GetLogEventsCommand, DescribeLogStreamsCommand } = require("@aws-sdk/client-cloudwatch-logs");
 const { SchedulerClient, GetScheduleCommand, CreateScheduleCommand, UpdateScheduleCommand, DeleteScheduleCommand } = require("@aws-sdk/client-scheduler");
 const { SQSClient, SendMessageCommand } = require("@aws-sdk/client-sqs");
+const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { initConnection, getSqlConnection } = require("./initializeConnection.js");
+
+const PRESIGN_TTL = 900; // 15 minutes
 
 const glueClient = new GlueClient({});
 const logsClient = new CloudWatchLogsClient({});
 const schedulerClient = new SchedulerClient({});
 const sqsClient = new SQSClient({});
-
-let sqlConnection;
-const secretsManager = new SecretsManagerClient();
-
-const initConnection = async () => {
-  if (!sqlConnection) {
-    try {
-      const getSecretValueCommand = new GetSecretValueCommand({
-        SecretId: process.env.SM_DB_CREDENTIALS,
-      });
-      const secretResponse = await secretsManager.send(getSecretValueCommand);
-      const credentials = JSON.parse(secretResponse.SecretString);
-
-      const connectionConfig = {
-        host: process.env.RDS_PROXY_ENDPOINT,
-        port: credentials.port,
-        username: credentials.username,
-        password: credentials.password,
-        database: credentials.dbname,
-        ssl: { rejectUnauthorized: true },
-      };
-
-      sqlConnection = postgres(connectionConfig);
-      await sqlConnection`SELECT 1`;
-      console.log("Database connection initialized successfully");
-    } catch (error) {
-      console.error("Error initializing database connection:", error);
-      throw error;
-    }
-  }
-};
+const s3Client = new S3Client({});
 
 const createResponse = async (event) => ({
     statusCode: 200,
@@ -92,7 +63,7 @@ exports.handler = async (event) => {
       console.error("GLUE_JOB_NAME not configured for scheduled invocation");
       return;
     }
-    const inFlight = await sqlConnection`
+    const inFlight = await getSqlConnection()`
       SELECT id FROM ingestion_runs
       WHERE run_type = 'site' AND status IN ('running', 'stopping')
       LIMIT 1
@@ -101,8 +72,15 @@ exports.handler = async (event) => {
       console.log("Scheduled trigger skipped — a job is already in-flight");
       return;
     }
-    const metadataJson = { force_full: forceFull === "true", job_name: jobName, triggered_by: "scheduler" };
-    const inserted = await sqlConnection`
+    const scheduleRow = await getSqlConnection()`SELECT updated_by FROM ingestion_schedule LIMIT 1`;
+    const scheduledByUserId = scheduleRow[0]?.updated_by?.toString() ?? null;
+    const metadataJson = {
+      force_full: forceFull === "true",
+      job_name: jobName,
+      triggered_by: "scheduler",
+      ...(scheduledByUserId ? { triggered_by_user_id: scheduledByUserId } : {}),
+    };
+    const inserted = await getSqlConnection()`
       INSERT INTO ingestion_runs (run_type, triggered_by, status, started_at, metadata)
       VALUES ('site', 'scheduler', 'running', now(), ${JSON.stringify(metadataJson)}::jsonb)
       RETURNING id
@@ -116,7 +94,7 @@ exports.handler = async (event) => {
         "--INGESTION_RUN_ID": ingestionRunId,
       },
     }));
-    await sqlConnection`
+    await getSqlConnection()`
       UPDATE ingestion_runs SET glue_run_id = ${glueResp.JobRunId} WHERE id = ${ingestionRunId}
     `;
     console.log(`Scheduled ingestion started: runId=${ingestionRunId} glueRunId=${glueResp.JobRunId}`);
@@ -163,6 +141,8 @@ exports.handler = async (event) => {
         const userId = body?.user_id;
         const email = (body?.email || "").trim().toLowerCase();
 
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "promote_user", userId)));
+
         if (!userId) {
           response.statusCode = 400;
           response.body = JSON.stringify({ error: "user_id is required" });
@@ -175,7 +155,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const updated = await sqlConnection`
+        const updated = await getSqlConnection()`
           UPDATE users
           SET
             email = ${email},
@@ -205,7 +185,7 @@ exports.handler = async (event) => {
 
       // Fetch all system messages with version history
       case "GET /admin/system-messages": {
-        const rows = await sqlConnection`
+        const rows = await getSqlConnection()`
           SELECT
             sm.id,
             sm.type,
@@ -292,33 +272,18 @@ exports.handler = async (event) => {
           break;
         }
 
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const createdByUserId = getAuthenticatedUserId(event);
+        if (!createdByUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
 
-        // Find admin user id (ensure role is admin)
-        const adminRows = await sqlConnection`
-          SELECT id, email
-          FROM users
-          WHERE email = ${adminEmail}
-          LIMIT 1
-        `;
-
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
-          break;
-        }
-
-
-        const createdByUserId = adminRows[0].id;
+        console.log(JSON.stringify(buildAuditEntry(createdByUserId, "create_system_message", messageType)));
 
         // Create new version, make it active, deactivate old
         try {
-          const created = await sqlConnection.begin(async (tx) => {
+          const created = await getSqlConnection().begin(async (tx) => {
             const [{ next_version }] = await tx`
               SELECT COALESCE(MAX(version), 0) + 1 AS next_version
               FROM system_messages
@@ -427,9 +392,8 @@ exports.handler = async (event) => {
 
       // Delete a non-active system message version
       case "DELETE /admin/system-messages/{system_message_type}/{version_id}": {
-        let body;
         try {
-          body = parseBody(event.body);
+          parseBody(event.body);
         } catch (error) {
           response.statusCode = 400;
           response.body = JSON.stringify({ error: error.message });
@@ -467,30 +431,17 @@ exports.handler = async (event) => {
           break;
         }
 
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const callerUserId = getAuthenticatedUserId(event);
+        if (!callerUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
 
-        // Find admin user id
-        const adminRows = await sqlConnection`
-          SELECT id, email
-          FROM users
-          WHERE email = ${adminEmail}
-          LIMIT 1
-        `;
-
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
-          break;
-        }
-
+        console.log(JSON.stringify(buildAuditEntry(callerUserId, "delete_system_message", versionId, { messageType })));
 
         try {
-          const deleted = await sqlConnection.begin(async (tx) => {
+          const deleted = await getSqlConnection().begin(async (tx) => {
             const targetRows = await tx`
               SELECT id, type, version, is_active
               FROM system_messages
@@ -565,9 +516,8 @@ exports.handler = async (event) => {
 
       // Activate a historical version
       case "POST /admin/system-messages/{system_message_type}/{version_id}/activate": {
-        let body;
         try {
-          body = parseBody(event.body);
+          parseBody(event.body);
         } catch (error) {
           response.statusCode = 400;
           response.body = JSON.stringify({ error: error.message });
@@ -605,30 +555,17 @@ exports.handler = async (event) => {
           break;
         }
 
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const callerUserId = getAuthenticatedUserId(event);
+        if (!callerUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
 
-        // Find admin user id (ensure role is admin)
-        const adminRows = await sqlConnection`
-          SELECT id, email
-          FROM users
-          WHERE email = ${adminEmail}
-          LIMIT 1
-        `;
-
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
-          break;
-        }
-
+        console.log(JSON.stringify(buildAuditEntry(callerUserId, "activate_system_message", versionId, { messageType })));
 
         try {
-          const result = await sqlConnection.begin(async (tx) => {
+          const result = await getSqlConnection().begin(async (tx) => {
             // Lock target row and verify it exists + belongs to specified type
             const targetRows = await tx`
               SELECT id, type, version, is_active
@@ -778,7 +715,7 @@ exports.handler = async (event) => {
 
         // Insert new admin user into database
         // Using postgres library template literal syntax for better performance
-        const result = await sqlConnection`
+        const result = await getSqlConnection()`
           INSERT INTO users (display_name, email, institution_id)
           VALUES (${display_name}, ${email}, ${institution_id || null})
           RETURNING id, display_name, email, institution_id, created_at
@@ -792,111 +729,191 @@ exports.handler = async (event) => {
       // Get analytics data
       case "GET /admin/analytics": {
         const qs = event.queryStringParameters ?? {};
+        const groupId = qs.groupId && qs.groupId !== "all" ? qs.groupId : null;
 
-        // If timeRange is NOT provided, return all-time totals only (no timeSeries)
-        const timeRangeProvided = typeof qs.timeRange === "string" && qs.timeRange.trim().length > 0;
+        // "all" timeRange = no date cutoff; otherwise parse Nd/Nm/Ny
+        const timeRangeParam = typeof qs.timeRange === "string" ? qs.timeRange.trim() : "";
+        const isAllTime = timeRangeParam === "all";
+        const timeRangeProvided = timeRangeParam.length > 0;
 
-        // Helper: compute totals (either all-time or since startDate)
-        const fetchTotals = async (startDateIso /* string | null */) => {
-          if (!startDateIso) {
-            const totalsRows = await sqlConnection`
+        // Resolve startDateIso — null means all-time
+        let startDateIso = null;
+        if (timeRangeProvided && !isAllTime) {
+          let daysBack = 90;
+          const m = timeRangeParam.match(/^(\d+)([dmy])$/);
+          if (m) {
+            const value = parseInt(m[1], 10);
+            const unit = m[2];
+            if (unit === "d") daysBack = value;
+            if (unit === "m") daysBack = value * 30;
+            if (unit === "y") daysBack = value * 365;
+          }
+          daysBack = Math.min(Math.max(1, daysBack), 365);
+          const startDate = new Date();
+          startDate.setDate(startDate.getDate() - daysBack);
+          startDateIso = startDate.toISOString();
+        }
+
+        // Helper: compute totals scoped by optional groupId and optional startDate
+        const fetchTotals = async () => {
+          if (!startDateIso && !groupId) {
+            const rows = await getSqlConnection()`
               SELECT
                 (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs) AS users,
                 (SELECT COUNT(cs.id)::int FROM chat_sessions cs) AS chat_sessions,
                 (SELECT COUNT(cm.id)::int FROM chat_messages cm) AS messages,
                 (SELECT COUNT(cm.id)::int FROM chat_messages cm WHERE cm.sender = 'user') AS questions
             `;
-            return totalsRows[0];
+            return rows[0];
           }
-
-          const totalsRows = await sqlConnection`
+          if (!groupId) {
+            const rows = await getSqlConnection()`
+              SELECT
+                (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs WHERE cs.created_at >= ${startDateIso}) AS users,
+                (SELECT COUNT(cs.id)::int FROM chat_sessions cs WHERE cs.created_at >= ${startDateIso}) AS chat_sessions,
+                (SELECT COUNT(cm.id)::int FROM chat_messages cm WHERE cm.created_at >= ${startDateIso}) AS messages,
+                (SELECT COUNT(cm.id)::int FROM chat_messages cm WHERE cm.created_at >= ${startDateIso} AND cm.sender = 'user') AS questions
+            `;
+            return rows[0];
+          }
+          if (!startDateIso) {
+            const rows = await getSqlConnection()`
+              SELECT
+                (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}) AS users,
+                (SELECT COUNT(cs.id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}) AS chat_sessions,
+                (SELECT COUNT(cm.id)::int FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}) AS messages,
+                (SELECT COUNT(cm.id)::int FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cm.sender = 'user') AS questions
+            `;
+            return rows[0];
+          }
+          const rows = await getSqlConnection()`
             SELECT
-              (SELECT COUNT(DISTINCT cs.user_id)::int
-              FROM chat_sessions cs
-              WHERE cs.created_at >= ${startDateIso}) AS users,
-
-              (SELECT COUNT(cs.id)::int
-              FROM chat_sessions cs
-              WHERE cs.created_at >= ${startDateIso}) AS chat_sessions,
-
-              (SELECT COUNT(cm.id)::int
-              FROM chat_messages cm
-              WHERE cm.created_at >= ${startDateIso}) AS messages,
-
-              (SELECT COUNT(cm.id)::int
-              FROM chat_messages cm
-              WHERE cm.created_at >= ${startDateIso}
-                AND cm.sender = 'user') AS questions
+              (SELECT COUNT(DISTINCT cs.user_id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cs.created_at >= ${startDateIso}) AS users,
+              (SELECT COUNT(cs.id)::int FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cs.created_at >= ${startDateIso}) AS chat_sessions,
+              (SELECT COUNT(cm.id)::int FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cm.created_at >= ${startDateIso}) AS messages,
+              (SELECT COUNT(cm.id)::int FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId} WHERE cm.created_at >= ${startDateIso} AND cm.sender = 'user') AS questions
           `;
-          return totalsRows[0];
+          return rows[0];
         };
 
         if (!timeRangeProvided) {
-          const totals = await fetchTotals(null);
-
+          const totals = await fetchTotals();
           response.statusCode = 200;
           response.body = JSON.stringify({ totals });
           break;
         }
 
-        // time series for provided timeRange (cap 365)
-        const timeRange = qs.timeRange || "90d";
-
-        let daysBack = 90;
-        const m = String(timeRange).match(/^(\d+)([dmy])$/);
-        if (m) {
-          const value = parseInt(m[1], 10);
-          const unit = m[2];
-          if (unit === "d") daysBack = value;
-          if (unit === "m") daysBack = value * 30;
-          if (unit === "y") daysBack = value * 365;
+        // Time series — build dynamically based on groupId and startDateIso
+        let timeSeries;
+        if (!groupId && !startDateIso) {
+          // All time, all groups
+          timeSeries = await getSqlConnection()`
+            WITH date_series AS (
+              SELECT generate_series(
+                DATE_TRUNC('day', (SELECT MIN(created_at) FROM chat_sessions)),
+                DATE_TRUNC('day', NOW()),
+                '1 day'::interval
+              )::date AS date
+            ),
+            daily_chat_sessions AS (
+              SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users
+              FROM chat_sessions cs GROUP BY 1
+            ),
+            daily_questions AS (
+              SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users
+              FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id
+              WHERE cm.sender = 'user' GROUP BY 1
+            )
+            SELECT TO_CHAR(ds.date, 'Mon DD') AS date,
+              COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users,
+              COALESCE(dq.questions, 0)::int AS questions,
+              COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+            FROM date_series ds
+            LEFT JOIN daily_chat_sessions dcs ON ds.date = dcs.date
+            LEFT JOIN daily_questions dq ON ds.date = dq.date
+            ORDER BY ds.date ASC
+          `;
+        } else if (!groupId) {
+          // Date-filtered, all groups
+          timeSeries = await getSqlConnection()`
+            WITH date_series AS (
+              SELECT generate_series(DATE_TRUNC('day', ${startDateIso}::timestamp), DATE_TRUNC('day', NOW()), '1 day'::interval)::date AS date
+            ),
+            daily_chat_sessions AS (
+              SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users
+              FROM chat_sessions cs WHERE cs.created_at >= ${startDateIso} GROUP BY 1
+            ),
+            daily_questions AS (
+              SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users
+              FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id
+              WHERE cm.created_at >= ${startDateIso} AND cm.sender = 'user' GROUP BY 1
+            )
+            SELECT TO_CHAR(ds.date, 'Mon DD') AS date,
+              COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users,
+              COALESCE(dq.questions, 0)::int AS questions,
+              COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+            FROM date_series ds
+            LEFT JOIN daily_chat_sessions dcs ON ds.date = dcs.date
+            LEFT JOIN daily_questions dq ON ds.date = dq.date
+            ORDER BY ds.date ASC
+          `;
+        } else if (!startDateIso) {
+          // All time, specific group
+          timeSeries = await getSqlConnection()`
+            WITH date_series AS (
+              SELECT generate_series(
+                DATE_TRUNC('day', (SELECT MIN(cs.created_at) FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId})),
+                DATE_TRUNC('day', NOW()),
+                '1 day'::interval
+              )::date AS date
+            ),
+            daily_chat_sessions AS (
+              SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users
+              FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}
+              GROUP BY 1
+            ),
+            daily_questions AS (
+              SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users
+              FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}
+              WHERE cm.sender = 'user' GROUP BY 1
+            )
+            SELECT TO_CHAR(ds.date, 'Mon DD') AS date,
+              COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users,
+              COALESCE(dq.questions, 0)::int AS questions,
+              COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+            FROM date_series ds
+            LEFT JOIN daily_chat_sessions dcs ON ds.date = dcs.date
+            LEFT JOIN daily_questions dq ON ds.date = dq.date
+            ORDER BY ds.date ASC
+          `;
+        } else {
+          // Date-filtered, specific group
+          timeSeries = await getSqlConnection()`
+            WITH date_series AS (
+              SELECT generate_series(DATE_TRUNC('day', ${startDateIso}::timestamp), DATE_TRUNC('day', NOW()), '1 day'::interval)::date AS date
+            ),
+            daily_chat_sessions AS (
+              SELECT DATE_TRUNC('day', cs.created_at)::date AS date, COUNT(cs.id)::int AS chat_sessions, COUNT(DISTINCT cs.user_id)::int AS session_users
+              FROM chat_sessions cs JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}
+              WHERE cs.created_at >= ${startDateIso} GROUP BY 1
+            ),
+            daily_questions AS (
+              SELECT DATE_TRUNC('day', cm.created_at)::date AS date, COUNT(cm.id)::int AS questions, COUNT(DISTINCT cs.user_id)::int AS question_users
+              FROM chat_messages cm JOIN chat_sessions cs ON cs.id = cm.chat_session_id JOIN user_memberships um ON um.user_id = cs.user_id AND um.entra_group_id = ${groupId}
+              WHERE cm.created_at >= ${startDateIso} AND cm.sender = 'user' GROUP BY 1
+            )
+            SELECT TO_CHAR(ds.date, 'Mon DD') AS date,
+              COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users,
+              COALESCE(dq.questions, 0)::int AS questions,
+              COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
+            FROM date_series ds
+            LEFT JOIN daily_chat_sessions dcs ON ds.date = dcs.date
+            LEFT JOIN daily_questions dq ON ds.date = dq.date
+            ORDER BY ds.date ASC
+          `;
         }
-        daysBack = Math.min(Math.max(1, daysBack), 365);
 
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - daysBack);
-        const startDateIso = startDate.toISOString();
-
-        const timeSeries = await sqlConnection`
-          WITH date_series AS (
-            SELECT generate_series(
-              DATE_TRUNC('day', ${startDateIso}::timestamp),
-              DATE_TRUNC('day', NOW()),
-              '1 day'::interval
-            )::date AS date
-          ),
-          daily_chat_sessions AS (
-            SELECT
-              DATE_TRUNC('day', cs.created_at)::date AS date,
-              COUNT(cs.id)::int AS chat_sessions,
-              COUNT(DISTINCT cs.user_id)::int AS session_users
-            FROM chat_sessions cs
-            WHERE cs.created_at >= ${startDateIso}
-            GROUP BY DATE_TRUNC('day', cs.created_at)::date
-          ),
-          daily_questions AS (
-            SELECT
-              DATE_TRUNC('day', cm.created_at)::date AS date,
-              COUNT(cm.id)::int AS questions,
-              COUNT(DISTINCT cs.user_id)::int AS question_users
-            FROM chat_messages cm
-            JOIN chat_sessions cs ON cs.id = cm.chat_session_id
-            WHERE cm.created_at >= ${startDateIso}
-              AND cm.sender = 'user'
-            GROUP BY DATE_TRUNC('day', cm.created_at)::date
-          )
-          SELECT
-            TO_CHAR(ds.date, 'Mon DD') AS date,
-            COALESCE(GREATEST(dcs.session_users, dq.question_users), 0)::int AS users,
-            COALESCE(dq.questions, 0)::int AS questions,
-            COALESCE(dcs.chat_sessions, 0)::int AS chat_sessions
-          FROM date_series ds
-          LEFT JOIN daily_chat_sessions dcs ON ds.date = dcs.date
-          LEFT JOIN daily_questions dq ON ds.date = dq.date
-          ORDER BY ds.date ASC
-        `;
-
-        const totals = await fetchTotals(startDateIso);
+        const totals = await fetchTotals();
 
         response.statusCode = 200;
         response.body = JSON.stringify({ timeSeries, totals });
@@ -905,7 +922,7 @@ exports.handler = async (event) => {
 
       // Fetch latest system settings
       case "GET /admin/system-settings": {
-        const rows = await sqlConnection`
+        const rows = await getSqlConnection()`
           WITH latest AS (
             SELECT *
             FROM system_settings
@@ -958,7 +975,7 @@ exports.handler = async (event) => {
           const limit = Math.min(parseInt(qs.limit ?? "20", 10), 50);
           const offset = Math.max(parseInt(qs.offset ?? "0", 10), 0);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT
               eg.id,
               eg.display_name,
@@ -970,7 +987,7 @@ exports.handler = async (event) => {
             LIMIT ${limit} OFFSET ${offset}
           `;
 
-          const [{ total }] = await sqlConnection`
+          const [{ total }] = await getSqlConnection()`
             SELECT COUNT(*)::int AS total FROM entra_groups
           `;
 
@@ -999,7 +1016,7 @@ exports.handler = async (event) => {
           const limit = Math.min(parseInt(qs.limit ?? "10", 10), 50);
           const offset = Math.max(parseInt(qs.offset ?? "0", 10), 0);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT
               u.id,
               u.email,
@@ -1012,7 +1029,7 @@ exports.handler = async (event) => {
             LIMIT ${limit} OFFSET ${offset}
           `;
 
-          const [{ total }] = await sqlConnection`
+          const [{ total }] = await getSqlConnection()`
             SELECT COUNT(*)::int AS total
             FROM user_memberships
             WHERE entra_group_id = ${groupId}
@@ -1036,7 +1053,7 @@ exports.handler = async (event) => {
           const limit = Math.min(parseInt(qs.limit ?? "10", 10), 50);
           const offset = Math.max(parseInt(qs.offset ?? "0", 10), 0);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT u.id, u.email, u.display_name, u.last_seen_at
             FROM users u
             WHERE NOT EXISTS (
@@ -1046,7 +1063,7 @@ exports.handler = async (event) => {
             LIMIT ${limit} OFFSET ${offset}
           `;
 
-          const [{ total }] = await sqlConnection`
+          const [{ total }] = await getSqlConnection()`
             SELECT COUNT(*)::int AS total
             FROM users u
             WHERE NOT EXISTS (
@@ -1072,7 +1089,7 @@ exports.handler = async (event) => {
           const limit = Math.min(parseInt(qs.limit ?? "50", 10), 100); // cap limit to 100
           const offset = parseInt(qs.offset ?? "0", 10);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT id, email, display_name, created_at, last_seen_at
             FROM users
             ORDER BY COALESCE(last_seen_at, created_at) DESC
@@ -1104,7 +1121,7 @@ exports.handler = async (event) => {
           const limit = parseInt(qs.limit ?? "50", 10);
           const offset = parseInt(qs.offset ?? "0", 10);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
             SELECT id, user_id, title, created_at, last_active_at
             FROM chat_sessions
             WHERE user_id = ${userId}
@@ -1137,7 +1154,7 @@ exports.handler = async (event) => {
           const limit = parseInt(qs.limit ?? "200", 10);
           const offset = parseInt(qs.offset ?? "0", 10);
 
-          const rows = await sqlConnection`
+          const rows = await getSqlConnection()`
              SELECT
                m.id,
                m.chat_session_id,
@@ -1224,12 +1241,14 @@ exports.handler = async (event) => {
         }
 
         // validate user
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const adminUserId = getAuthenticatedUserId(event);
+        if (!adminUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
+
+        console.log(JSON.stringify(buildAuditEntry(adminUserId, "update_system_settings", null, { patch })));
 
         if (
           patch.max_messages_per_day !== undefined &&
@@ -1331,24 +1350,10 @@ exports.handler = async (event) => {
         }
 
         // get admin user ID and confirm role
-        const adminRows = await sqlConnection`
-          SELECT id
-          FROM users
-          WHERE email = ${adminEmail}
-          LIMIT 1
-        `;
-
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
-          break;
-        }
-
-
-        const updatedByUserId = adminRows[0].id;
+        const updatedByUserId = adminUserId;
 
         // Single UPDATE of the latest row (no â€œensure row existsâ€ step)
-        const updated = await sqlConnection`
+        const updated = await getSqlConnection()`
           WITH latest AS (
             SELECT id
             FROM system_settings
@@ -1406,6 +1411,7 @@ exports.handler = async (event) => {
       case "POST /admin/ingestion/trigger": {
         let body = {};
         try { body = parseBody(event.body); } catch (_) {}
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "trigger_ingestion")));
         const forceFull = body?.force_full === true ? "true" : "false";
         const jobName = process.env.GLUE_JOB_NAME;
         if (!jobName) {
@@ -1415,7 +1421,7 @@ exports.handler = async (event) => {
         }
 
         // Block if a run is already in-flight (status check against DB)
-        const inFlight = await sqlConnection`
+        const inFlight = await getSqlConnection()`
           SELECT id FROM ingestion_runs
           WHERE run_type = 'site' AND status IN ('running', 'stopping')
           LIMIT 1
@@ -1427,16 +1433,13 @@ exports.handler = async (event) => {
         }
 
         // Insert the DB row first to get its UUID, then start Glue passing that UUID
-        const ingestionAdminEmail = event.requestContext?.authorizer?.email;
-        const ingestionAdminRows = ingestionAdminEmail
-          ? await sqlConnection`SELECT id FROM users WHERE email = ${ingestionAdminEmail} LIMIT 1`
-          : [];
+        const ingestionAdminRows = [{ id: getAuthenticatedUserId(event) }].filter(r => r.id);
         const metadataJson = {
           force_full: forceFull === "true",
           job_name: jobName,
           ...(ingestionAdminRows[0] ? { triggered_by_user_id: ingestionAdminRows[0].id.toString() } : {}),
         };
-        const inserted = await sqlConnection`
+        const inserted = await getSqlConnection()`
           INSERT INTO ingestion_runs (run_type, triggered_by, status, started_at, metadata)
           VALUES ('site', 'manual', 'running', now(), ${JSON.stringify(metadataJson)}::jsonb)
           RETURNING id
@@ -1454,7 +1457,7 @@ exports.handler = async (event) => {
         const glueRunId = glueResp.JobRunId;
 
         // Store the glue run ID back on the row
-        await sqlConnection`
+        await getSqlConnection()`
           UPDATE ingestion_runs SET glue_run_id = ${glueRunId} WHERE id = ${ingestionRunId}
         `;
 
@@ -1464,6 +1467,7 @@ exports.handler = async (event) => {
 
       // POST /admin/ingestion/stop — request cancellation of the active Glue job run
       case "POST /admin/ingestion/stop": {
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "stop_ingestion")));
         const jobName = process.env.GLUE_JOB_NAME;
         if (!jobName) {
           response.statusCode = 500;
@@ -1471,7 +1475,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const activeRuns = await sqlConnection`
+        const activeRuns = await getSqlConnection()`
           SELECT id, glue_run_id FROM ingestion_runs
           WHERE run_type = 'site' AND status = 'running'
           LIMIT 1
@@ -1491,7 +1495,7 @@ exports.handler = async (event) => {
           }));
         }
 
-        await sqlConnection`
+        await getSqlConnection()`
           UPDATE ingestion_runs SET status = 'stopping' WHERE id = ${runId}
         `;
 
@@ -1507,7 +1511,7 @@ exports.handler = async (event) => {
 
         // Reconcile any 'stopping' rows: if Glue reports the run is no longer running, mark stopped
         if (jobName) {
-          const stoppingRows = await sqlConnection`
+          const stoppingRows = await getSqlConnection()`
             SELECT id, glue_run_id FROM ingestion_runs
             WHERE run_type = 'site' AND status = 'stopping' AND glue_run_id IS NOT NULL
           `;
@@ -1517,7 +1521,7 @@ exports.handler = async (event) => {
               const glueState = jr.JobRun?.JobRunState;
               console.log(`Reconcile stopping run ${row.id}: Glue state=${glueState}`);
               if (glueState && !["RUNNING", "STARTING", "STOPPING"].includes(glueState)) {
-                await sqlConnection`
+                await getSqlConnection()`
                   UPDATE ingestion_runs
                   SET status = 'stopped', finished_at = now()
                   WHERE id = ${row.id}
@@ -1529,11 +1533,11 @@ exports.handler = async (event) => {
           }
         }
 
-        const [{ count: totalCount }] = await sqlConnection`
+        const [{ count: totalCount }] = await getSqlConnection()`
           SELECT COUNT(*) FROM ingestion_runs WHERE run_type = 'site'
         `;
 
-        const runs = await sqlConnection`
+        const runs = await getSqlConnection()`
           SELECT
             id, glue_run_id, run_type, triggered_by, status,
             started_at, finished_at,
@@ -1610,7 +1614,7 @@ exports.handler = async (event) => {
           const cron = rawExpr.replace(/^cron\(/, "").replace(/\)$/, "");
 
           // Fetch last-updated metadata from DB
-          const [meta] = await sqlConnection`
+          const [meta] = await getSqlConnection()`
             SELECT u.email AS updated_by_email, s.updated_at
             FROM ingestion_schedule s
             LEFT JOIN users u ON u.id = s.updated_by
@@ -1655,6 +1659,7 @@ exports.handler = async (event) => {
           response.body = JSON.stringify({ error: "cron and timezone are required" });
           break;
         }
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "update_ingestion_schedule", null, { cron, timezone, enabled, force_full })));
 
         const scheduleParams = {
           Name: scheduleName,
@@ -1682,18 +1687,15 @@ exports.handler = async (event) => {
           }
         }
 
-        // Resolve caller's user ID from email
-        const adminEmail = event.requestContext?.authorizer?.email;
-        const userRows = adminEmail ? await sqlConnection`SELECT id FROM users WHERE email = ${adminEmail} LIMIT 1` : [];
-        const updatedByUserId = userRows[0]?.id ?? null;
+        const updatedByUserId = getAuthenticatedUserId(event);
 
         // Upsert single row in ingestion_schedule
-        await sqlConnection`
+        await getSqlConnection()`
           INSERT INTO ingestion_schedule (cron, timezone, enabled, force_full, updated_by, updated_at)
           VALUES (${cron}, ${timezone}, ${enabled !== false}, ${force_full === true}, ${updatedByUserId}, now())
           ON CONFLICT DO NOTHING
         `;
-        await sqlConnection`
+        await getSqlConnection()`
           UPDATE ingestion_schedule
           SET cron = ${cron}, timezone = ${timezone}, enabled = ${enabled !== false},
               force_full = ${force_full === true}, updated_by = ${updatedByUserId}, updated_at = now()
@@ -1711,6 +1713,7 @@ exports.handler = async (event) => {
 
       // DELETE /admin/ingestion/schedule — remove the EventBridge schedule
       case "DELETE /admin/ingestion/schedule": {
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "delete_ingestion_schedule")));
         const scheduleName = process.env.SCHEDULE_NAME;
         if (!scheduleName) {
           response.statusCode = 500;
@@ -1719,7 +1722,7 @@ exports.handler = async (event) => {
         }
         try {
           await schedulerClient.send(new DeleteScheduleCommand({ Name: scheduleName }));
-          await sqlConnection`DELETE FROM ingestion_schedule`;
+          await getSqlConnection()`DELETE FROM ingestion_schedule`;
           response.body = JSON.stringify({ deleted: true });
         } catch (err) {
           if (err.name === "ResourceNotFoundException") {
@@ -1738,9 +1741,10 @@ exports.handler = async (event) => {
         try { body = parseBody(event.body); } catch (_) {}
 
         const scope = body?.scope;
-        if (!['all', 'group', 'user'].includes(scope)) {
+        console.log(JSON.stringify(buildAuditEntry(getAuthenticatedUserId(event), "trigger_export", null, { scope, scope_id: body?.scope_id ?? null })));
+        if (!['all', 'group', 'user', 'analytics'].includes(scope)) {
           response.statusCode = 400;
-          response.body = JSON.stringify({ error: "scope must be 'all', 'group', or 'user'" });
+          response.body = JSON.stringify({ error: "scope must be 'all', 'group', 'user', or 'analytics'" });
           break;
         }
         if ((scope === 'group' || scope === 'user') && !body?.scope_id) {
@@ -1749,26 +1753,22 @@ exports.handler = async (event) => {
           break;
         }
 
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const exportAdminUserId = getAuthenticatedUserId(event);
+        if (!exportAdminUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
 
-        const adminRows = await sqlConnection`
-          SELECT id FROM users WHERE email = ${adminEmail} LIMIT 1
-        `;
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
-          break;
-        }
-        const adminUserId = adminRows[0].id;
+        const exportMetadata = scope === 'analytics'
+          ? { groupId: body?.groupId ?? null, timeRange: body?.timeRange ?? null }
+          : null;
 
-        const inserted = await sqlConnection`
-          INSERT INTO export_runs (requested_by, status, scope, scope_id)
-          VALUES (${adminUserId}::uuid, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null}::uuid)
+        const exportTypeValue = scope === 'analytics' ? 'analytics' : 'chat';
+
+        const inserted = await getSqlConnection()`
+          INSERT INTO export_runs (requested_by, status, scope, scope_id, metadata, export_type)
+          VALUES (${exportAdminUserId}::uuid, 'pending', ${scope}::export_scope, ${body?.scope_id ?? null}::uuid, ${exportMetadata}::jsonb, ${exportTypeValue}::export_type)
           RETURNING id::text
         `;
         const exportRunId = inserted[0].id;
@@ -1778,7 +1778,7 @@ exports.handler = async (event) => {
           MessageBody: JSON.stringify({ exportRunId }),
         }));
 
-        await sqlConnection`
+        await getSqlConnection()`
           UPDATE export_runs SET status = 'processing' WHERE id = ${exportRunId}
         `;
 
@@ -1789,54 +1789,90 @@ exports.handler = async (event) => {
 
       // GET /admin/export/runs — list export jobs for the current admin
       case "GET /admin/export/runs": {
-        const adminEmail = event.requestContext?.authorizer?.email;
-        if (!adminEmail) {
+        const adminUserId = getAuthenticatedUserId(event);
+        if (!adminUserId) {
           response.statusCode = 401;
           response.body = JSON.stringify({ error: "Unauthorized" });
           break;
         }
 
-        const adminRows = await sqlConnection`
-          SELECT id FROM users WHERE email = ${adminEmail} LIMIT 1
-        `;
-        if (adminRows.length === 0) {
-          response.statusCode = 404;
-          response.body = JSON.stringify({ error: "Admin user not found" });
-          break;
-        }
-        const adminUserId = adminRows[0].id;
-
         const qs = event.queryStringParameters ?? {};
         const limit = 10;
         const offset = Math.max(parseInt(qs.offset ?? '0', 10), 0);
+        const exportTypeFilter = ['chat', 'analytics'].includes(qs.export_type) ? qs.export_type : null;
 
-        const runs = await sqlConnection`
+        const rawRuns = await getSqlConnection()`
           SELECT
             er.id,
             er.status,
             er.scope,
-            er.scope_id,
-            er.presigned_url,
-            er.url_expires_at,
+            er.export_type,
+            er.metadata,
+            er.s3_key,
             er.error_message,
-            er.row_count,
             er.requested_at,
             er.completed_at,
             CASE
               WHEN er.scope::text = 'group' THEN eg.display_name
               WHEN er.scope::text = 'user'  THEN u2.email
-              ELSE 'All Chats'
-            END AS scope_label
+              ELSE NULL
+            END AS _scope_base,
+            CASE
+              WHEN er.scope::text = 'analytics' AND jsonb_typeof(er.metadata->'groupId') = 'array' THEN (
+                SELECT STRING_AGG(eg2.display_name, ', ' ORDER BY eg2.display_name)
+                FROM jsonb_array_elements_text(er.metadata->'groupId') AS gid
+                JOIN entra_groups eg2 ON eg2.id::text = gid
+              )
+              WHEN er.scope::text = 'analytics' THEN eg_meta.display_name
+              ELSE NULL
+            END AS _meta_group_name
           FROM export_runs er
-          LEFT JOIN entra_groups eg ON eg.id = er.scope_id::text AND er.scope::text = 'group'
-          LEFT JOIN users u2        ON u2.id = er.scope_id AND er.scope::text = 'user'
+          LEFT JOIN entra_groups eg      ON eg.id = er.scope_id::text AND er.scope::text = 'group'
+          LEFT JOIN users u2             ON u2.id = er.scope_id AND er.scope::text = 'user'
+          LEFT JOIN entra_groups eg_meta ON eg_meta.id::text = (er.metadata->>'groupId') AND er.scope::text = 'analytics' AND jsonb_typeof(er.metadata->'groupId') = 'string'
           WHERE er.requested_by = ${adminUserId}
+          ${exportTypeFilter ? getSqlConnection()`AND er.export_type = ${exportTypeFilter}::export_type` : getSqlConnection()``}
           ORDER BY er.requested_at DESC
           LIMIT ${limit} OFFSET ${offset}
         `;
 
-        const [{ total }] = await sqlConnection`
-          SELECT COUNT(*)::int AS total FROM export_runs WHERE requested_by = ${adminUserId}
+        const runs = await Promise.all(rawRuns.map(async (r) => {
+          const meta = (typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata) ?? {};
+          let scope_label;
+          if (r.scope === 'analytics') {
+            const groupPart = r._meta_group_name ?? 'All groups';
+            const timePart = meta.timeRange === 'all' ? 'All time'
+              : meta.timeRange ? `Last ${meta.timeRange}` : null;
+            scope_label = [groupPart, timePart].filter(Boolean).join(' · ');
+          } else if (r.scope === 'all') {
+            scope_label = 'All chats';
+          } else {
+            scope_label = r._scope_base ?? r.scope;
+          }
+          const { _scope_base, _meta_group_name, metadata, s3_key, ...rest } = r;
+
+          const EXPORT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+          const url_expires_at = r.completed_at
+            ? new Date(new Date(r.completed_at).getTime() + EXPORT_TTL_MS).toISOString()
+            : null;
+          const linkExpired = url_expires_at ? new Date(url_expires_at) < new Date() : false;
+
+          let presigned_url = null;
+          if (r.status === 'completed' && s3_key && !linkExpired) {
+            presigned_url = await getSignedUrl(
+              s3Client,
+              new GetObjectCommand({ Bucket: process.env.EXPORT_BUCKET_NAME, Key: s3_key }),
+              { expiresIn: PRESIGN_TTL }
+            );
+          }
+
+          return { ...rest, scope_label, presigned_url, url_expires_at };
+        }));
+
+        const [{ total }] = await getSqlConnection()`
+          SELECT COUNT(*)::int AS total FROM export_runs
+          WHERE requested_by = ${adminUserId}
+          ${exportTypeFilter ? getSqlConnection()`AND export_type = ${exportTypeFilter}::export_type` : getSqlConnection()``}
         `;
 
         response.statusCode = 200;
@@ -1846,20 +1882,17 @@ exports.handler = async (event) => {
 
       // GET /admin/notifications — list notifications for the current admin
       case "GET /admin/notifications": {
-        const notifEmail = event.requestContext?.authorizer?.email;
-        if (!notifEmail) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
-        const notifUserRows = await sqlConnection`SELECT id FROM users WHERE email = ${notifEmail} LIMIT 1`;
-        if (!notifUserRows.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "User not found" }); break; }
-        const notifUserId = notifUserRows[0].id.toString();
+        const notifUserId = getAuthenticatedUserId(event);
+        if (!notifUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
-        const notifications = await sqlConnection`
+        const notifications = await getSqlConnection()`
           SELECT id::text, type::text, title, message, metadata, created_at
           FROM notifications
           WHERE user_id::text = ${notifUserId}
           ORDER BY created_at DESC
           LIMIT 20
         `;
-        const [{ total: notifTotal }] = await sqlConnection`
+        const [{ total: notifTotal }] = await getSqlConnection()`
           SELECT COUNT(*)::int AS total FROM notifications WHERE user_id::text = ${notifUserId}
         `;
         response.statusCode = 200;
@@ -1869,13 +1902,10 @@ exports.handler = async (event) => {
 
       // DELETE /admin/notifications — clear all notifications for the current admin
       case "DELETE /admin/notifications": {
-        const clearEmail = event.requestContext?.authorizer?.email;
-        if (!clearEmail) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
-        const clearUserRows = await sqlConnection`SELECT id FROM users WHERE email = ${clearEmail} LIMIT 1`;
-        if (!clearUserRows.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "User not found" }); break; }
-        const clearUserId = clearUserRows[0].id.toString();
+        const clearUserId = getAuthenticatedUserId(event);
+        if (!clearUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
-        await sqlConnection`DELETE FROM notifications WHERE user_id::text = ${clearUserId}`;
+        await getSqlConnection()`DELETE FROM notifications WHERE user_id::text = ${clearUserId}`;
         response.statusCode = 200;
         response.body = JSON.stringify({ success: true });
         break;
@@ -1883,16 +1913,13 @@ exports.handler = async (event) => {
 
       // DELETE /admin/notifications/{notification_id} — dismiss a single notification
       case "DELETE /admin/notifications/{notification_id}": {
-        const dismissEmail = event.requestContext?.authorizer?.email;
-        if (!dismissEmail) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
-        const dismissUserRows = await sqlConnection`SELECT id FROM users WHERE email = ${dismissEmail} LIMIT 1`;
-        if (!dismissUserRows.length) { response.statusCode = 404; response.body = JSON.stringify({ error: "User not found" }); break; }
-        const dismissUserId = dismissUserRows[0].id.toString();
+        const dismissUserId = getAuthenticatedUserId(event);
+        if (!dismissUserId) { response.statusCode = 401; response.body = JSON.stringify({ error: "Unauthorized" }); break; }
 
         const notificationId = event.pathParameters?.notification_id;
         if (!notificationId) { response.statusCode = 400; response.body = JSON.stringify({ error: "notification_id required" }); break; }
 
-        const deleted = await sqlConnection`
+        const deleted = await getSqlConnection()`
           DELETE FROM notifications
           WHERE id::text = ${notificationId} AND user_id::text = ${dismissUserId}
           RETURNING id::text
@@ -1911,8 +1938,12 @@ exports.handler = async (event) => {
           const feedbackTo = feedbackQs.to || null;
           const feedbackLimit = Math.min(parseInt(feedbackQs.limit ?? "5", 10), 200);
           const feedbackOffset = parseInt(feedbackQs.offset ?? "0", 10);
+          const VALID_CATEGORIES = ["Not helpful", "Inaccurate", "Off-topic", "Other"];
+          const feedbackCategory = feedbackQs.category && VALID_CATEGORIES.includes(feedbackQs.category)
+            ? feedbackQs.category
+            : null;
 
-          const feedbackRows = await sqlConnection`
+          const feedbackRows = await getSqlConnection()`
             SELECT
               mr.id::text,
               mr.is_positive,
@@ -1941,6 +1972,7 @@ exports.handler = async (event) => {
             WHERE mr.is_positive = false
               AND (${feedbackFrom}::timestamptz IS NULL OR mr.created_at >= ${feedbackFrom}::timestamptz)
               AND (${feedbackTo}::timestamptz IS NULL OR mr.created_at <= ${feedbackTo}::timestamptz)
+              AND (${feedbackCategory}::feedback_category IS NULL OR mr.category = ${feedbackCategory}::feedback_category)
             ORDER BY mr.created_at DESC
             LIMIT ${feedbackLimit} OFFSET ${feedbackOffset}
           `;
@@ -1965,7 +1997,7 @@ exports.handler = async (event) => {
           const summaryFrom = summaryQs.from || null;
           const summaryTo = summaryQs.to || null;
 
-          const dislikeTrend = await sqlConnection`
+          const dislikeTrend = await getSqlConnection()`
             SELECT date_trunc('day', mr.created_at)::date::text AS day, COUNT(*)::int AS count
             FROM message_ratings mr
             WHERE mr.is_positive = false
@@ -1974,7 +2006,7 @@ exports.handler = async (event) => {
             GROUP BY 1 ORDER BY 1
           `;
 
-          const likeTrend = await sqlConnection`
+          const likeTrend = await getSqlConnection()`
             SELECT date_trunc('day', mr.created_at)::date::text AS day, COUNT(*)::int AS count
             FROM message_ratings mr
             WHERE mr.is_positive = true
@@ -1992,7 +2024,7 @@ exports.handler = async (event) => {
           });
           const trend = Object.values(dayMap).sort((a, b) => a.day.localeCompare(b.day));
 
-          const categoryCounts = await sqlConnection`
+          const categoryCounts = await getSqlConnection()`
             SELECT
               mr.category::text AS category,
               COUNT(*)::int AS count
@@ -2003,14 +2035,14 @@ exports.handler = async (event) => {
             GROUP BY 1
           `;
 
-          const totalLikes = await sqlConnection`
+          const totalLikes = await getSqlConnection()`
             SELECT COUNT(*)::int AS count FROM message_ratings mr
             WHERE mr.is_positive = true
               AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
               AND (${summaryTo}::timestamptz IS NULL OR mr.created_at <= ${summaryTo}::timestamptz)
           `;
 
-          const totalDislikes = await sqlConnection`
+          const totalDislikes = await getSqlConnection()`
             SELECT COUNT(*)::int AS count FROM message_ratings mr
             WHERE mr.is_positive = false
               AND (${summaryFrom}::timestamptz IS NULL OR mr.created_at >= ${summaryFrom}::timestamptz)
@@ -2052,9 +2084,5 @@ exports.handler = async (event) => {
     }
   }
 
-  // Log response for debugging (visible in AWS CloudWatch Logs)
-  console.log(response);
-
-  // Return HTTP response to API Gateway, which forwards it to the client
   return response;
 };

@@ -1,11 +1,20 @@
 import * as cdk from "aws-cdk-lib";
-import * as glue from "aws-cdk-lib/aws-glue";
+import * as glue from "@aws-cdk/aws-glue-alpha";
 import * as iam from "aws-cdk-lib/aws-iam";
-import * as ec2 from "aws-cdk-lib/aws-ec2";
-import * as s3assets from "aws-cdk-lib/aws-s3-assets";
 import { Construct } from "constructs";
 import { VpcStack } from "./vpc-stack";
 import { DatabaseStack } from "./database-stack";
+
+// Read requirements.txt at synth time and convert to comma-separated string
+// for --additional-python-modules (Python Shell on Glue 3.0 does not support
+// the native -r installer option — that requires Glue 5.0 + Python 3.11).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const additionalModules: string = (require("fs") as typeof import("fs"))
+  .readFileSync("./glue/requirements.txt", "utf-8")
+  .split("\n")
+  .map((l: string) => l.trim())
+  .filter((l: string) => l && !l.startsWith("#"))
+  .join(",");
 
 export class GlueStack extends cdk.Stack {
   public readonly jobName: string;
@@ -19,23 +28,9 @@ export class GlueStack extends cdk.Stack {
   ) {
     super(scope, id, props);
 
-    const scriptAsset = new s3assets.Asset(this, "GlueScriptAsset", {
-      path: "./glue/sharepoint_ingestion.py",
-    });
-
-    // Security group for the Glue job — allows all outbound (NAT handles internet)
-    const glueSecurityGroup = new ec2.SecurityGroup(this, `${id}-GlueSG`, {
-      vpc: vpcStack.vpc,
-      description: "Security group for Glue SharePoint ingestion job",
-      allowAllOutbound: true,
-    });
-
-    // Glue requires a self-referencing rule for VPC connections
-    glueSecurityGroup.addIngressRule(
-      glueSecurityGroup,
-      ec2.Port.allTcp(),
-      "Glue self-referencing rule"
-    );
+    // Glue SG is owned by VpcStack so DatabaseStack can reference it without
+    // creating a cross-stack cycle (GlueStack → DatabaseStack already exists).
+    const glueSecurityGroup = vpcStack.glueSecurityGroup;
 
     // IAM role for the Glue job — least privilege
     const glueRole = new iam.Role(this, `${id}-GlueJobRole`, {
@@ -69,7 +64,7 @@ export class GlueStack extends cdk.Stack {
       ],
     }));
 
-    // VPC / ENI
+    // VPC / ENI — required by Glue VPC connections
     glueRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
@@ -90,47 +85,39 @@ export class GlueStack extends cdk.Stack {
       resources: [`arn:aws:logs:${this.region}:${this.account}:log-group:/aws-glue/*`],
     }));
 
-    // S3
-    scriptAsset.grantRead(glueRole);
+    // S3 — glue assets bucket
     glueRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
       resources: [`arn:aws:s3:::aws-glue-assets-${this.account}-${this.region}/*`],
     }));
 
-    dbStack.secretPathUser.grantRead(glueRole);
+    const privateSubnet = vpcStack.vpc.privateSubnets[0];
+    const connectionName = `${id}-VpcConnection-v2`;
 
     // Glue VPC connection — uses private-with-egress subnet so NAT is available
     // for Microsoft Graph API calls while still being able to reach RDS Proxy
-    const privateSubnet = vpcStack.vpc.privateSubnets[0];
-    const connectionName = `${id}-VpcConnection`;
-
-    const glueConnection = new glue.CfnConnection(this, `${id}-GlueConnection`, {
-      catalogId: this.account,
-      connectionInput: {
-        name: connectionName,
-        connectionType: "NETWORK",
-        physicalConnectionRequirements: {
-          subnetId: privateSubnet.subnetId,
-          securityGroupIdList: [glueSecurityGroup.securityGroupId],
-          availabilityZone: privateSubnet.availabilityZone,
-        },
-      },
+    const glueConnection = new glue.Connection(this, `${id}-GlueConnection`, {
+      connectionName,
+      type: glue.ConnectionType.NETWORK,
+      subnet: privateSubnet,
+      securityGroups: [glueSecurityGroup],
     });
+    (glueConnection.node.defaultChild as cdk.CfnResource).overrideLogicalId("KBAGlueGlueConnection");
 
-    this.jobName = `${id}-SharePointIngestion`;
+    this.jobName = `${id}-SharePointIngestion-v2`;
 
-    const glueJob = new glue.CfnJob(this, `${id}-GlueJob`, {
-      name: this.jobName,
-      role: glueRole.roleArn,
-      command: {
-        name: "pythonshell",
-        pythonVersion: "3.9",
-        scriptLocation: scriptAsset.s3ObjectUrl,
-      },
-      connections: {
-        connections: [connectionName],
-      },
+    const glueJob = new glue.PythonShellJob(this, `${id}-GlueJob`, {
+      jobName: this.jobName,
+      role: glueRole,
+      script: glue.Code.fromAsset("./glue/sharepoint_ingestion.py"),
+      glueVersion: glue.GlueVersion.V3_0,
+      pythonVersion: glue.PythonVersion.THREE_NINE,
+      maxCapacity: glue.MaxCapacity.DPU_1_16TH,
+      connections: [glueConnection],
+      maxRetries: 1,
+      timeout: cdk.Duration.minutes(120),
+      maxConcurrentRuns: 1,
       defaultArguments: {
         "--SHAREPOINT_SECRET_NAME": "KBA-SharePoint-Credentials",
         "--SHAREPOINT_CERT_SECRET": "Sharepoint-REST-Cert-Pfx-B64",
@@ -139,20 +126,14 @@ export class GlueStack extends cdk.Stack {
         "--RDS_PROXY_ENDPOINT": dbStack.rdsProxyEndpoint,
         "--FORCE_FULL": "false",
         "--TRIGGERED_BY": "manual",
-        "--additional-python-modules": "boto3==1.34.0,botocore==1.34.0,azure-identity==1.21.0,msgraph-sdk==1.27.0,psycopg2-binary==2.9.9,httpx==0.27.0,requests==2.32.3",
+        "--additional-python-modules": additionalModules,
         "--enable-continuous-cloudwatch-log": "true",
         "--enable-continuous-log-filter": "false",
       },
-      maxCapacity: 1,
-      maxRetries: 0,
-      timeout: 120,
-      executionProperty: {
-        maxConcurrentRuns: 1,
-      },
-      glueVersion: "3.0",
     });
 
-    glueJob.addDependency(glueConnection);
+    (glueJob.node.defaultChild as cdk.CfnResource).overrideLogicalId("KBAGlueGlueJob");
+    glueJob.node.addDependency(glueConnection);
 
     new cdk.CfnOutput(this, "GlueJobName", {
       value: this.jobName,

@@ -24,7 +24,6 @@ type ChatSessionActionsMenuProps = {
   chatSessionId: string;
   chatSessionName: string;
   displayName: string;
-  userId: string;
   isActive: boolean;
   onDeleted: () => void;
 };
@@ -33,7 +32,6 @@ export default function ChatSessionActionsMenu({
   chatSessionId,
   chatSessionName,
   displayName,
-  userId,
   isActive,
   onDeleted,
 }: ChatSessionActionsMenuProps) {
@@ -116,10 +114,9 @@ export default function ChatSessionActionsMenu({
     try {
       const token = await AuthService.getIdToken();
 
-      const url = new URL(`${import.meta.env.VITE_API_ENDPOINT}/chat_sessions/${chatSessionId}`);
-      url.searchParams.set("user_id", userId);
+      const url = `${import.meta.env.VITE_API_ENDPOINT}/chat_sessions/${chatSessionId}`;
 
-      const response = await fetch(url.toString(), {
+      const response = await fetch(url, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,

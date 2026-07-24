@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
 
 const DEFAULT_WELCOME_MESSAGE =
-  "Together we will try to find the right program for you. Click below to start a new conversation:";
+  "Welcome to the CUCCIO Knowledge Base Assistant. Click below to start a new conversation.";
 const DEFAULT_DISCLAIMER = "AI can make mistakes. Check important info.";
 
 export default function HomePage() {
@@ -126,7 +126,7 @@ export default function HomePage() {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ user_sessions_session_id: userId }),
+          body: JSON.stringify({}),
         }
       );
       if (!createResponse.ok) throw new Error("Failed to create chat session");
@@ -167,9 +167,8 @@ export default function HomePage() {
 
     try {
       const token = await getToken();
-      const url = new URL(`${import.meta.env.VITE_API_ENDPOINT}/chat_sessions/${sessionId}`);
-      url.searchParams.set("user_id", userId);
-      const response = await fetch(url.toString(), {
+      const url = `${import.meta.env.VITE_API_ENDPOINT}/chat_sessions/${sessionId}`;
+      const response = await fetch(url, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -243,7 +242,7 @@ export default function HomePage() {
               {!activeChatSessionId ? (
                 <div className="w-full max-w-2xl text-center">
                   <h1 className="text-3xl md:text-4xl font-bold mb-4 leading-tight">
-                    Welcome to CUCCIO Assistant!
+                    CUCCIO Assistant
                   </h1>
                   <p className="text-base md:text-lg text-muted-foreground mb-8 whitespace-pre-line">
                     {isLoadingWelcome ? "Loading..." : welcomeMessage}
@@ -270,3 +269,5 @@ export default function HomePage() {
     </ViewProvider>
   );
 }
+
+

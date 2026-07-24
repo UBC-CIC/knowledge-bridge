@@ -16,12 +16,12 @@ type MaxCharactersResponse = {
 
 const DEFAULT_MAX_CHARACTERS_PER_USER_MESSAGE = 50000;
 
-const WELCOME_PROMPT = `Hello! Please act as the Specialization Explorer.
+const WELCOME_PROMPT = `Hello! Please act as the CUCCIO Knowledge Base Assistant.
 1. Introduce yourself briefly.
-2. Ask the student these 1 of these starter questions, and use some variation of these in the later responses to complete the checklist:
-   - What are your academic interests?
-   - Which course or department do you like most at UBC Science?
-   - Do you want to pursue research or enter industry after graduation?
+2. Ask the user one of these starter questions to understand what they're looking for:
+   - What topic or area can I help you find information on today?
+   - Is there a specific document, policy, or project you're looking for?
+   - What can I help you with?
 3. Be friendly and inviting.`;
 
 const getToken = () => AuthService.getIdToken();
@@ -395,7 +395,7 @@ export default function AIChatPage() {
           )
         );
 
-        if (data.session_name && activeChatSessionId) {
+        if (data.session_name) {
           updateChatSessionName(activeChatSessionId, data.session_name);
         }
       } catch (error) {
@@ -532,7 +532,7 @@ export default function AIChatPage() {
         )
       );
 
-      if (data.session_name && activeChatSessionId) {
+      if (data.session_name) {
         updateChatSessionName(activeChatSessionId, data.session_name);
       }
     } catch (error) {

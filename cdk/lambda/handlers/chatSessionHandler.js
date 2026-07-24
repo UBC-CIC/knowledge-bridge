@@ -1,41 +1,7 @@
 const crypto = require("crypto");
 const { getCorsHeaders } = require("./utils/cors.js");
-const postgres = require("postgres");
-const {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} = require("@aws-sdk/client-secrets-manager");
-
-let sqlConnection;
-const secretsManager = new SecretsManagerClient();
-
-const initConnection = async () => {
-  if (!sqlConnection) {
-    try {
-      const getSecretValueCommand = new GetSecretValueCommand({
-        SecretId: process.env.SM_DB_CREDENTIALS,
-      });
-      const secretResponse = await secretsManager.send(getSecretValueCommand);
-      const credentials = JSON.parse(secretResponse.SecretString);
-
-      const connectionConfig = {
-        host: process.env.RDS_PROXY_ENDPOINT,
-        port: credentials.port,
-        username: credentials.username,
-        password: credentials.password,
-        database: credentials.dbname,
-        ssl: { rejectUnauthorized: true },
-      };
-
-      sqlConnection = postgres(connectionConfig);
-      await sqlConnection`SELECT 1`;
-      console.log("Database connection initialized successfully");
-    } catch (error) {
-      console.error("Error initializing database connection:", error);
-      throw error;
-    }
-  }
-};
+const { initConnection, getSqlConnection } = require("./initializeConnection.js");
+const { getAuthenticatedUserId } = require("./utils/handlerUtils.js");
 
 const createResponse = async (event) => ({
     statusCode: 200,
@@ -67,15 +33,15 @@ exports.handler = async (event) => {
 
     switch (pathData) {
       case "GET /chat_sessions/user/{user_id}": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
 
         if (!userId) {
-          response.statusCode = 400;
-          response.body = JSON.stringify({ error: "user_id is required" });
+          response.statusCode = 401;
+          response.body = JSON.stringify({ error: "Authentication required" });
           break;
         }
 
-        const sessions = await sqlConnection`
+        const sessions = await getSqlConnection()`
           SELECT id, user_id, title, created_at, last_active_at, metadata
           FROM chat_sessions
           WHERE user_id = ${userId}
@@ -89,11 +55,11 @@ exports.handler = async (event) => {
 
       case "POST /chat_sessions": {
         const body = parseBody(event.body);
-        const userId = body.user_id || body.userId || body.user_sessions_session_id;
+        const userId = getAuthenticatedUserId(event);
 
         if (!userId) {
-          response.statusCode = 400;
-          response.body = JSON.stringify({ error: "user_id is required" });
+          response.statusCode = 401;
+          response.body = JSON.stringify({ error: "Authentication required" });
           break;
         }
 
@@ -101,7 +67,7 @@ exports.handler = async (event) => {
         const metadata = body.metadata || {};
 
         // Validate user exists
-        const userExists = await sqlConnection`
+        const userExists = await getSqlConnection()`
           SELECT id FROM users WHERE id = ${userId}
         `;
         if (userExists.length === 0) {
@@ -114,7 +80,7 @@ exports.handler = async (event) => {
 
         const chatSessionId = crypto.randomUUID();
 
-        const inserted = await sqlConnection`
+        const inserted = await getSqlConnection()`
           INSERT INTO chat_sessions (
             id, user_id, title, created_at, last_active_at, metadata
           )
@@ -132,11 +98,7 @@ exports.handler = async (event) => {
 
       case "PUT /chat_sessions/{chat_session_id}": {
         const chatSessionId = event.pathParameters?.chat_session_id;
-
-        // Accept both names for compatibility while you transition
-        const userId =
-          event.queryStringParameters?.user_id ||
-          event.queryStringParameters?.user_session_id;
+        const userId = getAuthenticatedUserId(event);
 
         if (!chatSessionId) {
           response.statusCode = 400;
@@ -145,8 +107,8 @@ exports.handler = async (event) => {
         }
 
         if (!userId) {
-          response.statusCode = 400;
-          response.body = JSON.stringify({ error: "user_id is required" });
+          response.statusCode = 401;
+          response.body = JSON.stringify({ error: "Authentication required" });
           break;
         }
 
@@ -159,7 +121,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const chatSession = await sqlConnection`
+        const chatSession = await getSqlConnection()`
           SELECT id, user_id
           FROM chat_sessions
           WHERE id = ${chatSessionId}
@@ -177,7 +139,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const updated = await sqlConnection`
+        const updated = await getSqlConnection()`
           UPDATE chat_sessions
           SET title = ${title}, last_active_at = NOW()
           WHERE id = ${chatSessionId}
@@ -192,7 +154,7 @@ exports.handler = async (event) => {
 
       case "GET /chat_sessions/{chat_session_id}/chat_history": {
         const chatSessionId = event.pathParameters?.chat_session_id;
-        const authenticatedUserId = event?.requestContext?.authorizer?.userId;
+        const authenticatedUserId = getAuthenticatedUserId(event);
 
         if (!chatSessionId) {
           response.statusCode = 400;
@@ -206,7 +168,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const chatSessionResult = await sqlConnection`
+        const chatSessionResult = await getSqlConnection()`
           SELECT id, user_id
           FROM chat_sessions
           WHERE id = ${chatSessionId}
@@ -230,7 +192,7 @@ exports.handler = async (event) => {
         }
 
         // Fetch messages
-        const messages = await sqlConnection`
+        const messages = await getSqlConnection()`
           SELECT id, chat_session_id, sender, content, sources, created_at
           FROM chat_messages
           WHERE chat_session_id = ${chatSessionId}
@@ -249,11 +211,7 @@ exports.handler = async (event) => {
 
       case "DELETE /chat_sessions/{chat_session_id}": {
         const chatSessionId = event.pathParameters?.chat_session_id;
-
-        // Accept both names for compatibility while you transition
-        const userId =
-          event.queryStringParameters?.user_id ||
-          event.queryStringParameters?.user_session_id;
+        const userId = getAuthenticatedUserId(event);
 
         if (!chatSessionId) {
           response.statusCode = 400;
@@ -262,13 +220,13 @@ exports.handler = async (event) => {
         }
 
         if (!userId) {
-          response.statusCode = 400;
-          response.body = JSON.stringify({ error: "user_id is required" });
+          response.statusCode = 401;
+          response.body = JSON.stringify({ error: "Authentication required" });
           break;
         }
 
         // Verify the chat session exists and belongs to the user
-        const chatSession = await sqlConnection`
+        const chatSession = await getSqlConnection()`
           SELECT id, user_id
           FROM chat_sessions
           WHERE id = ${chatSessionId}
@@ -287,13 +245,13 @@ exports.handler = async (event) => {
         }
 
         // Delete children first if you DON'T have ON DELETE CASCADE
-        await sqlConnection`
+        await getSqlConnection()`
           DELETE FROM chat_messages
           WHERE chat_session_id = ${chatSessionId}
         `;
 
         // Delete the chat session
-        await sqlConnection`
+        await getSqlConnection()`
           DELETE FROM chat_sessions
           WHERE id = ${chatSessionId}
         `;
@@ -310,6 +268,5 @@ exports.handler = async (event) => {
     handleError(error, response);
   }
 
-  console.log(response);
   return response;
 };

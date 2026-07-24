@@ -70,17 +70,12 @@ exports.handler = async (event) => {
     });
 
     await initDb();
-    const [user] = await sqlConnection`
-      SELECT id FROM users WHERE email = ${decoded.email} LIMIT 1
+    await sqlConnection`
+      INSERT INTO ws_connections (connection_id, user_id, domain_name, stage)
+      VALUES (${connectionId}, ${decoded.sub}::uuid, ${domainName}, ${stage})
+      ON CONFLICT (connection_id) DO UPDATE
+        SET user_id = EXCLUDED.user_id, connected_at = now()
     `;
-    if (user) {
-      await sqlConnection`
-        INSERT INTO ws_connections (connection_id, user_id, domain_name, stage)
-        VALUES (${connectionId}, ${user.id}, ${domainName}, ${stage})
-        ON CONFLICT (connection_id) DO UPDATE
-          SET user_id = EXCLUDED.user_id, connected_at = now()
-      `;
-    }
 
     return { statusCode: 200 };
   } catch (error) {

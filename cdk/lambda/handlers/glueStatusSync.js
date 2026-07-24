@@ -1,6 +1,6 @@
 const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
 const postgres = require("postgres");
-const { writeNotification, writeNotificationToAllAdmins } = require("./utils/notificationWriter");
+const { publishNotification } = require("./utils/publishNotification");
 
 const secretsManager = new SecretsManagerClient();
 
@@ -15,21 +15,20 @@ const GLUE_TO_DB_STATUS = {
 let sqlConnection;
 
 const initConnection = async () => {
-  if (!sqlConnection) {
-    const secret = await secretsManager.send(new GetSecretValueCommand({
-      SecretId: process.env.SM_DB_CREDENTIALS,
-    }));
-    const credentials = JSON.parse(secret.SecretString);
-    sqlConnection = postgres({
-      host: process.env.RDS_PROXY_ENDPOINT,
-      port: credentials.port,
-      username: credentials.username,
-      password: credentials.password,
-      database: credentials.dbname,
-      ssl: { rejectUnauthorized: true },
-    });
-    await sqlConnection`SELECT 1`;
-  }
+  if (sqlConnection) return;
+  const secret = await secretsManager.send(new GetSecretValueCommand({
+    SecretId: process.env.SM_DB_CREDENTIALS,
+  }));
+  const credentials = JSON.parse(secret.SecretString);
+  sqlConnection = postgres({
+    host: process.env.RDS_PROXY_ENDPOINT,
+    port: credentials.port,
+    username: credentials.username,
+    password: credentials.password,
+    database: credentials.dbname,
+    ssl: { rejectUnauthorized: true },
+  });
+  await sqlConnection`SELECT 1`;
 };
 
 exports.handler = async (event) => {
@@ -72,30 +71,24 @@ exports.handler = async (event) => {
   console.log(`[GlueStatusSync] Run ${glueRunId} → ${dbStatus}`);
 
   const isCompleted = dbStatus === "completed";
-  const triggeredByUserId = row.metadata?.triggered_by_user_id;
+  const meta = typeof row.metadata === "string" ? JSON.parse(row.metadata) : (row.metadata ?? {});
+  const triggeredByUserId = meta.triggered_by_user_id;
 
   try {
-    if (triggeredByUserId) {
-      await writeNotification(sqlConnection, {
-        userId: triggeredByUserId,
-        type: isCompleted ? "ingestion_completed" : "ingestion_failed",
-        title: isCompleted ? "Ingestion complete" : "Ingestion failed",
-        message: isCompleted
-          ? "SharePoint ingestion finished successfully."
-          : `Ingestion ended with status "${dbStatus}".`,
-        metadata: { ingestion_run_id: row.id.toString() },
-      });
-    } else {
-      await writeNotificationToAllAdmins(sqlConnection, {
-        type: isCompleted ? "ingestion_completed" : "ingestion_failed",
-        title: isCompleted ? "Ingestion complete" : "Ingestion failed",
-        message: isCompleted
-          ? "Scheduled SharePoint ingestion finished successfully."
-          : `Scheduled ingestion ended with status "${dbStatus}".`,
-        metadata: { ingestion_run_id: row.id.toString() },
-      });
-    }
+    const payload = {
+      type: isCompleted ? "ingestion_completed" : "ingestion_failed",
+      title: isCompleted ? "Ingestion complete" : "Ingestion failed",
+      message: isCompleted
+        ? "SharePoint ingestion finished successfully."
+        : `Ingestion ended with status "${dbStatus}".`,
+      metadata: { ingestion_run_id: row.id.toString() },
+      ...(triggeredByUserId ? { userId: triggeredByUserId } : {}),
+    };
+
+    await publishNotification(payload);
+
+    console.log(`[GlueStatusSync] Published notification for run ${row.id}`);
   } catch (notifyErr) {
-    console.error(`[GlueStatusSync] Failed to write notification for run ${row.id}:`, notifyErr);
+    console.error(`[GlueStatusSync] Failed to publish notification for run ${row.id}:`, notifyErr);
   }
 };

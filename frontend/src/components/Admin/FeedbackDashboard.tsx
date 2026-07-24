@@ -13,21 +13,63 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ThumbsDown, ThumbsUp, MessageSquare, ExternalLink, Calendar, ChevronLeft, ChevronRight, User } from "lucide-react";
+import { ThumbsDown, ThumbsUp, MessageSquare, ExternalLink, Calendar, ChevronLeft, ChevronRight, User, RefreshCw } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import { cn } from "@/lib/utils";
+
+// ---------------------------------------------------------------------------
+// Cache — same pattern as ChatHistory
+// ---------------------------------------------------------------------------
+const CACHE_TTL = 5 * 60 * 1000; // 5 min
+
+const getCached = (key: string) => {
+  try {
+    const item = localStorage.getItem(key);
+    if (!item) return null;
+    const parsed = JSON.parse(item);
+    if (Date.now() - parsed.timestamp > CACHE_TTL) { localStorage.removeItem(key); return null; }
+    return parsed.data;
+  } catch { return null; }
+};
+
+const clearFeedbackCache = () => {
+  Object.keys(localStorage).forEach(k => {
+    if (k.startsWith("admin_feedback_")) localStorage.removeItem(k);
+  });
+};
+
+const setCached = (key: string, data: any) => {
+  try {
+    localStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), data }));
+  } catch {
+    // Evict all feedback cache entries and retry once
+    Object.keys(localStorage).forEach(k => { if (k.startsWith("admin_feedback_")) localStorage.removeItem(k); });
+    try { localStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), data })); } catch { }
+  }
+};
 
 const CATEGORIES = ["Not helpful", "Inaccurate", "Off-topic", "Other"] as const;
 type Category = (typeof CATEGORIES)[number];
 
+// Wong colorblind-safe palette
 const CATEGORY_COLORS: Record<Category, string> = {
-  "Not helpful": "bg-orange-100 text-orange-700 border-orange-200",
-  "Inaccurate":  "bg-red-100 text-red-700 border-red-200",
-  "Off-topic":   "bg-purple-100 text-purple-700 border-purple-200",
-  "Other":       "bg-gray-100 text-gray-700 border-gray-200",
+  "Not helpful": "bg-[#E69F00]/15 text-[#9a6b00] border-[#E69F00]/40",
+  "Inaccurate":  "bg-[#D55E00]/15 text-[#923f00] border-[#D55E00]/40",
+  "Off-topic":   "bg-[#0072B2]/15 text-[#004f7c] border-[#0072B2]/40",
+  "Other":       "bg-gray-100 text-gray-600 border-gray-200",
+};
+
+const CATEGORY_BAR_COLORS: Record<Category, string> = {
+  "Not helpful": "#E69F00",
+  "Inaccurate":  "#D55E00",
+  "Off-topic":   "#0072B2",
+  "Other":       "#9ca3af",
 };
 
 type FeedbackItem = {
@@ -83,6 +125,46 @@ const formatPresetLabel = (preset: DatePreset, customRange: { from?: Date; to?: 
   return "Custom range";
 };
 
+function CategoryPieChart({ getCategoryCount }: { getCategoryCount: (cat: Category) => number }) {
+  const dislikeTotal = CATEGORIES.reduce((s, c) => s + getCategoryCount(c), 0);
+  const pieData = CATEGORIES.map(cat => ({ name: cat, value: getCategoryCount(cat) }));
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-shrink-0">
+        <ResponsiveContainer width={110} height={110}>
+          <PieChart>
+            <Pie data={pieData} cx="50%" cy="50%" innerRadius={28} outerRadius={50} paddingAngle={2} dataKey="value">
+              {pieData.map((entry) => (
+                <Cell key={entry.name} fill={CATEGORY_BAR_COLORS[entry.name as Category]} />
+              ))}
+            </Pie>
+            <Tooltip
+              formatter={(value: number, name: string) => {
+                const pct = dislikeTotal > 0 ? Math.round((value / dislikeTotal) * 100) : 0;
+                return [`${value} (${pct}%)`, name];
+              }}
+              contentStyle={{ fontSize: 12 }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex-1 space-y-1.5">
+        {CATEGORIES.map(cat => {
+          const count = getCategoryCount(cat);
+          const pct = dislikeTotal > 0 ? Math.round((count / dislikeTotal) * 100) : 0;
+          return (
+            <div key={cat} className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: CATEGORY_BAR_COLORS[cat] }} />
+              <span className="text-sm text-gray-600 flex-1 truncate">{cat}</span>
+              <span className="text-sm font-semibold text-gray-700">{pct}%</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashboardProps) {
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [categoryCounts, setCategoryCounts] = useState<CategoryCount[]>([]);
@@ -115,9 +197,18 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
   }, [datePreset, customRange]);
 
   const fetchSummary = useCallback(async () => {
+    const { from, to } = buildDateParams();
+    const cacheKey = `admin_feedback_summary_${from ?? "all"}_${to ?? "all"}`;
+    const cached = getCached(cacheKey);
+    if (cached) {
+      setTrend(cached.trend);
+      setCategoryCounts(cached.categories);
+      setTotalLikes(cached.totalLikes);
+      setTotalDislikes(cached.totalDislikes);
+      return;
+    }
     setSummaryLoading(true);
     try {
-      const { from, to } = buildDateParams();
       const params = new URLSearchParams();
       if (from) params.set("from", from);
       if (to) params.set("to", to);
@@ -132,6 +223,12 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
       setCategoryCounts(data.categories ?? []);
       setTotalLikes(data.totalLikes ?? 0);
       setTotalDislikes(data.totalDislikes ?? 0);
+      setCached(cacheKey, {
+        trend: data.trend ?? [],
+        categories: data.categories ?? [],
+        totalLikes: data.totalLikes ?? 0,
+        totalDislikes: data.totalDislikes ?? 0,
+      });
     } catch (e) {
       console.error(e);
     } finally {
@@ -140,9 +237,16 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
   }, [buildDateParams]);
 
   const fetchFeedback = useCallback(async (pageNum: number) => {
+    const { from, to } = buildDateParams();
+    const cacheKey = `admin_feedback_list_${from ?? "all"}_${to ?? "all"}_${activeCategory ?? "all"}_p${pageNum}`;
+    const cached = getCached(cacheKey);
+    if (cached) {
+      setTotal(cached.total);
+      setFeedback(cached.feedback);
+      return;
+    }
     setLoading(true);
     try {
-      const { from, to } = buildDateParams();
       const params = new URLSearchParams();
       if (from) params.set("from", from);
       if (to) params.set("to", to);
@@ -158,6 +262,7 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
       const data = await res.json();
       setTotal(data.total ?? 0);
       setFeedback(data.feedback ?? []);
+      setCached(cacheKey, { total: data.total ?? 0, feedback: data.feedback ?? [] });
     } catch (e) {
       console.error(e);
     } finally {
@@ -165,14 +270,13 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
     }
   }, [buildDateParams, activeCategory]);
 
-  // Refetch everything when date range or category changes
+  // Refetch everything when date range or category changes; reset to page 0
   useEffect(() => {
     setPage(0);
     fetchSummary();
     fetchFeedback(0);
   }, [datePreset, customRange, activeCategory]);
 
-  // Refetch list when page changes (but not summary)
   useEffect(() => {
     fetchFeedback(page);
   }, [page]);
@@ -185,6 +289,13 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
   const handlePresetClick = (preset: DatePreset) => {
     if (preset !== "custom") setCustomRange({});
     setDatePreset(preset);
+  };
+
+  const handleRefresh = () => {
+    clearFeedbackCache();
+    setPage(0);
+    fetchSummary();
+    fetchFeedback(0);
   };
 
   const handleCustomRangeSelect = (range: { from?: Date; to?: Date } | undefined) => {
@@ -201,11 +312,20 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold text-gray-900">Feedback</h2>
-          <p className="text-gray-500 mt-1">Negative feedback from users on AI responses.</p>
+          <p className="text-gray-500 mt-1">Feedback from users on AI responses.</p>
         </div>
 
-        {/* Date filter */}
+        {/* Date filter + refresh */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={loading || summaryLoading}
+            className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm disabled:opacity-50"
+            title="Clear cache and refresh"
+          >
+            <RefreshCw size={12} className={(loading || summaryLoading) ? "animate-spin text-primary" : ""} />
+            Refresh
+          </button>
           {(["7d", "30d", "all"] as DatePreset[]).map(p => (
             <button
               key={p}
@@ -248,33 +368,47 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
       </div>
 
       {/* Summary stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        <Card className="border-gray-200 shadow-sm col-span-1">
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold text-green-600">{totalLikes}</div>
-            <div className="mt-1 flex items-center gap-1 text-xs text-green-600 font-medium">
-              <ThumbsUp size={11} /> Likes
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-gray-200 shadow-sm col-span-1">
-          <CardContent className="p-4">
-            <div className="text-2xl font-bold text-red-600">{totalDislikes}</div>
-            <div className="mt-1 flex items-center gap-1 text-xs text-red-600 font-medium">
-              <ThumbsDown size={11} /> Dislikes
-            </div>
-          </CardContent>
-        </Card>
-        {CATEGORIES.map(cat => (
-          <Card key={cat} className="border-gray-200 shadow-sm col-span-1">
-            <CardContent className="p-4">
-              <div className="text-2xl font-bold text-gray-900">{getCategoryCount(cat)}</div>
-              <div className={cn("mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium border", CATEGORY_COLORS[cat])}>
-                {cat}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Total Likes */}
+        <Card className="border-gray-200 shadow-sm">
+          <CardContent className="p-6 flex flex-col items-center justify-center h-full min-h-[140px] gap-2">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center justify-center w-14 h-14 rounded-full bg-green-50 flex-shrink-0">
+                <ThumbsUp className="h-7 w-7 text-green-600" />
               </div>
-            </CardContent>
-          </Card>
-        ))}
+              <div className="text-5xl font-bold text-green-600 leading-none">{totalLikes}</div>
+            </div>
+            <div className="text-sm font-semibold text-green-700 tracking-wide">Total Likes</div>
+          </CardContent>
+        </Card>
+
+        {/* Total Dislikes */}
+        <Card className="border-gray-200 shadow-sm">
+          <CardContent className="p-6 flex flex-col items-center justify-center h-full min-h-[140px] gap-2">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center justify-center w-14 h-14 rounded-full bg-red-50 flex-shrink-0">
+                <ThumbsDown className="h-7 w-7 text-red-500" />
+              </div>
+              <div className="text-5xl font-bold text-red-500 leading-none">{totalDislikes}</div>
+            </div>
+            <div className="text-sm font-semibold text-red-600 tracking-wide">Total Dislikes</div>
+          </CardContent>
+        </Card>
+
+
+        {/* Category breakdown */}
+        <Card className="border-gray-200 shadow-sm">
+          <CardContent className="p-5 flex flex-col justify-center h-full min-h-[140px]">
+            <div className="text-base font-semibold text-gray-700 mb-3">Dislike Reasons</div>
+            {summaryLoading ? (
+              <div className="flex items-center justify-center h-16">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary" />
+              </div>
+            ) : (
+              <CategoryPieChart getCategoryCount={getCategoryCount} />
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Trend chart */}
@@ -300,9 +434,27 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
                   labelFormatter={formatDay}
                   contentStyle={{ fontSize: 12 }}
                 />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="likes" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} name="Likes" />
-                <Line type="monotone" dataKey="dislikes" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} name="Dislikes" />
+                <Legend
+                  wrapperStyle={{ fontSize: 12 }}
+                  content={() => (
+                    <div className="flex items-center justify-center gap-5 pt-2">
+                      <div className="flex items-center gap-1.5">
+                        <svg width="24" height="10">
+                          <line x1="0" y1="5" x2="24" y2="5" stroke="#ef4444" strokeWidth="2" strokeDasharray="4 2" />
+                        </svg>
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>Dislikes</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <svg width="24" height="10">
+                          <line x1="0" y1="5" x2="24" y2="5" stroke="#22c55e" strokeWidth="2" />
+                        </svg>
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>Likes</span>
+                      </div>
+                    </div>
+                  )}
+                />
+                <Line type="monotone" dataKey="dislikes" stroke="#ef4444" strokeWidth={2} strokeDasharray="4 2" dot={{ r: 4 }} name="Dislikes" />
+                <Line type="monotone" dataKey="likes" stroke="#22c55e" strokeWidth={2} dot={{ r: 4 }} name="Likes" />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -315,7 +467,7 @@ export default function FeedbackDashboard({ onNavigateToSession }: FeedbackDashb
           <div className="flex items-center justify-between mb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-primary" />
-              All feedback
+              Feedback By Category
             </CardTitle>
           </div>
           {/* Category filter chips */}

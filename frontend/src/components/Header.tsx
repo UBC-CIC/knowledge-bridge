@@ -13,7 +13,7 @@ import NotificationBell from "@/components/Admin/NotificationBell";
 import NotificationPanel from "@/components/Admin/NotificationPanel";
 import type { Notification } from "@/types/notifications";
 
-type Mode = "student" | "admin";
+type Mode = "user" | "admin";
 
 type NotificationProps = {
   notifications: Notification[];
@@ -40,7 +40,7 @@ export default function Header({ notificationProps }: Props) {
   const navigate = useNavigate();
   const { role } = useUser();
 
-  const mode: Mode = location.pathname.startsWith("/admin") ? "admin" : "student";
+  const mode: Mode = location.pathname.startsWith("/admin") ? "admin" : "user";
 
   const handleModeChange = (newMode: Mode) => {
     if (newMode === "admin") {
@@ -108,7 +108,7 @@ export default function Header({ notificationProps }: Props) {
                 <SelectValue placeholder="Select mode" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="student">Mode: User</SelectItem>
+                <SelectItem value="user">Mode: User</SelectItem>
                 <SelectItem value="admin">Mode: Admin</SelectItem>
               </SelectContent>
             </Select>

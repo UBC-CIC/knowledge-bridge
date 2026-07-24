@@ -410,7 +410,6 @@ export default function SystemSettings() {
       setSaving(true);
       setError(null);
       const token = await AuthService.getIdToken();
-      if (!adminEmail) throw new Error("Missing admin email");
       const payload = {
         max_messages_per_day: settings.max_messages_per_day,
         max_characters_per_user_message: settings.max_characters_per_user_message,
@@ -422,7 +421,6 @@ export default function SystemSettings() {
         partially_grounded_threshold: settings.partially_grounded_threshold,
         max_context_chunks: settings.max_context_chunks,
         max_history_messages: settings.max_history_messages,
-        updated_by_email: adminEmail,
       };
       const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/system-settings`, {
         method: "PUT",
@@ -448,11 +446,10 @@ export default function SystemSettings() {
 
   const saveSystemMessage = async (type: SystemMessageType, content: string): Promise<SystemMessageVersion> => {
     const token = await AuthService.getIdToken();
-    if (!adminEmail) throw new Error("Missing adminEmail");
     const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/system-messages/${type}`, {
       method: "POST",
       headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({ content, adminEmail }),
+      body: JSON.stringify({ content }),
     });
     if (!res.ok) throw new Error(`Failed to save system message (${res.status}): ${await res.text().catch(() => "")}`);
     return (await res.json()) as SystemMessageVersion;
@@ -464,11 +461,9 @@ export default function SystemSettings() {
 
   const deleteSystemMessage = async (type: SystemMessageType, versionId: string): Promise<void> => {
     const token = await AuthService.getIdToken();
-    if (!adminEmail) throw new Error("Missing adminEmail");
     const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/system-messages/${type}/${versionId}`, {
       method: "DELETE",
       headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({ adminEmail }),
     });
     if (!res.ok) throw new Error(`Failed to delete system message (${res.status}): ${await res.text().catch(() => "")}`);
   };
@@ -482,11 +477,9 @@ export default function SystemSettings() {
 
   const activateSystemMessage = async (type: SystemMessageType, versionId: string): Promise<void> => {
     const token = await AuthService.getIdToken();
-    if (!adminEmail) throw new Error("Missing adminEmail");
     const res = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/admin/system-messages/${type}/${versionId}/activate`, {
       method: "POST",
       headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({ adminEmail }),
     });
     if (!res.ok) throw new Error(`Failed to activate system message (${res.status}): ${await res.text().catch(() => "")}`);
   };

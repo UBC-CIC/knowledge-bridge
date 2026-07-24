@@ -1,4 +1,9 @@
 const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
+const {
+  SecretsManagerClient,
+  GetSecretValueCommand,
+} = require("@aws-sdk/client-secrets-manager");
+const postgres = require("postgres");
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -15,6 +20,25 @@ const sanitizeString = (value, maxLength = 10000) => {
 };
 
 const lambda = new LambdaClient({});
+const secretsManager = new SecretsManagerClient();
+let sqlConnection;
+
+const initDb = async () => {
+  if (sqlConnection) return;
+  const res = await secretsManager.send(
+    new GetSecretValueCommand({ SecretId: process.env.SM_DB_CREDENTIALS })
+  );
+  const creds = JSON.parse(res.SecretString);
+  sqlConnection = postgres({
+    host: process.env.RDS_PROXY_ENDPOINT,
+    port: creds.port,
+    username: creds.username,
+    password: creds.password,
+    database: creds.dbname,
+    ssl: { rejectUnauthorized: true },
+  });
+  await sqlConnection`SELECT 1`;
+};
 
 exports.handler = async (event) => {
   console.log("WebSocket message received:", {
@@ -26,7 +50,12 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body);
-    const { action, query, chat_session_id, user_id, is_intro_message } = body;
+    const { action, query, chat_session_id, is_intro_message } = body;
+    const connectionId = event.requestContext.connectionId;
+
+    if (action === "ping") {
+      return { statusCode: 200, body: JSON.stringify({ type: "pong" }) };
+    }
 
     if (action === "generate_text") {
       // Validate inputs before invoking text generation Lambda
@@ -40,10 +69,15 @@ exports.handler = async (event) => {
         return { statusCode: 400, body: JSON.stringify({ error: sessionValidation.error }) };
       }
 
-      const userValidation = validateUUID(user_id, "user_id");
-      if (!userValidation.valid) {
-        return { statusCode: 400, body: JSON.stringify({ error: userValidation.error }) };
+      // Derive user_id from the authenticated connection record, not the client payload
+      await initDb();
+      const [conn] = await sqlConnection`
+        SELECT user_id FROM ws_connections WHERE connection_id = ${connectionId}
+      `;
+      if (!conn) {
+        return { statusCode: 403, body: JSON.stringify({ error: "Connection not found" }) };
       }
+      const user_id = conn.user_id;
 
       // Invoke the text generation Lambda function
       const textGenPayload = {
@@ -56,16 +90,11 @@ exports.handler = async (event) => {
           is_intro_message: is_intro_message
         }),
         requestContext: {
-          connectionId: event.requestContext.connectionId,
+          connectionId: connectionId,
           domainName: event.requestContext.domainName,
           stage: event.requestContext.stage,
         },
       };
-
-      console.log(
-        "Invoking text generation function with payload:",
-        textGenPayload
-      );
 
       const result = await lambda.send(
         new InvokeCommand({
