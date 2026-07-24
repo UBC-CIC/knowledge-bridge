@@ -5,7 +5,6 @@ import * as codebuild from "aws-cdk-lib/aws-codebuild";
 import * as codepipeline from "aws-cdk-lib/aws-codepipeline";
 import * as codepipeline_actions from "aws-cdk-lib/aws-codepipeline-actions";
 import * as iam from "aws-cdk-lib/aws-iam";
-import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as codeconnections from "aws-cdk-lib/aws-codeconnections";
 import * as s3 from "aws-cdk-lib/aws-s3";
 
@@ -65,15 +64,22 @@ export class CICDStack extends cdk.Stack {
       const sourceOutput = new codepipeline.Artifact();
 
       const artifactAccessLogsBucket = new s3.Bucket(this, "ArtifactAccessLogs", {
+        bucketNamePrefix: `${id.toLowerCase()}-artifact-access-logs`,
+        bucketNamespace: s3.BucketNamespace.ACCOUNT_REGIONAL,
         blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
         enforceSSL: true,
+        autoDeleteObjects: true,
+        lifecycleRules: [{ expiration: cdk.Duration.days(90), id: "expire-access-logs-90d" }],
       });
 
       const artifactBucket = new s3.Bucket(this, "PipelineArtifactBucket", {
+        bucketNamePrefix: `${id.toLowerCase()}-pipeline-artifacts`,
+        bucketNamespace: s3.BucketNamespace.ACCOUNT_REGIONAL,
         blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
         enforceSSL: true,
+        autoDeleteObjects: true,
         serverAccessLogsBucket: artifactAccessLogsBucket,
         serverAccessLogsPrefix: "pipeline-artifacts/",
       });
@@ -123,7 +129,7 @@ export class CICDStack extends cdk.Stack {
         const repoName = `${id.toLowerCase()}-${lambda.name.toLowerCase()}`;
         const ecrRepo = new ecr.Repository(this, `${lambda.name}Repo`, {
           repositoryName: repoName,
-          imageTagMutability: ecr.TagMutability.MUTABLE,
+          imageTagMutability: ecr.TagMutability.IMMUTABLE,
           removalPolicy: cdk.RemovalPolicy.RETAIN,
           imageScanOnPush: true,
         });

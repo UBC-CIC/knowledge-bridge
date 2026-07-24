@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
-  title: specEx API
-  description: Specialization Explorer API
+  title: CUCCIO KBA API
+  description: CUCCIO Knowledge Base Assistant API
   version: 1.0.0
 tags:
   - name: User
@@ -304,7 +304,7 @@ paths:
                   type: string
                 role:
                   type: string
-                  enum: [student, admin]
+                  enum: [user, admin]
       responses:
         "200":
           description: Updated user
@@ -314,6 +314,121 @@ paths:
           description: Unauthorized
         "404":
           description: User not found
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/entra_groups:
+    <<: *commonOptions
+    get:
+      tags:
+        - Admin
+      summary: Get paginated Entra groups with member counts
+      operationId: get_admin_entra_groups
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated list of Entra groups
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/entra_groups/{groupId}/users:
+    <<: *commonOptions
+    get:
+      tags:
+        - Admin
+      summary: Get paginated users within a specific Entra group
+      operationId: get_admin_entra_group_users
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated list of users in group
+        "400":
+          description: Bad Request
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/entra_groups/unassigned/users:
+    <<: *commonOptions
+    get:
+      tags:
+        - Admin
+      summary: Get users with no Entra group memberships
+      operationId: get_admin_unassigned_users
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated list of unassigned users
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
       x-amazon-apigateway-integration:
         uri:
           Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
@@ -487,6 +602,222 @@ paths:
       responses:
         "200":
           description: List of chat messages
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/export/trigger:
+    <<: *commonOptions
+    post:
+      tags: [Admin]
+      summary: Trigger a new chat export job
+      operationId: trigger_export
+      security:
+        - adminAuthorizer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope]
+              properties:
+                scope:
+                  type: string
+                  enum: [all, group, user]
+                scope_id:
+                  type: string
+                  format: uuid
+      responses:
+        "202":
+          description: Export job accepted
+        "400":
+          description: Bad Request
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/export/runs:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: List export job runs for the current admin
+      operationId: list_export_runs
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated list of export runs
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/notifications:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: List notifications for the current admin
+      operationId: list_notifications
+      security:
+        - adminAuthorizer: []
+      responses:
+        "200":
+          description: Notifications list and total count
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+    delete:
+      tags: [Admin]
+      summary: Clear all notifications for the current admin
+      operationId: clear_all_notifications
+      security:
+        - adminAuthorizer: []
+      responses:
+        "200":
+          description: All notifications cleared
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/notifications/{notification_id}:
+    <<: *commonOptions
+    delete:
+      tags: [Admin]
+      summary: Dismiss a single notification
+      operationId: dismiss_notification
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Notification dismissed
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/feedback:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: List dislike feedback entries with message context
+      operationId: list_feedback
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: ISO timestamp — return only feedback at or after this time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated feedback list
+        "401":
+          description: Unauthorized
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${adminFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /admin/feedback/summary:
+    <<: *commonOptions
+    get:
+      tags: [Admin]
+      summary: Daily dislike trend and per-category counts
+      operationId: get_feedback_summary
+      security:
+        - adminAuthorizer: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: ISO timestamp — include data at or after this time
+      responses:
+        "200":
+          description: Trend data and category counts
         "401":
           description: Unauthorized
         "500":
@@ -696,7 +1027,7 @@ paths:
                     welcome_message:
                       - id: "6bda6a51-2af0-4312-8d47-89f6169ae4ad"
                         type: "welcome_message"
-                        content: "Together we will try to find the right program for you. Click below to start a new conversation."
+                        content: "Welcome to the CUCCIO Knowledge Base Assistant. Click below to start a new conversation."
                         character_limit: 400
                         version: 1
                         is_active: true
@@ -751,16 +1082,11 @@ paths:
               type: object
               required:
                 - content
-                - adminEmail
               properties:
                 content:
                   type: string
                   description: The full message content for the new version
                   example: "AI can make mistakes. Check important info."
-                adminEmail:
-                  type: string
-                  description: Email of the admin creating this new version (used to populate created_by)
-                  example: "admin@example.com"
       responses:
         "200":
           description: Created a new system message version (active)
@@ -810,7 +1136,7 @@ paths:
                     type: string
                     format: date-time
         "400":
-          description: Bad Request - Invalid type, missing/invalid content/adminEmail, or content exceeds character limit
+          description: Bad Request - Invalid type, missing/invalid content, or content exceeds character limit
         "401":
           description: Unauthorized
         "403":
@@ -867,14 +1193,7 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - adminEmail
-              properties:
-                adminEmail:
-                  type: string
-                  format: email
-                  description: Email of the admin performing the delete (used to validate admin access)
-                  example: "admin@example.com"
+              properties: {}
       responses:
         "200":
           description: System message version deleted successfully
@@ -925,7 +1244,7 @@ paths:
                       type: "disclaimer"
                       version: 2
         "400":
-          description: Bad Request - Invalid type/version_id/adminEmail, or attempted to delete active version
+          description: Bad Request - Invalid type/version_id, or attempted to delete active version
         "401":
           description: Unauthorized
         "403":
@@ -982,14 +1301,7 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - adminEmail
-              properties:
-                adminEmail:
-                  type: string
-                  format: email
-                  description: Email of the admin performing the activation (used to validate admin access)
-                  example: "admin@example.com"
+              properties: {}
       responses:
         "200":
           description: Activation successful (or already active)
@@ -1105,7 +1417,7 @@ paths:
                       created_by_email: "admin@example.com"
                       created_at: "2026-02-18T19:21:18.406Z"
         "400":
-          description: Bad Request - Invalid type/version_id/adminEmail
+          description: Bad Request - Invalid type/version_id
         "401":
           description: Unauthorized
         "403":
@@ -1133,10 +1445,16 @@ paths:
         - name: timeRange
           in: query
           required: false
-          description: Time range for analytics data (e.g., 7d, 30d, 90d, 6m, 1y)
+          description: Time range for analytics data (e.g., 7d, 30d, 90d, 6m, 1y, all)
           schema:
             type: string
             default: "90d"
+        - name: groupId
+          in: query
+          required: false
+          description: Entra group ID to filter analytics by. Omit or pass "all" for all groups.
+          schema:
+            type: string
       responses:
         "200":
           description: Analytics time series and totals
@@ -1280,13 +1598,6 @@ paths:
           schema:
             type: string
             format: uuid
-        - name: user_id
-          in: query
-          required: true
-          description: User UUID used to verify ownership when renaming
-          schema:
-            type: string
-            format: uuid
       requestBody:
         required: true
         content:
@@ -1330,13 +1641,6 @@ paths:
           in: path
           required: true
           description: Chat session UUID
-          schema:
-            type: string
-            format: uuid
-        - name: user_id
-          in: query
-          required: true
-          description: User UUID used to verify ownership when deleting
           schema:
             type: string
             format: uuid
@@ -1449,38 +1753,6 @@ paths:
         passthroughBehavior: "when_no_match"
         httpMethod: POST
         type: aws_proxy
-
-  /user/{user_id}:
-    <<: *commonOptions
-    get:
-      tags:
-        - User
-      summary: Get user by id
-      operationId: get_user
-      security:
-        - userAuthorizer: []
-      parameters:
-        - name: user_id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: User found
-        "404":
-          description: User not found
-        "401":
-          description: Unauthorized
-        "500":
-          description: Internal Server Error
-      x-amazon-apigateway-integration:
-        uri:
-          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userFunction.Arn}/invocations
-        passthroughBehavior: "when_no_match"
-        httpMethod: POST
-        type: aws_proxy
     put:
       tags:
         - User
@@ -1507,7 +1779,7 @@ paths:
                 email:
                   type: string
                   format: email
-                  example: student@example.com
+                  example: user@example.com
       responses:
         "200":
           description: User updated successfully
@@ -1519,6 +1791,40 @@ paths:
           description: User not found
         "409":
           description: Email already in use
+        "500":
+          description: Internal Server Error
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userFunction.Arn}/invocations
+        passthroughBehavior: "when_no_match"
+        httpMethod: POST
+        type: aws_proxy
+
+  /user/{user_id}/accessible_sources:
+    <<: *commonOptions
+    get:
+      tags:
+        - User
+      summary: Get SharePoint lists accessible to a user based on their Entra group memberships
+      operationId: get_accessible_sources
+      security:
+        - userAuthorizer: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of accessible site sources
+        "400":
+          description: Invalid user_id
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
         "500":
           description: Internal Server Error
       x-amazon-apigateway-integration:
@@ -1676,11 +1982,16 @@ paths:
                 is_positive:
                   type: boolean
                   description: "true for thumbs up, false for thumbs down"
+                category:
+                  type: string
+                  nullable: true
+                  enum: ["Not helpful", "Inaccurate", "Off-topic", "Other"]
+                  description: Feedback category (only for thumbs down)
                 comment:
                   type: string
                   nullable: true
                   maxLength: 2000
-                  description: Optional feedback comment (typically provided on thumbs down)
+                  description: Optional free-text comment (typically provided on thumbs down)
       responses:
         "200":
           description: Rating saved
@@ -1742,18 +2053,12 @@ paths:
       security:
         - userAuthorizer: []
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              required:
-                - user_id
               properties:
-                user_id:
-                  type: string
-                  format: uuid
-                  description: User UUID (guest/student user)
                 title:
                   type: string
                   nullable: true

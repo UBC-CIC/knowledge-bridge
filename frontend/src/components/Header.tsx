@@ -9,16 +9,38 @@ import {
 import { useSidebar } from "@/providers/sidebar";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useUser } from "@/providers/user";
+import NotificationBell from "@/components/Admin/NotificationBell";
+import NotificationPanel from "@/components/Admin/NotificationPanel";
+import type { Notification } from "@/types/notifications";
 
-type Mode = "student" | "admin";
+type Mode = "user" | "admin";
 
-export default function Header() {
+type NotificationProps = {
+  notifications: Notification[];
+  total: number;
+  panelOpen: boolean;
+  expanded: boolean;
+  setExpanded: (v: boolean) => void;
+  openPanel: () => void;
+  closePanel: () => void;
+  deleteNotification: (id: string) => void;
+  clearAll: () => void;
+  onNavigateToExports: () => void;
+  incomingToast?: Notification | null;
+  dismissToast?: () => void;
+};
+
+type Props = {
+  notificationProps?: NotificationProps;
+};
+
+export default function Header({ notificationProps }: Props) {
   const { mobileOpen, toggleMobile } = useSidebar();
   const location = useLocation();
   const navigate = useNavigate();
   const { role } = useUser();
 
-  const mode: Mode = location.pathname.startsWith("/admin") ? "admin" : "student";
+  const mode: Mode = location.pathname.startsWith("/admin") ? "admin" : "user";
 
   const handleModeChange = (newMode: Mode) => {
     if (newMode === "admin") {
@@ -58,17 +80,40 @@ export default function Header() {
           </Link>
         </div>
 
-        {canSwitchModes ? (
-          <Select value={mode} onValueChange={(v) => handleModeChange(v as Mode)}>
-            <SelectTrigger className="w-fit border-primary-foreground bg-transparent text-white [&_svg:not([class*='text-'])]:text-primary-foreground hover:bg-white/10">
-              <SelectValue placeholder="Select mode" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="student">Mode: User</SelectItem>
-              <SelectItem value="admin">Mode: Admin</SelectItem>
-            </SelectContent>
-          </Select>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {canSwitchModes && notificationProps && (
+            <div className="relative">
+              <NotificationBell
+                total={notificationProps.total}
+                onClick={notificationProps.openPanel}
+              />
+              {notificationProps.panelOpen && (
+                <NotificationPanel
+                  notifications={notificationProps.notifications}
+                  total={notificationProps.total}
+                  expanded={notificationProps.expanded}
+                  onSetExpanded={notificationProps.setExpanded}
+                  onClose={notificationProps.closePanel}
+                  onClearAll={notificationProps.clearAll}
+                  onDelete={notificationProps.deleteNotification}
+                  onNavigateToExports={notificationProps.onNavigateToExports}
+                />
+              )}
+            </div>
+          )}
+
+          {canSwitchModes && (
+            <Select value={mode} onValueChange={(v) => handleModeChange(v as Mode)}>
+              <SelectTrigger className="w-fit border-primary-foreground bg-transparent text-white [&_svg:not([class*='text-'])]:text-primary-foreground hover:bg-white/10">
+                <SelectValue placeholder="Select mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="user">Mode: User</SelectItem>
+                <SelectItem value="admin">Mode: Admin</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        </div>
       </div>
     </header>
   );

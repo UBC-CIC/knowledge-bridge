@@ -1,9 +1,4 @@
 const { initializeConnection } = require("./initializeConnection.js");
-const {
-  CognitoIdentityProviderClient,
-  AdminGetUserCommand,
-} = require("@aws-sdk/client-cognito-identity-provider");
-
 const { SM_DB_CREDENTIALS, RDS_PROXY_ENDPOINT } = process.env;
 let sqlConnection = global.sqlConnection;
 
@@ -19,7 +14,7 @@ exports.handler = async (event) => {
     sqlConnection = global.sqlConnection;
   }
 
-  const { userName, request } = event;
+  const { request } = event;
 
   try {
     // Extract user attributes from the event

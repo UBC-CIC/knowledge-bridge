@@ -1,63 +1,68 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize from "rehype-sanitize";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Bot, User, MessageSquare, ChevronDown, ChevronRight, Clock, RefreshCw, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Bot, User, MessageSquare, ChevronDown, ChevronRight, Clock, RefreshCw, ThumbsUp, ThumbsDown, Info, Download, X } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import { cn } from "@/lib/utils";
 
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+// ---------------------------------------------------------------------------
+// Cache
+// ---------------------------------------------------------------------------
+const CACHE_TTL: Record<string, number> = {
+    groups:      60 * 60 * 1000,  // 1 hour  — only changes when Glue runs
+    group_users: 15 * 60 * 1000,  // 15 min  — changes on user sign-in
+    sessions:     5 * 60 * 1000,  // 5 min   — new sessions created continuously
+    messages:     5 * 60 * 1000,  // 5 min   — messages are append-only
+};
+
+const getTtl = (key: string): number => {
+    if (key.startsWith("admin_chat_groups_")) return CACHE_TTL.groups;
+    if (key.startsWith("admin_chat_group_users_")) return CACHE_TTL.group_users;
+    if (key.startsWith("admin_chat_sessions_")) return CACHE_TTL.sessions;
+    return CACHE_TTL.messages;
+};
 
 const clearAdminCache = () => {
     Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('admin_chat_')) {
-            localStorage.removeItem(key);
-        }
+        if (key.startsWith("admin_chat_")) localStorage.removeItem(key);
     });
 };
 
-const getCachedItem = (key: string) => {
+const getCached = (key: string) => {
     try {
         const item = localStorage.getItem(key);
         if (!item) return null;
         const parsed = JSON.parse(item);
-        if (Date.now() - parsed.timestamp > CACHE_TTL) {
-            localStorage.removeItem(key);
-            return null;
-        }
+        if (Date.now() - parsed.timestamp > getTtl(key)) { localStorage.removeItem(key); return null; }
         return parsed.data;
-    } catch (e) {
-        return null;
+    } catch { return null; }
+};
+
+const setCached = (key: string, data: any) => {
+    try {
+        localStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), data }));
+    } catch {
+        clearAdminCache();
+        try { localStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), data })); } catch { }
     }
 };
 
-const setCachedItem = (key: string, data: any) => {
-    try {
-        localStorage.setItem(key, JSON.stringify({
-            timestamp: Date.now(),
-            data
-        }));
-    } catch (e) {
-        // Handle quota exceeded
-        console.warn('Local storage full, clearing admin cache');
-        clearAdminCache();
-        try {
-            localStorage.setItem(key, JSON.stringify({
-                timestamp: Date.now(),
-                data
-            }));
-        } catch (e2) {
-            console.error('Failed to cache item after clearing:', e2);
-        }
-    }
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+type EntraGroup = {
+    id: string;
+    display_name: string;
+    member_count: number;
 };
-// --- Types ---
-type UserData = {
+
+type GroupUser = {
     id: string;
     email: string;
-    role: string;
+    display_name: string;
     last_seen_at?: string;
 };
 
@@ -76,122 +81,231 @@ type ChatMessage = {
     content: string;
     created_at: string;
     sources?: any[];
-    rating?: { is_positive: boolean; comment: string | null } | null;
+    rating?: { is_positive: boolean; comment: string | null; category: string | null } | null;
 };
 
-export default function ChatHistory() {
-    const [users, setUsers] = useState<UserData[]>([]);
-    const [loadingUsers, setLoadingUsers] = useState(false);
+type PaginationState = { offset: number; total: number; hasMore: boolean };
 
-    const [expandedUserIds, setExpandedUserIds] = useState<Set<string>>(new Set());
+
+const UNASSIGNED_ID = "__unassigned__";
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+type ChatHistoryProps = {
+    initialSessionId?: string;
+    initialMessageId?: string;
+    initialUserLabel?: string;
+};
+
+export default function ChatHistory({ initialSessionId, initialMessageId, initialUserLabel }: ChatHistoryProps = {}) {
+    // Groups
+    const [groups, setGroups] = useState<EntraGroup[]>([]);
+    const [groupsPagination, setGroupsPagination] = useState<PaginationState>({ offset: 0, total: 0, hasMore: false });
+    const [loadingGroups, setLoadingGroups] = useState(false);
+    const [loadingMoreGroups, setLoadingMoreGroups] = useState(false);
+    const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
+
+    // Users per group — keyed by groupId
+    const [groupUsers, setGroupUsers] = useState<Record<string, GroupUser[]>>({});
+    const [groupUsersPagination, setGroupUsersPagination] = useState<Record<string, PaginationState>>({});
+    const [loadingGroupUsers, setLoadingGroupUsers] = useState<Record<string, boolean>>({});
+    const [expandedUserKeys, setExpandedUserKeys] = useState<Set<string>>(new Set()); // `${groupId}:${userId}`
+
+    // Sessions per user — keyed by userId (shared across groups, sessions are same)
     const [userSessions, setUserSessions] = useState<Record<string, ChatSession[]>>({});
-    const [loadingSessions, setLoadingSessions] = useState<Record<string, boolean>>({});
+    const [userSessionsPagination, setUserSessionsPagination] = useState<Record<string, PaginationState>>({});
+    const [loadingUserSessions, setLoadingUserSessions] = useState<Record<string, boolean>>({});
 
+    // Messages
     const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [loadingMessages, setLoadingMessages] = useState(false);
+    const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+    const pendingScrollMessageId = useRef<string | null>(null);
 
-    // Initial load
+    // Export
+    const [triggeringExport, setTriggeringExport] = useState<string | null>(null);
+    const [exportStartedToast, setExportStartedToast] = useState(false);
+    const exportToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const GROUP_LIMIT = 20;
+    const USER_LIMIT = 10;
+    const SESSION_LIMIT = 20;
+
+    useEffect(() => { fetchGroups(0, false); }, []);
+    useEffect(() => () => { if (exportToastTimer.current) clearTimeout(exportToastTimer.current); }, []);
+
+    // Deep-link: auto-load session and scroll to message when props are provided
     useEffect(() => {
-        fetchUsers();
-    }, []);
+        if (!initialSessionId) return;
+        pendingScrollMessageId.current = initialMessageId ?? null;
+        handleSessionSelect(initialSessionId);
+    }, [initialSessionId, initialMessageId]);
 
-    const getAuthHeaders = async () => {
-        const token = await AuthService.getIdToken();
-        return {
-            Authorization: token,
-            "Content-Type": "application/json",
-        };
-    };
+    // Scroll to highlighted message after messages load
+    useEffect(() => {
+        if (!pendingScrollMessageId.current || loadingMessages || messages.length === 0) return;
+        const targetId = pendingScrollMessageId.current;
+        pendingScrollMessageId.current = null;
+        setTimeout(() => {
+            const el = document.getElementById(`msg-${targetId}`);
+            if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                setHighlightedMessageId(targetId);
+                setTimeout(() => setHighlightedMessageId(null), 2500);
+            }
+        }, 100);
+    }, [messages, loadingMessages]);
 
-    const fetchUsers = async (forceRefresh = false) => {
-        if (!forceRefresh) {
-            const cached = getCachedItem('admin_chat_users');
+    const getAuthHeaders = async () => ({
+        Authorization: await AuthService.getIdToken(),
+        "Content-Type": "application/json",
+    });
+
+    // ---------------------------------------------------------------------------
+    // Fetch groups (paginated, append on load-more)
+    // ---------------------------------------------------------------------------
+    const fetchGroups = async (offset: number, append: boolean, forceRefresh = false) => {
+        const cacheKey = `admin_chat_groups_${offset}`;
+        if (!forceRefresh && !append) {
+            const cached = getCached(cacheKey);
             if (cached) {
-                setUsers(cached);
+                setGroups(cached.groups);
+                setGroupsPagination(cached.pagination);
                 return;
             }
         }
 
+        offset === 0 ? setLoadingGroups(true) : setLoadingMoreGroups(true);
         try {
-            setLoadingUsers(true);
             const headers = await getAuthHeaders();
-
             const res = await fetch(
-                `${import.meta.env.VITE_API_ENDPOINT}/admin/users?limit=100&offset=0`,
+                `${import.meta.env.VITE_API_ENDPOINT}/admin/entra_groups?limit=${GROUP_LIMIT}&offset=${offset}`,
                 { headers }
             );
-            if (!res.ok) throw new Error("Failed to fetch users");
-
+            if (!res.ok) throw new Error("Failed to fetch groups");
             const data = await res.json();
-            const usersData = Array.isArray(data) ? data : [];
-            setUsers(usersData);
-            setCachedItem('admin_chat_users', usersData);
+            const pagination: PaginationState = {
+                offset,
+                total: data.total,
+                hasMore: offset + data.groups.length < data.total,
+            };
+            setGroups(prev => append ? [...prev, ...data.groups] : data.groups);
+            setGroupsPagination(pagination);
+            if (!append) setCached(cacheKey, { groups: data.groups, pagination });
         } catch (e) {
             console.error(e);
         } finally {
-            setLoadingUsers(false);
+            setLoadingGroups(false);
+            setLoadingMoreGroups(false);
         }
     };
 
-    const fetchSessionsForUser = async (userId: string, forceRefresh = false) => {
-        const cacheKey = `admin_chat_sessions_${userId}`;
-        if (!forceRefresh) {
-            const cached = getCachedItem(cacheKey);
+    // ---------------------------------------------------------------------------
+    // Fetch users in a group (paginated, append on load-more)
+    // ---------------------------------------------------------------------------
+    const fetchGroupUsers = async (groupId: string, offset: number, append: boolean, forceRefresh = false) => {
+        const cacheKey = `admin_chat_group_users_${groupId}_${offset}`;
+        if (!forceRefresh && !append) {
+            const cached = getCached(cacheKey);
             if (cached) {
-                setUserSessions(prev => ({ ...prev, [userId]: cached }));
+                setGroupUsers(prev => ({ ...prev, [groupId]: append ? [...(prev[groupId] ?? []), ...cached.users] : cached.users }));
+                setGroupUsersPagination(prev => ({ ...prev, [groupId]: cached.pagination }));
                 return;
             }
         }
 
-        try {
-            setLoadingSessions(prev => ({ ...prev, [userId]: true }));
-            const headers = await getAuthHeaders();
+        const url = groupId === UNASSIGNED_ID
+            ? `${import.meta.env.VITE_API_ENDPOINT}/admin/entra_groups/unassigned/users?limit=${USER_LIMIT}&offset=${offset}`
+            : `${import.meta.env.VITE_API_ENDPOINT}/admin/entra_groups/${groupId}/users?limit=${USER_LIMIT}&offset=${offset}`;
 
+        setLoadingGroupUsers(prev => ({ ...prev, [groupId]: true }));
+        try {
+            const headers = await getAuthHeaders();
+            const res = await fetch(url, { headers });
+            if (!res.ok) throw new Error("Failed to fetch group users");
+            const data = await res.json();
+            const pagination: PaginationState = {
+                offset,
+                total: data.total,
+                hasMore: offset + data.users.length < data.total,
+            };
+            setGroupUsers(prev => ({ ...prev, [groupId]: append ? [...(prev[groupId] ?? []), ...data.users] : data.users }));
+            setGroupUsersPagination(prev => ({ ...prev, [groupId]: pagination }));
+            if (!append) setCached(cacheKey, { users: data.users, pagination });
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoadingGroupUsers(prev => ({ ...prev, [groupId]: false }));
+        }
+    };
+
+    // ---------------------------------------------------------------------------
+    // Fetch sessions for a user
+    // ---------------------------------------------------------------------------
+    const fetchUserSessions = async (userId: string, offset: number, append: boolean, forceRefresh = false) => {
+        const cacheKey = `admin_chat_sessions_${userId}_${offset}`;
+        if (!forceRefresh && !append) {
+            const cached = getCached(cacheKey);
+            if (cached) {
+                setUserSessions(prev => ({ ...prev, [userId]: append ? [...(prev[userId] ?? []), ...cached.sessions] : cached.sessions }));
+                setUserSessionsPagination(prev => ({ ...prev, [userId]: cached.pagination }));
+                return;
+            }
+        }
+
+        setLoadingUserSessions(prev => ({ ...prev, [userId]: true }));
+        try {
+            const headers = await getAuthHeaders();
             const res = await fetch(
-                `${import.meta.env.VITE_API_ENDPOINT}/admin/users/${userId}/chat_sessions?limit=50&offset=0`,
+                `${import.meta.env.VITE_API_ENDPOINT}/admin/users/${userId}/chat_sessions?limit=${SESSION_LIMIT}&offset=${offset}`,
                 { headers }
             );
             if (!res.ok) throw new Error("Failed to fetch sessions");
-
             const data = await res.json();
-            const sessionsData = Array.isArray(data) ? data : [];
-            setUserSessions(prev => ({ ...prev, [userId]: sessionsData }));
-            setCachedItem(cacheKey, sessionsData);
+            const sessions = Array.isArray(data) ? data : [];
+            // The existing endpoint doesn't return total — infer hasMore from returned count
+            const pagination: PaginationState = {
+                offset,
+                total: -1, // unknown
+                hasMore: sessions.length === SESSION_LIMIT,
+            };
+            setUserSessions(prev => ({ ...prev, [userId]: append ? [...(prev[userId] ?? []), ...sessions] : sessions }));
+            setUserSessionsPagination(prev => ({ ...prev, [userId]: pagination }));
+            if (!append) setCached(cacheKey, { sessions, pagination });
         } catch (e) {
             console.error(e);
         } finally {
-            setLoadingSessions(prev => ({ ...prev, [userId]: false }));
+            setLoadingUserSessions(prev => ({ ...prev, [userId]: false }));
         }
     };
 
-    const fetchMessagesForSession = async (sessionId: string, forceRefresh = false) => {
+    // ---------------------------------------------------------------------------
+    // Fetch messages for a session
+    // ---------------------------------------------------------------------------
+    const fetchMessages = async (sessionId: string, forceRefresh = false) => {
         const cacheKey = `admin_chat_messages_${sessionId}`;
         if (!forceRefresh) {
-            const cached = getCachedItem(cacheKey);
-            if (cached) {
-                setMessages(cached);
-                return;
-            }
+            const cached = getCached(cacheKey);
+            if (cached) { setMessages(cached); return; }
         }
 
+        setLoadingMessages(true);
         try {
-            setLoadingMessages(true);
             const headers = await getAuthHeaders();
-
             const res = await fetch(
                 `${import.meta.env.VITE_API_ENDPOINT}/admin/chat_sessions/${sessionId}/messages?limit=200&offset=0`,
                 { headers }
             );
             if (!res.ok) throw new Error("Failed to fetch messages");
-
             const data = await res.json();
-            const messagesData = (Array.isArray(data) ? data : []).map((msg: any) => ({
+            const msgs = (Array.isArray(data) ? data : []).map((msg: any) => ({
                 ...msg,
-                sources: typeof msg.sources === 'string' ? JSON.parse(msg.sources) : (msg.sources ?? []),
+                sources: typeof msg.sources === "string" ? JSON.parse(msg.sources) : (msg.sources ?? []),
             }));
-            setMessages(messagesData);
-            setCachedItem(cacheKey, messagesData);
+            setMessages(msgs);
+            setCached(cacheKey, msgs);
         } catch (e) {
             console.error(e);
         } finally {
@@ -199,14 +313,31 @@ export default function ChatHistory() {
         }
     };
 
-    const toggleUserExpanded = (userId: string) => {
-        setExpandedUserIds(prev => {
+    // ---------------------------------------------------------------------------
+    // Interaction handlers
+    // ---------------------------------------------------------------------------
+    const toggleGroup = (groupId: string) => {
+        setExpandedGroupIds(prev => {
             const next = new Set(prev);
-            if (next.has(userId)) {
-                next.delete(userId);
+            if (next.has(groupId)) {
+                next.delete(groupId);
             } else {
-                next.add(userId);
-                fetchSessionsForUser(userId);
+                next.add(groupId);
+                if (!groupUsers[groupId]) fetchGroupUsers(groupId, 0, false);
+            }
+            return next;
+        });
+    };
+
+    const toggleUser = (groupId: string, userId: string) => {
+        const key = `${groupId}:${userId}`;
+        setExpandedUserKeys(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) {
+                next.delete(key);
+            } else {
+                next.add(key);
+                if (!userSessions[userId]) fetchUserSessions(userId, 0, false);
             }
             return next;
         });
@@ -214,158 +345,215 @@ export default function ChatHistory() {
 
     const handleSessionSelect = (sessionId: string) => {
         setSelectedSessionId(sessionId);
-        setMessages([]); // prevent old messages from showing
-        fetchMessagesForSession(sessionId);
-    };
-
-    const formatDate = (dateString?: string) => {
-        if (!dateString) return "";
-        return new Date(dateString).toLocaleString([], {
-            month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit'
-        });
-    };
-
-    const formatSource = (source: any) => {
-        const uri = source?.source_url || source?.url || source?.uri || (typeof source === 'string' ? source : '');
-        const title = source?.title || '';
-        const content = source?.content || '';
-        const isSafe = uri && (uri.startsWith('https://') || uri.startsWith('http://'));
-
-        return (
-            <div className="flex flex-col gap-1 w-full text-left">
-                {title && (
-                    <div className="text-[11px] font-semibold text-gray-800">{title}</div>
-                )}
-                {uri && (
-                    <div className="break-all text-[11px] font-medium text-primary">
-                        <a href={isSafe ? uri : '#'} target="_blank" rel="noopener noreferrer" className="hover:underline" title={uri}>{uri}</a>
-                    </div>
-                )}
-                {content && (
-                    <div className="text-[11px] text-gray-500 italic pl-2 border-l-2 border-gray-200">
-                        "{content}"
-                    </div>
-                )}
-            </div>
-        );
+        setMessages([]);
+        fetchMessages(sessionId);
     };
 
     const handleRefresh = () => {
         clearAdminCache();
-        setExpandedUserIds(new Set());
-        setSelectedSessionId(null);
+        setGroups([]);
+        setGroupUsers({});
         setUserSessions({});
         setMessages([]);
-        fetchUsers(true);
+        setExpandedGroupIds(new Set());
+        setExpandedUserKeys(new Set());
+        setSelectedSessionId(null);
+        fetchGroups(0, false, true);
     };
 
+    // ---------------------------------------------------------------------------
+    // Export
+    // ---------------------------------------------------------------------------
+    const triggerExport = async (scope: 'all' | 'group' | 'user', scopeId?: string) => {
+        const key = scope + (scopeId ?? '');
+        setTriggeringExport(key);
+        try {
+            const headers = await getAuthHeaders();
+            const res = await fetch(
+                `${import.meta.env.VITE_API_ENDPOINT}/admin/export/trigger`,
+                {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ scope, ...(scopeId ? { scope_id: scopeId } : {}) }),
+                }
+            );
+            if (!res.ok) throw new Error("Failed to trigger export");
+            if (exportToastTimer.current) clearTimeout(exportToastTimer.current);
+            setExportStartedToast(true);
+            exportToastTimer.current = setTimeout(() => setExportStartedToast(false), 6000);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setTriggeringExport(null);
+        }
+    };
+
+    // ---------------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------------
+    const formatDate = (d?: string) => {
+        if (!d) return "";
+        return new Date(d).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    };
+
+    const formatSource = (source: any) => {
+        const uri = source?.source_url || source?.url || source?.uri || (typeof source === "string" ? source : "");
+        const title = source?.title || "";
+        const content = source?.content || "";
+        const isSafe = uri && (uri.startsWith("https://") || uri.startsWith("http://"));
+        return (
+            <div className="flex flex-col gap-1 w-full text-left">
+                {title && <div className="text-[11px] font-semibold text-gray-800">{title}</div>}
+                {uri && (
+                    <div className="break-all text-[11px] font-medium text-primary">
+                        <a href={isSafe ? uri : "#"} target="_blank" rel="noopener noreferrer" className="hover:underline">{uri}</a>
+                    </div>
+                )}
+                {content && <div className="text-[11px] text-gray-500 italic pl-2 border-l-2 border-gray-200">"{content}"</div>}
+            </div>
+        );
+    };
+
+    // ---------------------------------------------------------------------------
+    // Render
+    // ---------------------------------------------------------------------------
     return (
+        <>
         <div className="space-y-8 max-w-7xl mx-auto animate-in fade-in duration-500 flex flex-col h-[calc(100vh-8rem)]">
             <div className="flex-shrink-0 flex items-center justify-between">
                 <div>
                     <h2 className="text-3xl font-bold text-gray-900">Chat History</h2>
-                    <p className="text-gray-500 mt-1">
-                        Review user conversations and chat sessions across the platform.
-                    </p>
+                    <p className="text-gray-500 mt-1">Browse conversations by Entra group.</p>
                 </div>
-                <button
-                    onClick={handleRefresh}
-                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm"
-                >
-                    <RefreshCw size={16} className={loadingUsers ? "animate-spin text-primary" : ""} />
-                    Refresh Data
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => triggerExport('all')}
+                        disabled={triggeringExport === 'all'}
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm disabled:opacity-50"
+                    >
+                        <Download size={16} className={triggeringExport === 'all' ? "animate-pulse text-primary" : ""} />
+                        Export All
+                    </button>
+                    <button
+                        onClick={handleRefresh}
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm"
+                    >
+                        <RefreshCw size={16} className={loadingGroups ? "animate-spin text-primary" : ""} />
+                        Refresh Data
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1 min-h-0">
 
-                {/* Left Column: Users & Chat Sessions */}
+                {/* Left column: Groups → Users → Sessions */}
                 <Card className="md:col-span-1 border-gray-200 shadow-sm flex flex-col overflow-hidden h-full">
                     <CardHeader className="flex-shrink-0 border-b pb-4">
                         <CardTitle className="flex items-center gap-2 text-lg">
                             <User className="h-5 w-5 text-primary" />
-                            Users & Sessions
+                            Groups & Users
                         </CardTitle>
                         <CardDescription className="text-xs">
-                            Select a user to view their chat sessions.
+                            Expand a group to see its members and their sessions.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="flex-1 overflow-y-auto p-0">
-                        {loadingUsers ? (
-                            <div className="text-center text-gray-500 py-10">Loading users...</div>
-                        ) : users.length === 0 ? (
-                            <div className="text-center text-gray-500 py-10">No users found.</div>
+                        {loadingGroups ? (
+                            <div className="text-center text-gray-500 py-10">Loading groups…</div>
+                        ) : groups.length === 0 ? (
+                            <div className="text-center text-gray-500 py-10">No groups found. Run the Glue ingestion job first.</div>
                         ) : (
                             <div className="p-3 space-y-2">
-                                {users.map((user, index) => (
-                                    <div key={user.id} className="w-full bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm transition-all hover:shadow-md">
-                                        {/* User Header */}
-                                        <button
-                                            onClick={() => toggleUserExpanded(user.id)}
-                                            className="w-full flex items-center justify-between p-5 hover:bg-gray-50 transition-colors text-left"
-                                        >
-                                            <div>
-                                                <div className="font-semibold text-base text-gray-900">
-                                                    {user.email || `User ${index + 1}`}
-                                                </div>
-                                            </div>
-                                            <div className="text-gray-400">
-                                                {expandedUserIds.has(user.id) ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                                            </div>
-                                        </button>
-
-                                        {/* Sessions List */}
-                                        {expandedUserIds.has(user.id) && (
-                                            <div className="bg-gray-50/70 border-t border-gray-100 p-3 space-y-2">
-                                                {loadingSessions[user.id] ? (
-                                                    <div className="text-xs text-center text-gray-500 py-2">Loading sessions...</div>
-                                                ) : !userSessions[user.id] || userSessions[user.id].length === 0 ? (
-                                                    <div className="text-xs text-center text-gray-400 py-2">No sessions found.</div>
-                                                ) : (
-                                                    userSessions[user.id].map((session, sessionIndex) => (
-                                                        <button
-                                                            key={session.id}
-                                                            onClick={() => handleSessionSelect(session.id)}
-                                                            className={cn(
-                                                                "w-full text-left p-4 rounded-xl transition-all border",
-                                                                selectedSessionId === session.id
-                                                                    ? "bg-white border-primary shadow-md ring-1 ring-primary/20"
-                                                                    : "bg-white border-gray-200 shadow-sm hover:border-primary/50 hover:shadow-md"
-                                                            )}
-                                                        >
-                                                            <div className="flex items-center gap-3 mb-1.5">
-                                                                <MessageSquare size={16} className={selectedSessionId === session.id ? "text-primary" : "text-gray-400"} />
-                                                                <span className={cn(
-                                                                    "text-sm font-semibold truncate",
-                                                                    selectedSessionId === session.id ? "text-primary" : "text-gray-700"
-                                                                )}>
-                                                                    {session.title || `Chat ${sessionIndex + 1}`}
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex items-center gap-1 text-[10px] text-gray-500 pl-5">
-                                                                <Clock size={10} />
-                                                                {formatDate(session.created_at)}
-                                                            </div>
-                                                        </button>
-                                                    ))
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
+                                {groups.map(group => (
+                                    <GroupRow
+                                        key={group.id}
+                                        group={group}
+                                        expanded={expandedGroupIds.has(group.id)}
+                                        onToggle={() => toggleGroup(group.id)}
+                                        users={groupUsers[group.id] ?? []}
+                                        usersPagination={groupUsersPagination[group.id]}
+                                        loadingUsers={!!loadingGroupUsers[group.id]}
+                                        onLoadMoreUsers={() => {
+                                            const p = groupUsersPagination[group.id];
+                                            if (p) fetchGroupUsers(group.id, p.offset + USER_LIMIT, true);
+                                        }}
+                                        expandedUserKeys={expandedUserKeys}
+                                        onToggleUser={(userId) => toggleUser(group.id, userId)}
+                                        userSessions={userSessions}
+                                        userSessionsPagination={userSessionsPagination}
+                                        loadingUserSessions={loadingUserSessions}
+                                        onLoadMoreSessions={(userId) => {
+                                            const p = userSessionsPagination[userId];
+                                            if (p) fetchUserSessions(userId, p.offset + SESSION_LIMIT, true);
+                                        }}
+                                        selectedSessionId={selectedSessionId}
+                                        onSelectSession={handleSessionSelect}
+                                        formatDate={formatDate}
+                                        onExportGroup={(groupId) => triggerExport('group', groupId)}
+                                        onExportUser={(userId) => triggerExport('user', userId)}
+                                        exportingKey={triggeringExport}
+                                    />
                                 ))}
+
+                                {/* Load more groups */}
+                                {groupsPagination.hasMore && (
+                                    <button
+                                        onClick={() => fetchGroups(groupsPagination.offset + GROUP_LIMIT, true)}
+                                        disabled={loadingMoreGroups}
+                                        className="w-full text-xs text-primary hover:underline py-2 disabled:opacity-40"
+                                    >
+                                        {loadingMoreGroups ? "Loading…" : `Load more groups (${groups.length} / ${groupsPagination.total})`}
+                                    </button>
+                                )}
+
+                                {/* Unassigned virtual group — always shown at the bottom */}
+                                <GroupRow
+                                    key={UNASSIGNED_ID}
+                                    group={{ id: UNASSIGNED_ID, display_name: "Unassigned", member_count: groupUsersPagination[UNASSIGNED_ID]?.total ?? 0 }}
+                                    expanded={expandedGroupIds.has(UNASSIGNED_ID)}
+                                    onToggle={() => toggleGroup(UNASSIGNED_ID)}
+                                    users={groupUsers[UNASSIGNED_ID] ?? []}
+                                    usersPagination={groupUsersPagination[UNASSIGNED_ID]}
+                                    loadingUsers={!!loadingGroupUsers[UNASSIGNED_ID]}
+                                    onLoadMoreUsers={() => {
+                                        const p = groupUsersPagination[UNASSIGNED_ID];
+                                        if (p) fetchGroupUsers(UNASSIGNED_ID, p.offset + USER_LIMIT, true);
+                                    }}
+                                    expandedUserKeys={expandedUserKeys}
+                                    onToggleUser={(userId) => toggleUser(UNASSIGNED_ID, userId)}
+                                    userSessions={userSessions}
+                                    userSessionsPagination={userSessionsPagination}
+                                    loadingUserSessions={loadingUserSessions}
+                                    onLoadMoreSessions={(userId) => {
+                                        const p = userSessionsPagination[userId];
+                                        if (p) fetchUserSessions(userId, p.offset + SESSION_LIMIT, true);
+                                    }}
+                                    selectedSessionId={selectedSessionId}
+                                    onSelectSession={handleSessionSelect}
+                                    formatDate={formatDate}
+                                    exportingKey={triggeringExport}
+                                    isVirtual
+                                />
                             </div>
                         )}
                     </CardContent>
                 </Card>
 
-                {/* Right Column: Conversation Viewer */}
+                {/* Right column: Conversation viewer */}
                 <Card className="md:col-span-2 border-gray-200 shadow-sm flex flex-col overflow-hidden h-full">
                     <CardHeader className="flex-shrink-0 border-b pb-4 bg-gray-50/50">
-                        <CardTitle className="text-lg flex items-center gap-2">
-                            <Bot className="h-5 w-5 text-primary" />
-                            Conversation
-                        </CardTitle>
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-lg flex items-center gap-2">
+                                <Bot className="h-5 w-5 text-primary" />
+                                Conversation
+                            </CardTitle>
+                            {selectedSessionId && initialUserLabel && (
+                                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 rounded-full text-xs text-gray-600">
+                                    <User className="h-3 w-3 text-gray-400" />
+                                    {initialUserLabel}
+                                </div>
+                            )}
+                        </div>
                         <CardDescription className="text-xs">
                             {selectedSessionId ? "Transcript of selected session." : "Select a session to view the transcript."}
                         </CardDescription>
@@ -375,7 +563,7 @@ export default function ChatHistory() {
                         {!selectedSessionId ? (
                             <div className="flex h-full flex-col items-center justify-center text-gray-400 gap-4">
                                 <MessageSquare className="h-12 w-12 text-gray-200" />
-                                <p className="text-lg">Select a chat session from the left to view the conversation here</p>
+                                <p className="text-lg">Select a chat session to view the conversation</p>
                             </div>
                         ) : loadingMessages ? (
                             <div className="flex h-full items-center justify-center">
@@ -390,18 +578,11 @@ export default function ChatHistory() {
                                 {messages.map((msg, idx) => {
                                     const isUser = msg.sender.toLowerCase() === "user";
                                     return (
-                                        <div
-                                            key={msg.id || idx}
-                                            className={cn("flex flex-col max-w-[85%]", isUser ? "ml-auto" : "mr-auto")}
-                                        >
-                                            <div className={cn(
-                                                "flex items-center gap-2 mb-1 text-xs",
-                                                isUser ? "justify-end text-gray-500" : "text-gray-500"
-                                            )}>
+                                        <div key={msg.id || idx} id={msg.id ? `msg-${msg.id}` : undefined} className={cn("flex flex-col max-w-[85%] rounded-lg transition-colors duration-700", isUser ? "ml-auto" : "mr-auto", highlightedMessageId === msg.id && "ring-2 ring-primary/40 bg-primary/5")}>
+                                            <div className={cn("flex items-center gap-2 mb-1 text-xs", isUser ? "justify-end text-gray-500" : "text-gray-500")}>
                                                 <span className="font-semibold">{isUser ? "User" : "Assistant"}</span>
                                                 <span className="text-xs opacity-75">{formatDate(msg.created_at)}</span>
                                             </div>
-
                                             <div className={cn(
                                                 "p-5 rounded-2xl shadow-sm text-[15px] leading-relaxed",
                                                 isUser
@@ -422,24 +603,16 @@ export default function ChatHistory() {
                                                             ul: ({ ...props }) => <ul className="list-disc pl-5 mb-4" {...props} />,
                                                             ol: ({ ...props }) => <ol className="list-decimal pl-5 mb-4" {...props} />,
                                                             li: ({ ...props }) => <li className="mb-1" {...props} />,
-                                                            a: ({ ...props }) => (
-                                                                <a {...props} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" />
-                                                            ),
+                                                            a: ({ ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" />,
                                                             code: ({ className, children, ...props }: any) => {
                                                                 const isInline = !(/language-(\w+)/.exec(className || "")) && props.inline;
-                                                                return isInline ? (
-                                                                    <code className="px-1 py-0.5 bg-muted rounded text-xs" {...props}>{children}</code>
-                                                                ) : (
-                                                                    <code className="block p-2 bg-muted rounded-md text-xs overflow-auto" {...props}>{children}</code>
-                                                                );
+                                                                return isInline
+                                                                    ? <code className="px-1 py-0.5 bg-muted rounded text-xs" {...props}>{children}</code>
+                                                                    : <code className="block p-2 bg-muted rounded-md text-xs overflow-auto" {...props}>{children}</code>;
                                                             },
                                                             pre: ({ ...props }) => <pre className="bg-muted p-2 rounded-md overflow-auto text-xs my-2" {...props} />,
                                                             blockquote: ({ ...props }) => <blockquote className="pl-4 border-l-4 border-muted italic my-4" {...props} />,
-                                                            table: ({ ...props }) => (
-                                                                <div className="overflow-x-auto">
-                                                                    <table className="border-collapse border border-muted text-xs w-full my-4" {...props} />
-                                                                </div>
-                                                            ),
+                                                            table: ({ ...props }) => <div className="overflow-x-auto"><table className="border-collapse border border-muted text-xs w-full my-4" {...props} /></div>,
                                                             th: ({ ...props }) => <th className="border border-muted px-2 py-1 bg-muted" {...props} />,
                                                             td: ({ ...props }) => <td className="border border-muted px-2 py-1" {...props} />,
                                                         }}
@@ -448,8 +621,6 @@ export default function ChatHistory() {
                                                     </ReactMarkdown>
                                                 )}
                                             </div>
-
-                                            {/* Rating badge */}
                                             {msg.sender === "AI" && msg.rating && (
                                                 <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
                                                     <span className="font-medium text-gray-400">User's Rating:</span>
@@ -459,9 +630,7 @@ export default function ChatHistory() {
                                                             ? "bg-green-50 text-green-700 border-green-200"
                                                             : "bg-red-50 text-red-600 border-red-200"
                                                     )}>
-                                                        {msg.rating.is_positive
-                                                            ? <ThumbsUp size={10} />
-                                                            : <ThumbsDown size={10} />}
+                                                        {msg.rating.is_positive ? <ThumbsUp size={10} /> : <ThumbsDown size={10} />}
                                                         {msg.rating.is_positive ? "Helpful" : "Not helpful"}
                                                     </div>
                                                     {msg.rating.comment && (
@@ -469,8 +638,6 @@ export default function ChatHistory() {
                                                     )}
                                                 </div>
                                             )}
-
-                                            {/* Display Sources (if AI and sources exist) */}
                                             {msg.sender === "AI" && msg.sources && msg.sources.length > 0 && (
                                                 <div className="mt-2 w-full">
                                                     <details className="w-full group">
@@ -496,6 +663,242 @@ export default function ChatHistory() {
                     </CardContent>
                 </Card>
             </div>
+
+        </div>
+
+        {/* Export started toast */}
+        {exportStartedToast && (
+            <div className="fixed bottom-6 right-6 z-50 flex items-start gap-3 bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-3 max-w-sm animate-in slide-in-from-bottom-4 duration-300">
+                <div className="flex-shrink-0 mt-0.5 bg-blue-100 rounded-full p-1">
+                    <Download size={14} className="text-blue-600" />
+                </div>
+                <div className="flex-1 text-sm">
+                    <p className="font-medium text-gray-900">Export started</p>
+                    <p className="text-gray-500 text-xs mt-0.5">
+                        You'll be notified here once the export is ready to download.
+                    </p>
+                </div>
+                <button onClick={() => setExportStartedToast(false)} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
+                    <X size={14} />
+                </button>
+            </div>
+        )}
+        </>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// GroupRow sub-component
+// ---------------------------------------------------------------------------
+type GroupRowProps = {
+    group: EntraGroup;
+    expanded: boolean;
+    onToggle: () => void;
+    users: GroupUser[];
+    usersPagination?: PaginationState;
+    loadingUsers: boolean;
+    onLoadMoreUsers: () => void;
+    expandedUserKeys: Set<string>;
+    onToggleUser: (userId: string) => void;
+    userSessions: Record<string, ChatSession[]>;
+    userSessionsPagination: Record<string, PaginationState>;
+    loadingUserSessions: Record<string, boolean>;
+    onLoadMoreSessions: (userId: string) => void;
+    selectedSessionId: string | null;
+    onSelectSession: (sessionId: string) => void;
+    formatDate: (d?: string) => string;
+    isVirtual?: boolean;
+    onExportGroup?: (groupId: string) => void;
+    onExportUser?: (userId: string) => void;
+    exportingKey?: string | null;
+};
+
+function GroupRow({
+    group, expanded, onToggle,
+    users, usersPagination, loadingUsers, onLoadMoreUsers,
+    expandedUserKeys, onToggleUser,
+    userSessions, userSessionsPagination, loadingUserSessions, onLoadMoreSessions,
+    selectedSessionId, onSelectSession, formatDate, isVirtual, onExportGroup, onExportUser, exportingKey,
+}: GroupRowProps) {
+    const [showId, setShowId] = useState(false);
+    const tooltipRef = useRef<HTMLDivElement>(null);
+
+    return (
+        <div className="w-full bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm transition-all hover:shadow-md">
+            {/* Group header */}
+            <div className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
+                <button onClick={onToggle} className="flex items-center gap-2 flex-1 text-left min-w-0">
+                    {expanded ? <ChevronDown size={16} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={16} className="text-gray-400 flex-shrink-0" />}
+                    <span className="font-semibold text-sm text-gray-900 truncate">{group.display_name}</span>
+                    <span className="text-xs text-gray-400 flex-shrink-0">({group.member_count})</span>
+                </button>
+                {/* Export + (i) tooltip — hidden for virtual groups */}
+                {!isVirtual && (
+                    <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                        {onExportGroup && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onExportGroup(group.id); }}
+                                disabled={exportingKey === 'group' + group.id}
+                                className="p-1 text-gray-300 hover:text-primary transition-colors disabled:opacity-40"
+                                aria-label="Export group chats"
+                                title="Export group chats"
+                            >
+                                <Download size={14} className={exportingKey === 'group' + group.id ? "animate-pulse" : ""} />
+                            </button>
+                        )}
+                        <div className="relative" ref={tooltipRef}>
+                            <button
+                                onMouseEnter={() => setShowId(true)}
+                                onMouseLeave={() => setShowId(false)}
+                                className="p-1 text-gray-300 hover:text-gray-500 transition-colors"
+                                aria-label="Show group ID"
+                            >
+                                <Info size={14} />
+                            </button>
+                            {showId && (
+                                <div className="absolute right-0 top-6 z-50 bg-gray-900 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap shadow-lg">
+                                    {group.id}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Users list */}
+            {expanded && (
+                <div className="bg-gray-50/70 border-t border-gray-100 p-2 space-y-1">
+                    {loadingUsers && users.length === 0 ? (
+                        <div className="text-xs text-center text-gray-500 py-2">Loading users…</div>
+                    ) : users.length === 0 ? (
+                        <div className="text-xs text-center text-gray-400 py-2">No members found.</div>
+                    ) : (
+                        <>
+                            {users.map(user => (
+                                <UserRow
+                                    key={`${group.id}:${user.id}`}
+                                    groupId={group.id}
+                                    user={user}
+                                    expanded={expandedUserKeys.has(`${group.id}:${user.id}`)}
+                                    onToggle={() => onToggleUser(user.id)}
+                                    sessions={userSessions[user.id] ?? []}
+                                    sessionsPagination={userSessionsPagination[user.id]}
+                                    loadingSessions={!!loadingUserSessions[user.id]}
+                                    onLoadMoreSessions={() => onLoadMoreSessions(user.id)}
+                                    selectedSessionId={selectedSessionId}
+                                    onSelectSession={onSelectSession}
+                                    formatDate={formatDate}
+                                    onExport={onExportUser}
+                                    exportingKey={exportingKey}
+                                />
+                            ))}
+                            {usersPagination?.hasMore && (
+                                <button
+                                    onClick={onLoadMoreUsers}
+                                    disabled={loadingUsers}
+                                    className="w-full text-[11px] text-primary hover:underline py-1.5 disabled:opacity-40"
+                                >
+                                    {loadingUsers ? "Loading…" : `Load more users (${users.length} / ${usersPagination.total})`}
+                                </button>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// UserRow sub-component
+// ---------------------------------------------------------------------------
+type UserRowProps = {
+    groupId: string;
+    user: GroupUser;
+    expanded: boolean;
+    onToggle: () => void;
+    sessions: ChatSession[];
+    sessionsPagination?: PaginationState;
+    loadingSessions: boolean;
+    onLoadMoreSessions: () => void;
+    selectedSessionId: string | null;
+    onSelectSession: (sessionId: string) => void;
+    formatDate: (d?: string) => string;
+    onExport?: (userId: string) => void;
+    exportingKey?: string | null;
+};
+
+function UserRow({
+    user, expanded, onToggle,
+    sessions, sessionsPagination, loadingSessions, onLoadMoreSessions,
+    selectedSessionId, onSelectSession, formatDate, onExport, exportingKey,
+}: UserRowProps) {
+    return (
+        <div className="rounded-lg border border-gray-100 bg-white overflow-hidden">
+            <div className="flex items-center">
+                <button
+                    onClick={onToggle}
+                    className="flex-1 flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left min-w-0"
+                >
+                    {expanded ? <ChevronDown size={13} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={13} className="text-gray-400 flex-shrink-0" />}
+                    <User size={13} className="text-gray-400 flex-shrink-0" />
+                    <span className="text-xs font-medium text-gray-700 truncate">{user.email}</span>
+                </button>
+                {onExport && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onExport(user.id); }}
+                        disabled={exportingKey === 'user' + user.id}
+                        className="flex-shrink-0 px-2 py-2.5 text-gray-300 hover:text-primary transition-colors disabled:opacity-40"
+                        aria-label="Export user chats"
+                        title="Export user chats"
+                    >
+                        <Download size={12} className={exportingKey === 'user' + user.id ? "animate-pulse" : ""} />
+                    </button>
+                )}
+            </div>
+
+            {expanded && (
+                <div className="border-t border-gray-100 bg-gray-50/50 px-3 py-2 space-y-1">
+                    {loadingSessions && sessions.length === 0 ? (
+                        <div className="text-[11px] text-gray-400 py-1">Loading sessions…</div>
+                    ) : sessions.length === 0 ? (
+                        <div className="text-[11px] text-gray-400 py-1">No sessions.</div>
+                    ) : (
+                        <>
+                            {sessions.map((session, idx) => (
+                                <button
+                                    key={session.id}
+                                    onClick={() => onSelectSession(session.id)}
+                                    className={cn(
+                                        "w-full text-left px-2.5 py-2 rounded-lg border transition-all text-[11px]",
+                                        selectedSessionId === session.id
+                                            ? "bg-white border-primary shadow-sm ring-1 ring-primary/20 text-primary"
+                                            : "bg-white border-gray-200 hover:border-primary/40 text-gray-600"
+                                    )}
+                                >
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                        <MessageSquare size={10} className="flex-shrink-0" />
+                                        <span className="font-medium truncate">{session.title || `Chat ${idx + 1}`}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 text-[10px] text-gray-400 pl-3.5">
+                                        <Clock size={9} />
+                                        {formatDate(session.created_at)}
+                                    </div>
+                                </button>
+                            ))}
+                            {sessionsPagination?.hasMore && (
+                                <button
+                                    onClick={onLoadMoreSessions}
+                                    disabled={loadingSessions}
+                                    className="w-full text-[10px] text-primary hover:underline py-1 disabled:opacity-40"
+                                >
+                                    {loadingSessions ? "Loading…" : "Load more sessions"}
+                                </button>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

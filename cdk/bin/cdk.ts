@@ -91,3 +91,17 @@ stacks.forEach((stack) => {
     cdk.Tags.of(stack).add(key, value);
   });
 });
+
+const componentTags: Record<string, string> = {
+  [`${StackPrefix}-VPC`]:      "vpc",
+  [`${StackPrefix}-Database`]: "database",
+  [`${StackPrefix}-DBFlow`]:   "dbflow",
+  [`${StackPrefix}-Glue`]:     "glue",
+  [`${StackPrefix}-CICD`]:     "cicd",
+  [`${StackPrefix}-Api`]:      "api",
+  [`${StackPrefix}-Amplify`]:  "amplify",
+};
+stacks.forEach((stack) => {
+  const component = componentTags[stack.stackName];
+  if (component) cdk.Tags.of(stack).add("Component", component);
+});

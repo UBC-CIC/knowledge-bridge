@@ -3,9 +3,28 @@ const {
   GetSecretValueCommand,
 } = require("@aws-sdk/client-secrets-manager");
 const { CognitoJwtVerifier } = require("aws-jwt-verify");
+const postgres = require("postgres");
 
 const secretsManager = new SecretsManagerClient();
 let jwtVerifier;
+let sqlConnection;
+
+const initDb = async () => {
+  if (sqlConnection) return;
+  const res = await secretsManager.send(
+    new GetSecretValueCommand({ SecretId: process.env.SM_DB_CREDENTIALS })
+  );
+  const creds = JSON.parse(res.SecretString);
+  sqlConnection = postgres({
+    host: process.env.RDS_PROXY_ENDPOINT,
+    port: creds.port,
+    username: creds.username,
+    password: creds.password,
+    database: creds.dbname,
+    ssl: { rejectUnauthorized: true },
+  });
+  await sqlConnection`SELECT 1`;
+};
 
 async function initializeVerifier() {
   const response = await secretsManager.send(
@@ -49,6 +68,14 @@ exports.handler = async (event) => {
         groups: decoded?.["cognito:groups"],
       },
     });
+
+    await initDb();
+    await sqlConnection`
+      INSERT INTO ws_connections (connection_id, user_id, domain_name, stage)
+      VALUES (${connectionId}, ${decoded.sub}::uuid, ${domainName}, ${stage})
+      ON CONFLICT (connection_id) DO UPDATE
+        SET user_id = EXCLUDED.user_id, connected_at = now()
+    `;
 
     return { statusCode: 200 };
   } catch (error) {

@@ -1,5 +1,4 @@
 import os
-import json
 import boto3
 
 cached_allowed_origins = None

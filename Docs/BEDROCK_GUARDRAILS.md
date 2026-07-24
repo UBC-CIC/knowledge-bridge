@@ -1,18 +1,18 @@
 # Bedrock Guardrails Implementation
 
-This document explains the Bedrock Guardrails implementation integrated into the Specialization Explorer project. It covers how guardrails are created in CDK, configured, and enforced at runtime in the text generation Lambda, and provides tips for testing, monitoring, and troubleshooting.
+This document explains the Bedrock Guardrails implementation integrated into the CUCCIO Knowledge Base Assistant. It covers how guardrails are created in CDK, configured, and enforced at runtime in the text generation Lambda, and provides tips for testing, monitoring, and troubleshooting.
 
 ## Introduction
 
 ### What is Amazon Bedrock?
-Amazon Bedrock is a fully managed service that provides access to foundation models (LLMs) from leading AI providers through a single API. In this project, Amazon Bedrock powers the conversational AI assistant that helps students explore UBC Science specializations.
+Amazon Bedrock is a fully managed service that provides access to foundation models (LLMs) from leading AI providers through a single API. In this project, Amazon Bedrock powers the CUCCIO Knowledge Base Assistant, helping staff and CIOs query SharePoint content through conversational AI.
 **Learn more:** https://docs.aws.amazon.com/bedrock/
 
 ### How this project uses LLMs
-The Specialization Explorer uses Bedrock foundation models to:
-- Answer student questions about UBC Science specializations
-- Guide students through a structured discovery flow (Detective → Suggestion phases)
-- Provide personalized recommendations via natural language conversation
+The CUCCIO Knowledge Base Assistant uses Bedrock foundation models to:
+- Answer questions grounded in SharePoint content retrieved via pgvector similarity search
+- Maintain conversation context across multi-turn exchanges
+- Stay on-topic for CUCCIO organizational knowledge base use cases
 
 The primary model used is configurable via environment variables (defaulting to Claude Haiku for fast responses and Claude Sonnet for suggestions), accessed through Amazon Bedrock.
 
@@ -75,12 +75,12 @@ const guardrailConfig = {
   piiInputAction: 'ANONYMIZE',
   piiInputEnabled: true,
   promptAttackStrength: 'HIGH',
-  blockedInputMessaging: "Sorry, I can't help with that. I'm the UBC Science Specialization Explorer — I'm here to help you find the right specialization for your academic journey.",
+  blockedInputMessaging: "Sorry, I can't help with that. I'm the CUCCIO Knowledge Base Assistant — I'm here to help you find information from your organization's SharePoint content.",
 };
 
 const inputGuardrail = new bedrock.CfnGuardrail(this, 'InputGuardrail', {
   name: `${id}-input-guardrail`,
-  blockedInputMessaging: "Sorry, I can't help with that. I'm the UBC Science Specialization Explorer — I'm here to help you find the right specialization for your academic journey.",
+  blockedInputMessaging: "Sorry, I can't help with that. I'm the CUCCIO Knowledge Base Assistant — I'm here to help you find information from your organization's SharePoint content.",
   blockedOutputsMessaging: 'Response blocked.',
   sensitiveInformationPolicyConfig: {
     piiEntitiesConfig: [
@@ -334,7 +334,7 @@ Note: `guardrailVersion` in the Lambda environment is set to the pinned version 
 
 ## Glossary
 
-- **Bedrock LLM / Foundation model:** Pretrained large language models offered through Amazon Bedrock, such as Claude Haiku or Claude Sonnet. These are the models the runtime invokes to generate text.
+- **Bedrock LLM / Foundation model:** Pretrained large language models offered through Amazon Bedrock, such as Claude Haiku or Claude Sonnet. These are the models the CUCCIO Knowledge Base Assistant invokes to generate responses grounded in SharePoint content.
 - **Guardrail:** A Bedrock configuration that contains policy-based rules to filter, block, or transform prompts based on content policy and sensitive information rules.
 - **PII (Personally Identifiable Information):** Sensitive personal data that could identify an individual. This project anonymizes a broad set of PII types across general (name, email, phone, address, age, username, password, driver ID, license plate, VIN), financial (card numbers, CVV, expiry, PIN, IBAN, SWIFT code), IT (IP address, MAC address, URL), and Canada-specific (health number, SIN) categories. PII is **anonymized** (masked) rather than blocked — the request continues to the LLM with redacted text.
 - **Prompt injection:** An attack where a user attempts to override the system prompt or manipulate the model's behavior through crafted input. This is the only case where the guardrail **blocks** the request entirely.

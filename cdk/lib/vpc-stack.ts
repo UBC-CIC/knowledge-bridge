@@ -1,7 +1,6 @@
 import { Stack, StackProps } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
-import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { Fn } from "aws-cdk-lib";
 import {
   AwsCustomResource,
@@ -13,6 +12,8 @@ export class VpcStack extends Stack {
   public readonly vpc: ec2.Vpc;
   public readonly vpcCidrString: string;
   public readonly privateSubnetsCidrStrings: string[];
+  public readonly appSecurityGroup: ec2.SecurityGroup;
+  public readonly glueSecurityGroup: ec2.SecurityGroup;
 
   constructor(
     scope: Construct,
@@ -76,6 +77,25 @@ export class VpcStack extends Stack {
         Fn.importValue(`${AWSControlTowerStackSet}-PrivateSubnet2ACIDR`),
         Fn.importValue(`${AWSControlTowerStackSet}-PrivateSubnet3ACIDR`),
       ];
+
+      this.appSecurityGroup = new ec2.SecurityGroup(this, "AppSecurityGroup", {
+        vpc: this.vpc,
+        description: "Shared SG for all application compute (Lambdas)",
+        allowAllOutbound: true,
+      });
+
+      this.glueSecurityGroup = new ec2.SecurityGroup(this, "GlueSecurityGroup", {
+        vpc: this.vpc,
+        description: "Security group for Glue SharePoint ingestion job",
+        allowAllOutbound: true,
+      });
+      // Required by AWS Glue for VPC connections — Glue workers communicate over
+      // all TCP ports. This SG is not reused by any other resource.
+      this.glueSecurityGroup.addIngressRule(
+        this.glueSecurityGroup,
+        ec2.Port.allTcp(),
+        "Glue self-referencing rule (Glue VPC connection requirement)"
+      );
 
       if (existingPublicSubnetID === "") {
         console.log(
@@ -166,6 +186,8 @@ export class VpcStack extends Stack {
             },
             physicalResourceId: PhysicalResourceId.of("igw-lookup"),
           },
+          // ec2:DescribeInternetGateways is a List/Describe action and does not
+          // support resource-level scoping in IAM — ANY_RESOURCE is required here.
           policy: AwsCustomResourcePolicy.fromSdkCalls({
             resources: AwsCustomResourcePolicy.ANY_RESOURCE,
           }),
@@ -225,24 +247,15 @@ export class VpcStack extends Stack {
 
       this.vpc.addFlowLog(`${id}-vpcFlowLog`);
 
-      // Add DynamoDB gateway endpoint
-      this.vpc.addGatewayEndpoint(`${id}-DynamoDB Endpoint`, {
-        service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
-        subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
-      });
-
       // Add S3 gateway endpoint
       this.vpc.addGatewayEndpoint(`${id}-S3 Endpoint`, {
         service: ec2.GatewayVpcEndpointAwsService.S3,
-        subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
+        subnets: [
+          { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+          { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+        ],
       });
 
-      // Get default security group for VPC
-      const defaultSecurityGroup = ec2.SecurityGroup.fromSecurityGroupId(
-        this,
-        id,
-        this.vpc.vpcDefaultSecurityGroup
-      );
     } else {
       this.vpcCidrString = "10.0.0.0/16";
 
@@ -270,6 +283,25 @@ export class VpcStack extends Stack {
         ],
       });
 
+      this.appSecurityGroup = new ec2.SecurityGroup(this, "AppSecurityGroup", {
+        vpc: this.vpc,
+        description: "Shared SG for all application compute (Lambdas)",
+        allowAllOutbound: true,
+      });
+
+      this.glueSecurityGroup = new ec2.SecurityGroup(this, "GlueSecurityGroup", {
+        vpc: this.vpc,
+        description: "Security group for Glue SharePoint ingestion job",
+        allowAllOutbound: true,
+      });
+      // Required by AWS Glue for VPC connections — Glue workers communicate over
+      // all TCP ports. This SG is not reused by any other resource.
+      this.glueSecurityGroup.addIngressRule(
+        this.glueSecurityGroup,
+        ec2.Port.allTcp(),
+        "Glue self-referencing rule (Glue VPC connection requirement)"
+      );
+
       this.vpc.addFlowLog("kba-vpcFlowLog");
 
       // Add secrets manager endpoint to VPC
@@ -282,15 +314,6 @@ export class VpcStack extends Stack {
       this.vpc.addInterfaceEndpoint(`${id}-RDS Endpoint`, {
         service: ec2.InterfaceVpcEndpointAwsService.RDS,
         subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      });
-
-      // Add DynamoDB gateway endpoint
-      this.vpc.addGatewayEndpoint(`${id}-DynamoDB Endpoint`, {
-        service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
-        subnets: [
-          { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-          { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-        ],
       });
 
       // Add S3 gateway endpoint

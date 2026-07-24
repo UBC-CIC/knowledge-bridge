@@ -1,6 +1,6 @@
 # Database Migrations
 
-This document provides comprehensive information about the database migration system used in the Specialization Explorer project.
+This document provides comprehensive information about the database migration system used in the CUCCIO Knowledge Base Assistant project.
 
 ## Table of Contents
 
@@ -16,7 +16,7 @@ This document provides comprehensive information about the database migration sy
 
 ## Overview
 
-The Specialization Explorer project uses a `node-pg-migrate` system to manage database schema changes with numbered JavaScript files. This provides a reliable, trackable, and automated approach to database schema evolution throughout the project lifecycle.
+The CUCCIO Knowledge Base Assistant project uses a `node-pg-migrate` system to manage database schema changes with numbered JavaScript files. This provides a reliable, trackable, and automated approach to database schema evolution throughout the project lifecycle.
 
 ## Quick Start
 
@@ -463,23 +463,29 @@ exports.up = (pgm) => {
   pgm.sql(`
     INSERT INTO system_settings (
       max_messages_per_day,
-      min_messages_before_suggest,
-      max_chatacters_per_user_message,
-      max_chatacters_per_ai_message,
+      max_characters_per_user_message,
+      max_characters_per_ai_message,
       temperature,
-      top_p,
-      specialization_list,
+      support_score_threshold,
+      scope_alignment_score_threshold,
+      grounded_threshold,
+      partially_grounded_threshold,
+      max_context_chunks,
+      max_history_messages,
       updated_by,
       updated_at
     )
     SELECT
       45,
-      4,
       2000,
       5000,
       0.2,
-      0.9,
-      ARRAY[]::text[],
+      0.25,
+      0.25,
+      0.75,
+      0.50,
+      10,
+      20,
       NULL,
       now()
     WHERE NOT EXISTS (SELECT 1 FROM system_settings);
@@ -602,4 +608,4 @@ exports.up = (pgm) => {
 - Ask team for review of complex migrations
 - Check PostgreSQL documentation for advanced SQL features
 
-This comprehensive migration system ensures safe, trackable, and reliable database schema evolution throughout the Specialization Explorer project lifecycle.
+This comprehensive migration system ensures safe, trackable, and reliable database schema evolution throughout the CUCCIO Knowledge Base Assistant project lifecycle.

@@ -1,6 +1,6 @@
 # Security Overview
 
-**Project:** Specialization Explorer
+**Project:** CUCCIO Knowledge Base Assistant
 **Document Type:** Public Security Architecture Overview
 **Last Updated:** May 2026
 
@@ -21,7 +21,7 @@
 
 ## 1. Introduction
 
-Specialization Explorer is an AI-powered conversational application that helps undergraduate students navigate academic specialization choices. This document provides an overview of the security measures implemented to protect user data, ensure system integrity, and maintain service availability.
+The CUCCIO Knowledge Base Assistant is an AI-powered conversational application that helps CUCCIO staff and CIOs query organizational SharePoint content. This document provides an overview of the security measures implemented to protect user data, ensure system integrity, and maintain service availability.
 
 ### 1.1 Security Principles
 
@@ -89,8 +89,8 @@ Specialization Explorer is an AI-powered conversational application that helps u
 ║                         AI / ML LAYER                           ║
 ║                                                                 ║
 ║   ┌─────────────────┐  ┌─────────────────┐  ┌───────────────┐   ║
-║   │    Bedrock      │  │ Knowledge Base  │  │  OpenSearch   │   ║
-║   │   Guardrails    │  │     RAG         │  │  Serverless   │   ║
+║   │    Bedrock      │  │  Glue Ingestion │  │   pgvector    │   ║
+║   │   Guardrails    │  │  (SharePoint)   │  │    (RDS)      │   ║
 ║   └─────────────────┘  └─────────────────┘  └───────────────┘   ║
 ╚═════════════════════════════════════════════════════════════════╝
 ```
@@ -102,33 +102,35 @@ Specialization Explorer is an AI-powered conversational application that helps u
 | **Edge** | CloudFront, WAF, Shield | DDoS protection, TLS termination, rate limiting |
 | **Application** | API Gateway, Lambda | Authentication, authorization, input validation |
 | **Data** | RDS, S3, Secrets Manager | Encryption, access control, credential rotation |
-| **AI/ML** | Bedrock, Knowledge Base | PII protection, prompt security, output validation |
+| **AI/ML** | Bedrock, Glue, pgvector | PII protection, prompt security, output validation |
 
 ---
 
 ## 3. Authentication & Authorization
 
-### 3.1 Dual Authentication Model
+### 3.1 Authentication Model
+
+All users authenticate via **Microsoft Entra ID** federated through AWS Cognito. There is no anonymous or public access.
 
 ```
 ╔═════════════════════════════════════════════════════════════════╗
 ║                     AUTHENTICATION FLOW                         ║
 ╠══════════════════════════════╦══════════════════════════════════╣
-║        ADMIN USERS           ║          PUBLIC USERS            ║
+║        ADMIN USERS           ║         REGULAR USERS            ║
 ║                              ║                                  ║
 ║   ┌──────────────────────┐   ║   ┌──────────────────────┐       ║
-║   │     AWS Cognito      │   ║   │     Custom JWT       │       ║
+║   │  Microsoft Entra ID  │   ║   │  Microsoft Entra ID  │       ║
+║   │  via AWS Cognito     │   ║   │  via AWS Cognito     │       ║
 ║   │                      │   ║   │                      │       ║
-║   │  · Email / password  │   ║   │  · Anonymous access  │       ║
-║   │  · MFA support       │   ║   │  · Short-lived token │       ║
-║   │  · Email verify      │   ║   │  · Auto-refresh      │       ║
-║   │  · Group membership  │   ║   │                      │       ║
+║   │  · Entra ID SSO      │   ║   │  · Entra ID SSO      │       ║
+║   │  · Cognito `admin`   │   ║   │  · Cognito JWT       │       ║
+║   │    group membership  │   ║   │                      │       ║
 ║   └──────────┬───────────┘   ║   └──────────┬───────────┘       ║
 ║              │               ║              │                   ║
 ║              ▼               ║              ▼                   ║
 ║   ┌──────────────────────┐   ║   ┌──────────────────────┐       ║
 ║   │   Admin Authorizer   │   ║   │   User Authorizer    │       ║
-║   │    (Cognito JWT)     │   ║   │    (Custom JWT)      │       ║
+║   │    (Cognito JWT)     │   ║   │    (Cognito JWT)     │       ║
 ║   └──────────────────────┘   ║   └──────────────────────┘       ║
 ╚══════════════════════════════╩══════════════════════════════════╝
 ```
@@ -252,7 +254,7 @@ Specialization Explorer is an AI-powered conversational application that helps u
 | User credentials | Sensitive | Cognito managed, never stored in app |
 | Chat messages | Private | Encrypted at rest, user-scoped access |
 | Session data | Private | UUID-based, ownership validated |
-| Knowledge base | Internal | Encrypted, admin-only upload |
+| SharePoint content | Internal | Ingested via Glue, admin-triggered, stored encrypted in RDS |
 | System config | Internal | Database stored, admin-only access |
 
 ### 6.2 Encryption at Rest
@@ -262,10 +264,10 @@ Specialization Explorer is an AI-powered conversational application that helps u
 ║                      ENCRYPTION AT REST                         ║
 ╠═════════════════════════════════════════════════════════════════╣
 ║                                                                 ║
-║   ┌─────────────────┐  ┌─────────────────┐  ┌───────────────┐   ║
-║   │      RDS        │  │       S3        │  │  OpenSearch   │   ║
-║   │    AES-256      │  │     SSE-S3      │  │ AWS-managed   │   ║
-║   └─────────────────┘  └─────────────────┘  └───────────────┘   ║
+║   ┌─────────────────┐  ┌─────────────────┐                       ║
+║   │   RDS / pgvec   │  │       S3        │                       ║
+║   │    AES-256      │  │     SSE-S3      │                       ║
+║   └─────────────────┘  └─────────────────┘                       ║
 ║                                                                 ║
 ╠═════════════════════════════════════════════════════════════════╣
 ║                      ENCRYPTION IN TRANSIT                      ║
@@ -326,8 +328,8 @@ Specialization Explorer is an AI-powered conversational application that helps u
                               ▼
   ┌─────────────────────────────────────────────────────────────┐
   │  3 · RAG RETRIEVAL                                          │
-  │      · Knowledge Base query                                 │
-  │      · Source document retrieval                            │
+  │      · pgvector cosine similarity search                    │
+  │      · Retrieved chunk assembly                             │
   └───────────────────────────┬─────────────────────────────────┘
                               │
                               ▼
@@ -364,7 +366,7 @@ Specialization Explorer is an AI-powered conversational application that helps u
 | Control | Description |
 |---------|-------------|
 | **Prompt Attack Detection** | Identifies and blocks injection attempts |
-| **Scope Enforcement** | System prompts restrict topic to academic advising |
+| **Scope Enforcement** | System prompts restrict topic to organizational knowledge base content |
 | **Guardrails** | Strict boundaries on acceptable responses |
 
 For guardrail configuration details, see [`Docs/BEDROCK_GUARDRAILS.md`](./BEDROCK_GUARDRAILS.md).

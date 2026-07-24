@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChevronDown, ChevronUp, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ const isSafeUrl = (url: string) => {
 
 const DISLIKE_CHIPS = ["Not helpful", "Inaccurate", "Off-topic", "Other"];
 
-type MessageRating = { is_positive: boolean; comment: string | null };
+type MessageRating = { is_positive: boolean; comment: string | null; category?: string | null };
 
 type AIChatMessageProps = {
   text: string;
@@ -29,7 +29,7 @@ type AIChatMessageProps = {
   messageId?: string;
   isLastBotMessage?: boolean;
   existingRating?: MessageRating | null;
-  onRate?: (messageId: string, is_positive: boolean, comment?: string) => Promise<void>;
+  onRate?: (messageId: string, is_positive: boolean, category?: string, comment?: string) => Promise<void>;
 };
 
 export default function AIChatMessage({
@@ -49,19 +49,33 @@ export default function AIChatMessage({
   const [submittedRating, setSubmittedRating] = useState<boolean | null>(
     existingRating?.is_positive ?? null
   );
+
+  useEffect(() => {
+    if (existingRating !== null) {
+      setRatingState("submitted");
+      setSubmittedRating(existingRating.is_positive);
+    }
+  }, [existingRating]);
   const [selectedChip, setSelectedChip] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [ratingError, setRatingError] = useState<string | null>(null);
 
   const showRatingUI = isLastBotMessage && !isTyping && !!messageId && !!onRate;
 
   const handleThumbsUp = async () => {
     if (!messageId || !onRate) return;
     setSubmitting(true);
-    await onRate(messageId, true);
-    setSubmittedRating(true);
-    setRatingState("submitted");
-    setSubmitting(false);
+    setRatingError(null);
+    try {
+      await onRate(messageId, true, undefined, undefined);
+      setSubmittedRating(true);
+      setRatingState("submitted");
+    } catch {
+      setRatingError("Could not save rating. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleThumbsDown = () => {
@@ -71,20 +85,32 @@ export default function AIChatMessage({
   const handleDislikeSubmit = async () => {
     if (!messageId || !onRate) return;
     setSubmitting(true);
-    const comment = [selectedChip, commentText.trim()].filter(Boolean).join(" — ") || undefined;
-    await onRate(messageId, false, comment);
-    setSubmittedRating(false);
-    setRatingState("submitted");
-    setSubmitting(false);
+    setRatingError(null);
+    const comment = commentText.trim() || undefined;
+    try {
+      await onRate(messageId, false, selectedChip ?? undefined, comment);
+      setSubmittedRating(false);
+      setRatingState("submitted");
+    } catch {
+      setRatingError("Could not save rating. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleDislikeSkip = async () => {
     if (!messageId || !onRate) return;
     setSubmitting(true);
-    await onRate(messageId, false);
-    setSubmittedRating(false);
-    setRatingState("submitted");
-    setSubmitting(false);
+    setRatingError(null);
+    try {
+      await onRate(messageId, false, "Other", undefined);
+      setSubmittedRating(false);
+      setRatingState("submitted");
+    } catch {
+      setRatingError("Could not save rating. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const formatSource = (source: any) => {
@@ -421,7 +447,7 @@ export default function AIChatMessage({
                     <Button
                       size="sm"
                       onClick={handleDislikeSubmit}
-                      disabled={submitting}
+                      disabled={submitting || !selectedChip || (selectedChip === "Other" && !commentText.trim())}
                       className="h-7 text-xs bg-primary text-white hover:bg-primary/90"
                     >
                       <Send className="h-3 w-3 mr-1" />Submit
@@ -447,6 +473,10 @@ export default function AIChatMessage({
                   </button>
                   <span className="text-xs text-muted-foreground">Thanks for the feedback</span>
                 </div>
+              )}
+
+              {ratingError && (
+                <p className="mt-2 text-xs text-red-600">{ratingError}</p>
               )}
             </div>
           )}

@@ -1,7 +1,7 @@
-import boto3
 import logging
 import re
 from typing import Dict, Any, Optional, List, Tuple
+from helpers.bedrock import get_bedrock_llm_client
 
 from helpers.crud import (
     fetch_recent_messages, ensure_session_exists, insert_message,
@@ -16,7 +16,6 @@ from helpers.guardrail import invoke_guardrail, ACTION_ANONYMIZED, ACTION_BLOCKE
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-logger.info(f"boto3 version: {boto3.__version__}")
 
 
 def _rewrite_query_for_retrieval(
@@ -50,9 +49,9 @@ Output ONLY the search query — no explanation, no quotes, no preamble.
 </latest_user_message>"""
 
     try:
-        bedrock_runtime = boto3.client("bedrock-runtime", region_name=llm_region)
+        bedrock_runtime = get_bedrock_llm_client(llm_region)
         response = bedrock_runtime.converse(
-            modelId=config.HAIKU_ARN,
+            modelId=config.MODEL_ARN,
             messages=[{"role": "user", "content": [{"text": user_message}]}],
             system=[{"text": rewrite_system_prompt}],
             inferenceConfig={"maxTokens": 60, "temperature": 0.0}
@@ -149,12 +148,14 @@ def _save_ai_response(
     warning_text: Optional[str] = None,
 ):
     try:
-        insert_message(db_connection, chat_session_id, "AI", answer_text, sources, warning_text)
+        message_id = insert_message(db_connection, chat_session_id, "AI", answer_text, sources, warning_text)
         update_last_active_session(db_connection, chat_session_id)
         db_connection.commit()
+        return message_id
     except Exception as e:
         db_connection.rollback()
         logger.error(f"Failed to save AI response: {e}")
+        return None
 
 
 def get_response(
@@ -173,23 +174,23 @@ def get_response(
 
     try:
         # 1. Check message limit
-        if user_id:
-            is_under_limit, usage_info = check_limit(user_id, db_connection)
-            if not is_under_limit:
-                return {
-                    "response": "Daily message limit exceeded. Please try again tomorrow.",
-                    "sources_used": [],
-                    "sessionId": chat_session_id,
-                    "message_limit_exceeded": True,
-                    "message_usage": usage_info,
-                    "warning": None,
-                }
+        is_under_limit, usage_info = check_limit(user_id, db_connection)
+        if not is_under_limit:
+            return {
+                "response": "Daily message limit exceeded. Please try again tomorrow.",
+                "sources_used": [],
+                "sessionId": chat_session_id,
+                "message_limit_exceeded": True,
+                "message_usage": usage_info,
+                "warning": None,
+            }
 
         # 2. Handle intro message — no retrieval, no guardrails, just return the greeting
         if is_intro_message:
+            intro_message_id = None
             try:
                 ensure_session_exists(db_connection, chat_session_id, user_id)
-                insert_message(db_connection, chat_session_id, "AI", config.INITIAL_PROMPT, sources=[], warning=None)
+                intro_message_id = insert_message(db_connection, chat_session_id, "AI", config.INITIAL_PROMPT, sources=[], warning=None)
                 update_last_active_session(db_connection, chat_session_id)
                 db_connection.commit()
             except Exception as e:
@@ -201,6 +202,7 @@ def get_response(
                 "response": config.INITIAL_PROMPT,
                 "sources_used": [],
                 "sessionId": chat_session_id,
+                "message_id": intro_message_id,
                 "message_usage": {},
                 "warning": None,
             }
@@ -219,6 +221,7 @@ def get_response(
 
             if guardrail_result['action'] == ACTION_BLOCKED:
                 denial_text = guardrail_result['text']
+                ai_message_id = None
                 try:
                     ensure_session_exists(db_connection, chat_session_id, user_id)
                     insert_message(db_connection, chat_session_id, 'user', query, sources=None, warning=None)
@@ -227,13 +230,14 @@ def get_response(
                 except Exception as db_err:
                     db_connection.rollback()
                     logger.error(f"DB error saving blocked message: {db_err}")
-                _save_ai_response(db_connection, chat_session_id, denial_text, sources=[], warning_text=None)
+                ai_message_id = _save_ai_response(db_connection, chat_session_id, denial_text, sources=[], warning_text=None)
                 if stream_callback:
                     stream_callback(denial_text)
                 return {
                     "response": denial_text,
                     "sources_used": [],
                     "sessionId": chat_session_id,
+                    "message_id": ai_message_id,
                     "message_usage": {},
                     "warning": None,
                 }
@@ -242,7 +246,7 @@ def get_response(
                 query = guardrail_result['text']
 
         # 3. Fetch user groups from DB
-        user_groups = get_user_groups(user_id, db_connection) if user_id else []
+        user_groups = get_user_groups(user_id, db_connection)
         logger.info(f"User {user_id} groups for retrieval: {user_groups}")
 
         # 4. Prepare conversation
@@ -256,7 +260,7 @@ def get_response(
             save_user_message=save_user_message,
         )
 
-        if user_id and save_user_message:
+        if save_user_message:
             usage_info = record_message_sent(user_id, db_connection)
 
     except ValueError as e:
@@ -267,7 +271,7 @@ def get_response(
 
     # 5. Build request payload with prompt caching on static system prompt
     request_payload = {
-        "modelId": config.HAIKU_ARN,
+        "modelId": config.MODEL_ARN,
         "messages": bedrock_messages,
         "system": [
             {"text": static_system_prompt},
@@ -280,7 +284,7 @@ def get_response(
         }
     }
 
-    bedrock_runtime = boto3.client("bedrock-runtime", region_name=llm_region)
+    bedrock_runtime = get_bedrock_llm_client(llm_region)
 
     full_response_text = ""
     yielded_text = ""
@@ -343,7 +347,7 @@ def get_response(
                 try:
                     cited_indices = [int(x.strip()) for x in indices_str.split(',')]
                 except ValueError:
-                    pass
+                    pass  # malformed indices — keep cited_indices as default empty list
 
     except Exception as e:
         logger.error(f"Generation failed: {e}")
@@ -354,12 +358,13 @@ def get_response(
     used_sources = [source for i, source in enumerate(sources, 1) if i in cited_indices]
 
     # 9. Save AI response
-    _save_ai_response(db_connection, chat_session_id, answer_text, used_sources)
+    ai_message_id = _save_ai_response(db_connection, chat_session_id, answer_text, used_sources)
 
     return {
         "response": answer_text,
         "sources_used": used_sources,
         "sessionId": chat_session_id,
+        "message_id": ai_message_id,
         "message_usage": usage_info,
         "warning": None,
     }

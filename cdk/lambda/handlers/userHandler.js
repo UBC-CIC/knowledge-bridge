@@ -1,42 +1,7 @@
-const postgres = require("postgres");
 const { getCorsHeaders } = require("./utils/cors.js");
-const {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} = require("@aws-sdk/client-secrets-manager");
-const crypto = require("crypto");
 const { validateUUID } = require("./utils/validation.js");
-
-let sqlConnection;
-const secretsManager = new SecretsManagerClient();
-
-const initConnection = async () => {
-  if (!sqlConnection) {
-    try {
-      const getSecretValueCommand = new GetSecretValueCommand({
-        SecretId: process.env.SM_DB_CREDENTIALS,
-      });
-      const secretResponse = await secretsManager.send(getSecretValueCommand);
-      const credentials = JSON.parse(secretResponse.SecretString);
-
-      const connectionConfig = {
-        host: process.env.RDS_PROXY_ENDPOINT,
-        port: credentials.port,
-        username: credentials.username,
-        password: credentials.password,
-        database: credentials.dbname,
-        ssl: { rejectUnauthorized: false },
-      };
-
-      sqlConnection = postgres(connectionConfig);
-      await sqlConnection`SELECT 1`;
-      console.log("Database connection initialized successfully");
-    } catch (error) {
-      console.error("Error initializing database connection:", error);
-      throw error;
-    }
-  }
-};
+const { initConnection, getSqlConnection } = require("./initializeConnection.js");
+const { getAuthenticatedUserId } = require("./utils/handlerUtils.js");
 
 const createResponse = async (event) => ({
     statusCode: 200,
@@ -75,7 +40,7 @@ exports.handler = async (event) => {
 
 
       case "GET /user/{user_id}": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
         const userIdValidation = validateUUID(userId, "user_id");
         if (!userIdValidation.valid) {
           response.statusCode = 400;
@@ -83,7 +48,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const user = await sqlConnection`
+        const user = await getSqlConnection()`
           SELECT id, email, display_name, created_at, last_seen_at,
                 messages_sent, messages_window_started_at, metadata
           FROM users
@@ -97,7 +62,7 @@ exports.handler = async (event) => {
         }
 
         // update last_seen_at
-        await sqlConnection`
+        await getSqlConnection()`
           UPDATE users SET last_seen_at = NOW() WHERE id = ${userId}
         `;
 
@@ -107,7 +72,7 @@ exports.handler = async (event) => {
 
       // Update's user with email so they no longer will be anonymous
       case "PUT /user/{user_id}": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
         const userIdValidation = validateUUID(userId, "user_id");
         if (!userIdValidation.valid) {
           response.statusCode = 400;
@@ -148,7 +113,7 @@ exports.handler = async (event) => {
           break;
         }
 
-        const existingUser = await sqlConnection`
+        const existingUser = await getSqlConnection()`
           SELECT id
           FROM users
           WHERE id = ${userId}
@@ -161,7 +126,7 @@ exports.handler = async (event) => {
         }
 
         try {
-          const updatedUser = await sqlConnection`
+          const updatedUser = await getSqlConnection()`
             UPDATE users
             SET
               email = ${normalizedEmail},
@@ -193,7 +158,7 @@ exports.handler = async (event) => {
       }
 
       case "GET /user/{user_id}/chat_sessions/{chat_session_id}/chat_history": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
         const chatSessionId = event.pathParameters?.chat_session_id;
 
         const userIdValidation = validateUUID(userId, "user_id");
@@ -210,7 +175,7 @@ exports.handler = async (event) => {
         }
 
         // Validate user exists (optional but nice)
-        const userExists = await sqlConnection`
+        const userExists = await getSqlConnection()`
           SELECT id FROM users WHERE id = ${userId}
         `;
         if (userExists.length === 0) {
@@ -220,7 +185,7 @@ exports.handler = async (event) => {
         }
 
         // Validate chat session exists AND belongs to user
-        const chatSession = await sqlConnection`
+        const chatSession = await getSqlConnection()`
           SELECT id, user_id
           FROM chat_sessions
           WHERE id = ${chatSessionId}
@@ -239,7 +204,7 @@ exports.handler = async (event) => {
         const limit = Math.min(parseInt(event.queryStringParameters?.limit) || 200, 1000);
         const offset = parseInt(event.queryStringParameters?.offset) || 0;
 
-        const rows = await sqlConnection`
+        const rows = await getSqlConnection()`
           SELECT
             m.id,
             m.chat_session_id,
@@ -250,6 +215,7 @@ exports.handler = async (event) => {
             m.created_at,
             r.is_positive AS rating_is_positive,
             r.comment AS rating_comment,
+            r.category AS rating_category,
             COUNT(*) OVER() AS total_count
           FROM chat_messages m
           LEFT JOIN message_ratings r
@@ -260,10 +226,10 @@ exports.handler = async (event) => {
         `;
 
         const total = rows.length > 0 ? parseInt(rows[0].total_count) : 0;
-        const messages = rows.map(({ total_count, rating_is_positive, rating_comment, ...msg }) => ({
+        const messages = rows.map(({ total_count, rating_is_positive, rating_comment, rating_category, ...msg }) => ({
           ...msg,
           rating: rating_is_positive !== null && rating_is_positive !== undefined
-            ? { is_positive: rating_is_positive, comment: rating_comment ?? null }
+            ? { is_positive: rating_is_positive, comment: rating_comment ?? null, category: rating_category ?? null }
             : null,
         }));
 
@@ -285,7 +251,7 @@ exports.handler = async (event) => {
       }
 
       case "POST /user/{user_id}/chat_sessions/{chat_session_id}/messages/{message_id}/rating": {
-        const userId = event.pathParameters?.user_id;
+        const userId = getAuthenticatedUserId(event);
         const chatSessionId = event.pathParameters?.chat_session_id;
         const messageId = event.pathParameters?.message_id;
 
@@ -327,8 +293,13 @@ exports.handler = async (event) => {
           ? parsedBody.comment.trim().slice(0, 2000) || null
           : null;
 
+        const VALID_CATEGORIES = ["Not helpful", "Inaccurate", "Off-topic", "Other"];
+        const category = parsedBody.category && VALID_CATEGORIES.includes(parsedBody.category)
+          ? parsedBody.category
+          : null;
+
         // Verify message belongs to this session and session belongs to this user
-        const msg = await sqlConnection`
+        const msg = await getSqlConnection()`
           SELECT m.id FROM chat_messages m
           JOIN chat_sessions s ON s.id = m.chat_session_id
           WHERE m.id = ${messageId}
@@ -342,15 +313,38 @@ exports.handler = async (event) => {
           break;
         }
 
-        await sqlConnection`
-          INSERT INTO message_ratings (message_id, user_id, is_positive, comment)
-          VALUES (${messageId}, ${userId}, ${parsedBody.is_positive}, ${comment})
+        await getSqlConnection()`
+          INSERT INTO message_ratings (message_id, user_id, is_positive, comment, category)
+          VALUES (${messageId}, ${userId}, ${parsedBody.is_positive}, ${comment}, ${category}::feedback_category)
           ON CONFLICT (message_id, user_id)
-          DO UPDATE SET is_positive = EXCLUDED.is_positive, comment = EXCLUDED.comment
+          DO UPDATE SET is_positive = EXCLUDED.is_positive, comment = EXCLUDED.comment, category = EXCLUDED.category
         `;
 
         response.statusCode = 200;
         response.body = JSON.stringify({ success: true });
+        break;
+      }
+
+      case "GET /user/{user_id}/accessible_sources": {
+        const userId = getAuthenticatedUserId(event);
+        const userIdValidation = validateUUID(userId, "user_id");
+        if (!userIdValidation.valid) {
+          response.statusCode = 400;
+          response.body = JSON.stringify({ error: userIdValidation.error });
+          break;
+        }
+
+        const sources = await getSqlConnection()`
+          SELECT DISTINCT ss.id, ss.name, ss.source_url
+          FROM user_memberships um
+          JOIN site_source_access ssa ON ssa.entra_group_id = um.entra_group_id
+          JOIN site_sources ss ON ss.id = ssa.site_source_id
+          WHERE um.user_id = ${userId}
+            AND ss.status IN ('active', 'degraded')
+          ORDER BY ss.name
+        `;
+
+        response.body = JSON.stringify({ sources });
         break;
       }
 
@@ -361,6 +355,5 @@ exports.handler = async (event) => {
     handleError(error, response);
   }
 
-  console.log(response);
   return response;
 };

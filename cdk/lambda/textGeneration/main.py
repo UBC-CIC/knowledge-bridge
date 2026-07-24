@@ -1,9 +1,7 @@
-
 import boto3.exceptions
 import json
 from helpers.cors import get_cors_headers
 import logging
-import os
 import boto3
 from helpers.chat import get_response
 from helpers.db_connection import get_db_connection
@@ -34,27 +32,39 @@ def handler(event, context=None):
 
     query = body.get('query')
     is_intro_message = body.get('is_intro_message', False)
-    
-    # Perform Query Length Validation 
-    if len(query) > config.MAX_CHARACTERS_PER_USER_MESSAGE:
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': f'Query exceeds maximum length of {config.MAX_CHARACTERS_PER_USER_MESSAGE} characters'})
-        }
-    
+
     chat_session_id = body.get('chat_session_id')
-    
+
     # Fallback to path parameters
     if not chat_session_id and 'pathParameters' in event and event['pathParameters']:
         chat_session_id = event['pathParameters'].get('chat_session_id') or event['pathParameters'].get('id')
 
-    user_id = body.get('user_id')
+    # REST path: authorizer injects verified identity; WebSocket path: default.js already
+    # validated user_id against ws_connections by connectionId before invoking this Lambda.
+    ws_connection_id = event.get('requestContext', {}).get('connectionId')
+    user_id = event.get('requestContext', {}).get('authorizer', {}).get('userId')
+    if not user_id:
+        if ws_connection_id:
+            # Synthetic event from default.js — user_id was server-derived, safe to trust
+            user_id = body.get('user_id')
+        if not user_id:
+            return {
+                'statusCode': 401,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'Unauthorized'})
+            }
     logger.info(f"Request: user_id={user_id}, chat_session_id={chat_session_id}, is_intro={is_intro_message}")
-    
+
     if not query or not chat_session_id:
         return {
             'statusCode': 400,
             'body': json.dumps({'error': 'Missing query or chat_session_id'})
+        }
+
+    if len(query) > config.MAX_CHARACTERS_PER_USER_MESSAGE:
+        return {
+            'statusCode': 400,
+            'body': json.dumps({'error': f'Query exceeds maximum length of {config.MAX_CHARACTERS_PER_USER_MESSAGE} characters'})
         }
 
     # Sanitize session ID before querying DB
@@ -71,13 +81,12 @@ def handler(event, context=None):
     try:
         conn = get_db_connection()
 
-        # Validate the session ownership before doing anything with the session 
-        if user_id: 
-            if not validate_session_ownership(conn, chat_session_id, user_id): 
-                return {
-                    'statusCode': 403,
-                    'body': json.dumps({'error': 'Unauthorized access to chat session'})
-                }
+        # Validate the session ownership before doing anything with the session
+        if not validate_session_ownership(conn, chat_session_id, user_id):
+            return {
+                'statusCode': 403,
+                'body': json.dumps({'error': 'Unauthorized access to chat session'})
+            }
         
         # Load dynamic configuration from DB
         config.load_config(conn)
@@ -129,6 +138,7 @@ def handler(event, context=None):
             "sources": response_data.get("sources_used", []),
             "warning": response_data.get("warning"),
             "chat_session_id": response_data.get("sessionId"),
+            "message_id": response_data.get("message_id"),
             "token_usage": response_data.get("token_usage", {})
         }
         
@@ -161,6 +171,7 @@ def handler(event, context=None):
                         'sources': response_body['sources'],
                         'warning': response_body.get('warning'),
                         'chat_session_id': response_body['chat_session_id'],
+                        'message_id': response_body.get('message_id'),
                         'token_usage': response_body.get('token_usage', {})
                     }
                     apigw_management.post_to_connection(
@@ -173,7 +184,7 @@ def handler(event, context=None):
 
         return {
             'statusCode': status_code,
-            'headers': { 'Content-Type': 'application/json', **get_cors_headers(event if 'event' in locals() else {}) },
+            'headers': { 'Content-Type': 'application/json', **get_cors_headers(event) },
             'body': json.dumps(response_body)
         }
         
@@ -181,6 +192,6 @@ def handler(event, context=None):
         logger.error(f"Error: {e}", exc_info=True)
         return {
             'statusCode': 500,
-            'headers': { 'Content-Type': 'application/json', **get_cors_headers(event if 'event' in locals() else {}) },
+            'headers': { 'Content-Type': 'application/json', **get_cors_headers(event) },
             'body': json.dumps({'error': 'Internal server error'})
         }

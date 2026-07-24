@@ -16,15 +16,16 @@ type MaxCharactersResponse = {
 
 const DEFAULT_MAX_CHARACTERS_PER_USER_MESSAGE = 50000;
 
-const WELCOME_PROMPT = `Hello! Please act as the Specialization Explorer.
+const WELCOME_PROMPT = `Hello! Please act as the CUCCIO Knowledge Base Assistant.
 1. Introduce yourself briefly.
-2. Ask the student these 1 of these starter questions, and use some variation of these in the later responses to complete the checklist:
-   - What are your academic interests?
-   - Which course or department do you like most at UBC Science?
-   - Do you want to pursue research or enter industry after graduation?
+2. Ask the user one of these starter questions to understand what they're looking for:
+   - What topic or area can I help you find information on today?
+   - Is there a specific document, policy, or project you're looking for?
+   - What can I help you with?
 3. Be friendly and inviting.`;
 
 const getToken = () => AuthService.getIdToken();
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function AIChatPage() {
   const { setCurrentMessages, setActiveChatName } = useView();
@@ -144,6 +145,9 @@ export default function AIChatPage() {
                 msg.id === streamingMessageId
                   ? {
                       ...msg,
+                      id: typeof message.message_id === "string" && UUID_REGEX.test(message.message_id)
+                        ? message.message_id
+                        : msg.id,
                       sources_used: message.sources || [],
                       warning: message.warning || null,
                       isTyping: false,
@@ -287,9 +291,9 @@ export default function AIChatPage() {
 
         chatMessages.sort((a, b) => a.time - b.time);
         setMessages(chatMessages);
+        setIsLoadingHistory(false);
       } catch (error) {
         console.error("Failed to load chat history:", error);
-      } finally {
         setIsLoadingHistory(false);
       }
     };
@@ -379,6 +383,9 @@ export default function AIChatPage() {
             msg.id === botMsg.id
               ? {
                   ...msg,
+                  id: typeof data.message_id === "string" && UUID_REGEX.test(data.message_id)
+                    ? data.message_id
+                    : msg.id,
                   text: data.response || "Sorry, I couldn't generate a response.",
                   sources_used: data.sources || [],
                   warning: data.warning || null,
@@ -388,7 +395,7 @@ export default function AIChatPage() {
           )
         );
 
-        if (data.session_name && activeChatSessionId) {
+        if (data.session_name) {
           updateChatSessionName(activeChatSessionId, data.session_name);
         }
       } catch (error) {
@@ -513,6 +520,9 @@ export default function AIChatPage() {
           msg.id === botMsg.id
             ? {
                 ...msg,
+                id: typeof data.message_id === "string" && UUID_REGEX.test(data.message_id)
+                  ? data.message_id
+                  : msg.id,
                 text: data.response || "Sorry, I couldn't generate a response.",
                 sources_used: data.sources || [],
                 warning: data.warning || null,
@@ -522,7 +532,7 @@ export default function AIChatPage() {
         )
       );
 
-      if (data.session_name && activeChatSessionId) {
+      if (data.session_name) {
         updateChatSessionName(activeChatSessionId, data.session_name);
       }
     } catch (error) {
@@ -548,19 +558,47 @@ export default function AIChatPage() {
     return null;
   }, [messages, isStreaming]);
 
-  const handleRate = async (messageId: string, is_positive: boolean, comment?: string) => {
+  const handleRate = async (messageId: string, is_positive: boolean, category?: string, comment?: string) => {
+    if (!activeChatSessionId) {
+      throw new Error("Missing active chat session id");
+    }
+    if (!UUID_REGEX.test(messageId)) {
+      throw new Error("Message is not persisted yet. Please wait a moment and retry.");
+    }
+
     try {
       const token = await getToken();
-      await fetch(
-        `${import.meta.env.VITE_API_ENDPOINT}/user/${userId}/chat_sessions/${activeChatSessionId}/messages/${messageId}/rating`,
+      const apiBase = String(import.meta.env.VITE_API_ENDPOINT || "").replace(/\/+$/, "");
+      const response = await fetch(
+        `${apiBase}/user/${userId}/chat_sessions/${activeChatSessionId}/messages/${messageId}/rating`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ is_positive, comment: comment ?? null }),
+          body: JSON.stringify({ is_positive, category: category ?? null, comment: comment ?? null }),
         }
+      );
+
+      if (!response.ok) {
+        let details = "";
+        try {
+          const errorData = await response.json();
+          details = errorData?.error ? `: ${errorData.error}` : "";
+        } catch {
+          // Ignore JSON parse errors and surface status text only.
+        }
+        throw new Error(`Failed to submit rating (${response.status})${details}`);
+      }
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? { ...m, rating: { is_positive, category: category ?? null, comment: comment ?? null } }
+            : m
+        )
       );
     } catch (error) {
       console.error("Failed to submit rating:", error);
+      throw error;
     }
   };
 
@@ -580,7 +618,7 @@ export default function AIChatPage() {
           messageId={message.id}
           isLastBotMessage={message.id === lastBotMessageId}
           existingRating={message.rating ?? null}
-          onRate={handleRate}
+          onRate={(id, pos, cat, cmt) => handleRate(id, pos, cat, cmt)}
         />
       );
     }

@@ -13,5 +13,5 @@ export interface Message {
   };
   warning?: string | null;
   hasPII?: boolean;
-  rating?: { is_positive: boolean; comment: string | null } | null;
+  rating?: { is_positive: boolean; comment: string | null; category?: string | null } | null;
 }

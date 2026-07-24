@@ -1,12 +1,12 @@
-﻿# Specialization Explorer
-This prototype explores how Large Language Models (LLMs) and Retrieval-Augmented Generation can support undergraduate students in navigating Bachelor of Science specialization choices through an AI-powered conversational experience. By leveraging conversational AI, institutional academic information, and publicly available alumni data, the Specialization Explorer enables students to reflect on their interests, compare specialization options, and discover academic pathways that align with their goals through personalized, open-ended dialogue.
+﻿# CUCCIO Knowledge Base Assistant
+An AI-powered RAG assistant built for CUCCIO (Canadian University Council of Chief Information Officers) staff and CIOs. Documents are ingested from SharePoint via AWS Glue, embedded into a pgvector index on RDS PostgreSQL, and retrieved at query time to ground responses from Amazon Bedrock's Claude models.
 
 | Index | Description |
 | :---------------------------------------------------- | :------------------------------------------------------ |
 | [High Level Architecture](#high-level-architecture) | High level overview illustrating component interactions |
 | [Deployment](#deployment-guide) | How to deploy the project |
 | [User Guide](#user-guide) | The working solution |
-| [Knowledge Base](#knowledge-base) | How the project uses Bedrock Knowledge Bases |
+| [Data Ingestion](#data-ingestion) | How SharePoint content is ingested and indexed |
 | [Directories](#directories) | General project directory structure |
 | [Additional Documentation](#additional-documentation) | Comprehensive guides and references |
 | [Credits](#credits) | Meet the team behind the solution |
@@ -26,9 +26,11 @@ To deploy this solution, please follow the steps laid out in the [Deployment Gui
 
 Please refer to the [Web App User Guide](Docs/USER_GUIDE.md) for instructions on navigating the web app interface.
 
-## Knowledge Base
+## Data Ingestion
 
-Please refer to [Knowledge Base Documentation](docs/KNOWLEDGE_BASE_DOCUMENTATION.md) as it explains how the project uses Bedrock Knowledges Bases. This includes the data source state machine, S3 and website ingestion phases, scheduler polling, retry behavior, and admin dashboard integration.
+Documents are sourced from SharePoint via the Microsoft Graph API. An AWS Glue Python Shell job fetches list items, chunks and embeds them using Cohere Embed English v3 (via Amazon Bedrock), and upserts the resulting vectors into a pgvector table on RDS PostgreSQL. Ingestion can be triggered manually from the admin dashboard or run on a configurable automated schedule.
+
+For setup instructions (SharePoint credentials, Glue IAM role, Secrets Manager configuration), refer to the [Deployment Guide](Docs/DEPLOYMENT_GUIDE.md).
 
 ## Directories
 
@@ -36,6 +38,8 @@ Please refer to [Knowledge Base Documentation](docs/KNOWLEDGE_BASE_DOCUMENTATION
 ├── cdk/
 │   ├── bin/
 │   │   └── cdk.ts
+│   ├── glue/
+│   │   └── sharepoint_ingestion.py      # Glue Python Shell job
 │   ├── lambda/
 │   │   ├── adminAuthorizerFunction/
 │   │   │   └── adminAuthorizerFunction.js
@@ -48,35 +52,32 @@ Please refer to [Knowledge Base Documentation](docs/KNOWLEDGE_BASE_DOCUMENTATION
 │   │   │   ├── migrations/
 │   │   │   │   └── 000_initial_schema.js
 │   │   │   └── index.js
-│   │   ├── ecrImageWaiter/
-│   │   │   ├── index.js
-│   │   │   └── package.json
 │   │   ├── handlers/
+│   │   │   ├── exports/
+│   │   │   │   ├── analyticsExport.js
+│   │   │   │   ├── chatExport.js
+│   │   │   │   └── index.js
 │   │   │   ├── utils/
 │   │   │   │   ├── cors.js
 │   │   │   │   ├── handlerUtils.js
+│   │   │   │   ├── notificationWriter.js
+│   │   │   │   ├── publishNotification.js
 │   │   │   │   └── validation.js
 │   │   │   ├── adminHandler.js
 │   │   │   ├── chatSessionHandler.js
+│   │   │   ├── exportProcessorHandler.js
+│   │   │   ├── glueStatusSync.js
 │   │   │   ├── initializeConnection.js
+│   │   │   ├── notificationDispatcher.js
+│   │   │   ├── sqlRunner.js
 │   │   │   ├── systemMessagesHandler.js
 │   │   │   └── userHandler.js
-│   │   ├── knowledgeBase/
-│   │   │   ├── helpers/
-│   │   │   └── main.py
-│   │   ├── knowledgeBaseProvisioner/
-│   │   │   └── main.py
 │   │   ├── publicTokenFunction/
 │   │   │   ├── cors.js
 │   │   │   └── publicTokenFunction.js
 │   │   ├── textGeneration/
 │   │   │   ├── helpers/
 │   │   │   ├── main.py
-│   │   │   └── requirements.txt
-│   │   ├── vectorIndexManagerSigV4/
-│   │   │   ├── Dockerfile
-│   │   │   ├── main.py
-│   │   │   ├── requirements.in
 │   │   │   └── requirements.txt
 │   │   └── websocket/
 │   │       ├── connect.js
@@ -93,7 +94,7 @@ Please refer to [Knowledge Base Documentation](docs/KNOWLEDGE_BASE_DOCUMENTATION
 │   │   ├── cicd-stack.ts
 │   │   ├── database-stack.ts
 │   │   ├── dbFlow-stack.ts
-│   │   ├── knowledge-base-stack.ts
+│   │   ├── glue-stack.ts
 │   │   └── vpc-stack.ts
 │   └── OpenAPI_Swagger_Definition.yaml
 │
@@ -146,19 +147,19 @@ Please refer to [Knowledge Base Documentation](docs/KNOWLEDGE_BASE_DOCUMENTATION
 
 - **AWS Lambda** (Python 3.12 and Node.js 22) for serverless compute
 - **Amazon Bedrock** for LLM inference — Claude Haiku 4.5 and Claude Sonnet 4.6 (Anthropic)
-- **Amazon Bedrock Knowledge Base** with **Cohere Embed English v3** for vector embeddings
-- **Amazon OpenSearch Serverless** for vector storage and similarity search
-- **PostgreSQL** (RDS) for relational data storage
-- **Amazon S3** for knowledge base document storage
+- **AWS Glue** (Python Shell) for SharePoint document ingestion and embedding
+- **Cohere Embed English v3** (via Amazon Bedrock) for document and query embeddings
+- **pgvector on Amazon RDS PostgreSQL** for vector storage and cosine similarity search
+- **Microsoft SharePoint** (Graph API) as the content source
+- **Amazon S3** for export file storage
 - **API Gateway** (REST and WebSocket) for APIs
-- **AWS Cognito** for authentication and authorization
+- **AWS Cognito** with Microsoft Entra ID federation for authentication and authorization
 
 ### Infrastructure
 
 - **AWS CDK** (TypeScript) for infrastructure as code
-- **AWS CodePipeline** for CI/CD (Docker image builds)
 - **Amazon RDS** with RDS Proxy for managed PostgreSQL
-- **Amazon VPC** for network isolation
+- **Amazon VPC** for network isolation (Glue and Lambda run in the same VPC as RDS)
 
 ## Additional Documentation
 
@@ -177,16 +178,15 @@ Please refer to [Knowledge Base Documentation](docs/KNOWLEDGE_BASE_DOCUMENTATION
 
 - **[Database Migrations](Docs/DATABASE_MIGRATIONS.md)**: Guide to the database migration system and best practices
 - **[Dependency Management](Docs/DEPENDENCY_MANAGEMENT.MD)**: Managing Python dependencies in Lambda functions using pip-tools
-- **[Changelog](Docs/CHANGELOG.md)**: Version history and release notes
 
 ### API and Usage
 
 - **[API Documentation](Docs/API_DOCUMENTATION.md)**: Comprehensive API reference for all REST and WebSocket endpoints
-- **[User Guide](Docs/USER_GUIDE.md)**: Complete guide for end-users on how to interact with Specialization Explorer
+- **[User Guide](Docs/USER_GUIDE.md)**: Complete guide for end-users on how to interact with the CUCCIO Knowledge Base Assistant
 
 ## Credits
 
-This application was architected and developed by the UBC Cloud Innovation Centre team. Thanks to the UBC CIC Technical and Project Management teams for their guidance and support.
+This application was architected and developed by the UBC Cloud Innovation Centre (CIC) team for CUCCIO (Canadian University Council of Chief Information Officers). Thanks to the UBC CIC Technical and Project Management teams, and to the CUCCIO sponsor team, for their guidance and support.
 
 ## License
 

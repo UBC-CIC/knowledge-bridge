@@ -6,7 +6,6 @@ import * as appsync from "aws-cdk-lib/aws-appsync";
 import { Construct } from "constructs";
 import { Duration } from "aws-cdk-lib";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
-import { Code, LayerVersion, Runtime } from "aws-cdk-lib/aws-lambda";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import { VpcStack } from "./vpc-stack";
 import { DatabaseStack } from "./database-stack";
@@ -15,13 +14,17 @@ import { WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integra
 import { Fn } from "aws-cdk-lib";
 import { Asset } from "aws-cdk-lib/aws-s3-assets";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
-import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as bedrock from "aws-cdk-lib/aws-bedrock";
 import * as cr from "aws-cdk-lib/custom-resources";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as events from "aws-cdk-lib/aws-events";
 import * as eventTargets from "aws-cdk-lib/aws-events-targets";
+import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as s3 from "aws-cdk-lib/aws-s3";
+import * as lambdaEventSources from "aws-cdk-lib/aws-lambda-event-sources";
+import * as sns from "aws-cdk-lib/aws-sns";
+import * as snsSubscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as crypto from 'crypto';
 
 function computeConfigHash(config: object): string {
@@ -41,11 +44,13 @@ export class ApiGatewayStack extends cdk.Stack {
   private eventApi: appsync.GraphqlApi;
   public readonly secret: secretsmanager.ISecret;
   public readonly allowedOriginsParamName: string;
+  private cognitoHostedUIDomain: string;
   public getEndpointUrl = () => this.api.url;
   public getUserPoolId = () => this.userPool.userPoolId;
   public getEventApiUrl = () => this.eventApi.graphqlUrl;
   public getUserPoolClientId = () => this.appClient.userPoolClientId;
   public getIdentityPoolId = () => this.identityPool.ref;
+  public getCognitoDomain = () => this.cognitoHostedUIDomain;
   public addLayer = (name: string, layer: lambda.ILayerVersion) =>
     (this.layerList[name] = layer);
   public getLayers = () => this.layerList;
@@ -138,90 +143,6 @@ export class ApiGatewayStack extends cdk.Stack {
         email: true,
       },
       selfSignUpEnabled: false,
-      autoVerify: {
-        email: true,
-      },
-      userVerification: {
-        emailSubject: "KBA - Verify your email",
-        emailBody: `
-                    <html>
-                        <head>
-                            <style>
-                            body {
-                                font-family: Outfit, sans-serif;
-                                background-color: #F5F5F5;
-                                color: #111835;
-                                margin: 0;
-                                padding: 0;
-                                font-size: 16px;
-                            }
-                            .email-container {
-                                background-color: #ffffff;
-                                width: 100%;
-                                max-width: 600px;
-                                margin: 0 auto;
-                                padding: 20px;
-                                border-radius: 8px;
-                                border: 1px solid #ddd;
-                            }
-                            .header {
-                                text-align: center;
-                                margin-bottom: 20px;
-                            }
-                            .header img {
-                                width: 100px;
-                                height: auto;
-                            }
-                            .main-content {
-                                text-align: center;
-                                font-size: 18px;
-                                color: #444;
-                                margin-bottom: 30px;
-                            }
-                            .code {
-                                display: inline-block;
-                                background-color: #111835;
-                                color: #ffffff;
-                                font-size: 24px;
-                                font-weight: bold;
-                                padding: 15px 25px;
-                                border-radius: 4px;
-                                margin-top: 20px;
-                                margin-bottom: 20px;
-                            }
-                            .footer {
-                                text-align: center;
-                                font-size: 14px;
-                                color: #888;
-                            }
-                            .footer a {
-                                color: #546bdf;
-                                text-decoration: none;
-                            }
-                            </style>
-                            <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600&display=swap" rel="stylesheet">
-                        </head>
-                        <body>
-                            <div class="email-container">
-                            <div class="header">
-                                <h1>Specialization Explorer</h1>
-                            </div>
-                            <div class="main-content">
-                                <p>Thank you for signing up for Specialization Explorer!</p>
-                                <p>Verify your email by using the code below:</p>
-                                <div class="code">{####}</div>
-                                <p>If you did not request this verification, please ignore this email.</p>
-                            </div>
-                            <div class="footer">
-                                <p>Please do not reply to this email.</p>
-                                <p>Specialization Explorer, 2025</p>
-                            </div>
-                            </div>
-                        </body>
-                    </html>
-          `,
-        emailStyle: cognito.VerificationEmailStyle.CODE,
-      },
       passwordPolicy: {
         minLength: 10,
         requireLowercase: true,
@@ -237,20 +158,22 @@ export class ApiGatewayStack extends cdk.Stack {
     });
 
     // Cognito hosted UI domain — required for OIDC federation
-    // TODO: fix cyclic dependency between ApiStack and AmplifyStack so this URL
-    // can be derived dynamically instead of hardcoded. AmplifyStack deploys after
-    // ApiStack so the URL isn't known at synth time. Options: custom domain, SSM
-    // written by a pre-deploy step, or restructuring stack order.
-    const amplifyCallbackUrl = "https://main.d2ceee5eyalm6f.amplifyapp.com";
+    // Callback URLs are bootstrapped with localhost only. AmplifyStack adds the real
+    // Amplify URL via UpdateCognitoCallbackUrls custom resource after deploy.
+    const cognitoDomainPrefix = id.replace(/-Api$/, '').toLowerCase();
     this.userPool.addDomain(`${id}-CognitoDomain`, {
-      cognitoDomain: { domainPrefix: "cic-kba" },
+      cognitoDomain: { domainPrefix: cognitoDomainPrefix },
     });
+    this.cognitoHostedUIDomain = `${cognitoDomainPrefix}.auth.${this.region}.amazoncognito.com`;
+    const cognitoHostedUIDomain = this.cognitoHostedUIDomain;
 
     // Microsoft Entra ID OIDC identity provider
-    // Pass credentials at deploy time: cdk deploy -c entraClientId=xxx -c entraClientSecret=yyy -c entraTenantId=zzz
-    const entraClientId = this.node.tryGetContext("entraClientId");
-    const entraClientSecret = this.node.tryGetContext("entraClientSecret");
-    const entraTenantId = this.node.tryGetContext("entraTenantId");
+    // Credentials are read from the existing KBA-SharePoint-Credentials secret in Secrets Manager.
+    // CloudFormation resolves {{resolve:secretsmanager:...}} at deploy time — never stored in context or template.
+    const entraSecret = secretsmanager.Secret.fromSecretNameV2(this, `${id}-EntraSecret`, "KBA-SharePoint-Credentials");
+    const entraClientId     = entraSecret.secretValueFromJson("client_id").unsafeUnwrap();
+    const entraClientSecret = entraSecret.secretValueFromJson("client_secret").unsafeUnwrap();
+    const entraTenantId     = entraSecret.secretValueFromJson("tenant_id").unsafeUnwrap();
 
     const entraOidcProvider = new cognito.UserPoolIdentityProviderOidc(this, `${id}-EntraOIDC`, {
       userPool: this.userPool,
@@ -293,8 +216,8 @@ export class ApiGatewayStack extends cdk.Stack {
           cognito.OAuthScope.EMAIL,
           cognito.OAuthScope.PROFILE,
         ],
-        callbackUrls: [amplifyCallbackUrl, "http://localhost:5173"],
-        logoutUrls: [amplifyCallbackUrl, "http://localhost:5173"],
+        callbackUrls: ["http://localhost:5173"],
+        logoutUrls: ["http://localhost:5173"],
       },
     });
     this.appClient.node.addDependency(entraOidcProvider);
@@ -303,7 +226,7 @@ export class ApiGatewayStack extends cdk.Stack {
       this,
       `${id}-identity-pool`,
       {
-        allowUnauthenticatedIdentities: true,
+        allowUnauthenticatedIdentities: false,
         identityPoolName: `${id}IdentityPool`,
         cognitoIdentityProviders: [
           {
@@ -325,6 +248,7 @@ export class ApiGatewayStack extends cdk.Stack {
         VITE_COGNITO_USER_POOL_CLIENT_ID: cdk.SecretValue.unsafePlainText(
           this.appClient.userPoolClientId
         ),
+        VITE_COGNITO_DOMAIN: cdk.SecretValue.unsafePlainText(cognitoHostedUIDomain),
         VITE_AWS_REGION: cdk.SecretValue.unsafePlainText(this.region),
         VITE_IDENTITY_POOL_ID: cdk.SecretValue.unsafePlainText(
           this.identityPool.ref
@@ -377,9 +301,9 @@ export class ApiGatewayStack extends cdk.Stack {
       deployOptions: {
         stageName: "prod",
         tracingEnabled: true,
-        description: "Deployment with flashcard support - Nov 18 2025",
+        description: `${id} — KBA REST API with Cognito auth, pgvector RAG, and SharePoint ingestion`,
         loggingLevel: apigateway.MethodLoggingLevel.INFO,
-        dataTraceEnabled: true,
+        dataTraceEnabled: false, // TODO: enable temporarily for debugging only, never in long-running prod
         metricsEnabled: true,
         
         accessLogDestination: new apigateway.LogGroupLogDestination(
@@ -433,7 +357,7 @@ export class ApiGatewayStack extends cdk.Stack {
               searchString: "/admin/ingestion/logs",
               fieldToMatch: { uriPath: {} },
               textTransformations: [{ priority: 0, type: "NONE" }],
-              positionalConstraint: "CONTAINS",
+              positionalConstraint: "STARTS_WITH",
             },
           },
           visibilityConfig: {
@@ -458,32 +382,6 @@ export class ApiGatewayStack extends cdk.Stack {
                   actionToUse: { count: {} },
                 },
               ],
-              scopeDownStatement: {
-                notStatement: {
-                  statement: {
-                    orStatement: {
-                      statements: [
-                        {
-                          byteMatchStatement: {
-                            searchString: "/admin/generate-presigned-urls/batch",
-                            fieldToMatch: { uriPath: {} },
-                            textTransformations: [{ priority: 0, type: "NONE" }],
-                            positionalConstraint: "ENDS_WITH",
-                          },
-                        },
-                        {
-                          byteMatchStatement: {
-                            searchString: "/admin/data_sources/batch",
-                            fieldToMatch: { uriPath: {} },
-                            textTransformations: [{ priority: 0, type: "NONE" }],
-                            positionalConstraint: "ENDS_WITH",
-                          },
-                        },
-                      ],
-                    },
-                  },
-                },
-              },
             },
           },
           overrideAction: { none: {} },
@@ -506,25 +404,50 @@ export class ApiGatewayStack extends cdk.Stack {
               limit: 100, // Reduced from 1000 to 100 for anonymous users
               aggregateKeyType: "IP",
               scopeDownStatement: {
-                // Only apply to requests WITHOUT Authorization header
-                notStatement: {
-                  statement: {
-                    byteMatchStatement: {
-                      searchString: "Bearer",
-                      fieldToMatch: {
-                        singleHeader: {
-                          name: "authorization",
+                // Apply to requests WITHOUT Authorization header AND not OPTIONS (CORS preflight)
+                andStatement: {
+                  statements: [
+                    {
+                      notStatement: {
+                        statement: {
+                          byteMatchStatement: {
+                            searchString: "Bearer",
+                            fieldToMatch: {
+                              singleHeader: {
+                                Name: "authorization",
+                              },
+                            },
+                            textTransformations: [
+                              {
+                                priority: 0,
+                                type: "NONE",
+                              },
+                            ],
+                            positionalConstraint: "CONTAINS",
+                          },
                         },
                       },
-                      textTransformations: [
-                        {
-                          priority: 0,
-                          type: "NONE",
-                        },
-                      ],
-                      positionalConstraint: "CONTAINS",
                     },
-                  },
+                    {
+                      notStatement: {
+                        statement: {
+                          byteMatchStatement: {
+                            searchString: "OPTIONS",
+                            fieldToMatch: {
+                              method: {},
+                            },
+                            textTransformations: [
+                              {
+                                priority: 0,
+                                type: "NONE",
+                              },
+                            ],
+                            positionalConstraint: "EXACTLY",
+                          },
+                        },
+                      },
+                    },
+                  ],
                 },
               },
             },
@@ -553,7 +476,7 @@ export class ApiGatewayStack extends cdk.Stack {
                   searchString: "Bearer",
                   fieldToMatch: {
                     singleHeader: {
-                      name: "authorization",
+                      Name: "authorization",
                     },
                   },
                   textTransformations: [
@@ -611,6 +534,10 @@ export class ApiGatewayStack extends cdk.Stack {
         },
       ],
     });
+
+    // Gateway error responses use '*' because these are static CloudFormation values
+    // and cannot reference the runtime SSM allowed-origins param. The Amplify stack
+    // updates the SSM param after deploy, but gateway responses are deploy-time only.
 
     // Custom Response for WAF Blocks (Returns 429 instead of 403)
     this.api.addGatewayResponse(`${id}-WafBlockResponse`, {
@@ -708,7 +635,7 @@ export class ApiGatewayStack extends cdk.Stack {
       }
     );
 
-    const adminGroup = new cognito.CfnUserPoolGroup(this, `${id}-AdminGroup`, {
+    new cognito.CfnUserPoolGroup(this, `${id}-AdminGroup`, {
       groupName: "admin",
       userPoolId: this.userPool.userPoolId,
       roleArn: adminRole.roleArn,
@@ -719,58 +646,68 @@ export class ApiGatewayStack extends cdk.Stack {
       userPoolId: this.userPool.userPoolId,
     });
 
-    const lambdaRole = new iam.Role(this, `${id}-postgresLambdaRole`, {
-      roleName: `${id}-postgresLambdaRole`,
-      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    // ── Shared policy helpers ──────────────────────────────────────────────────
+
+    const ec2EniPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        "ec2:CreateNetworkInterface",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DeleteNetworkInterface",
+        "ec2:AssignPrivateIpAddresses",
+        "ec2:UnassignPrivateIpAddresses",
+      ],
+      resources: ["*"],
     });
 
+    const cwLogsPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      resources: [`arn:aws:logs:${this.region}:${this.account}:*`],
+    });
 
-    // Grant access to specific secrets instead of '*'
+    const xrayPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        "xray:PutTraceSegments",
+        "xray:PutTelemetryRecords",
+        "xray:GetSamplingRules",
+        "xray:GetSamplingTargets",
+      ],
+      resources: ["*"],
+    });
+
+    // ── publicRole: userFunction, chatSessionFunction, systemMessagesFunction, userAuthFunction ──
+    const publicRole = new iam.Role(this, `${id}-publicLambdaRole`, {
+      roleName: `${id}-publicLambdaRole`,
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
+    db.secretPathUser.grantRead(publicRole);
+    this.secret.grantRead(publicRole);
+    publicRole.addToPolicy(ec2EniPolicy);
+    publicRole.addToPolicy(cwLogsPolicy);
+    publicRole.addToPolicy(xrayPolicy);
+
+    // ── textGenRole: lambdaTextGen ─────────────────────────────────────────────
+    const textGenRole = new iam.Role(this, `${id}-textGenLambdaRole`, {
+      roleName: `${id}-textGenLambdaRole`,
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
+    db.secretPathUser.grantRead(textGenRole);
+    textGenRole.addToPolicy(ec2EniPolicy);
+    textGenRole.addToPolicy(cwLogsPolicy);
+    textGenRole.addToPolicy(xrayPolicy);
+
+    // ── adminRole: adminFunction, adminAuthorizationFunction, glueStatusSyncFn ─
+    const lambdaRole = new iam.Role(this, `${id}-adminLambdaRole`, {
+      roleName: `${id}-adminLambdaRole`,
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
     db.secretPathUser.grantRead(lambdaRole);
     this.secret.grantRead(lambdaRole);
-
-    // Grant access to EC2
-    lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          "ec2:CreateNetworkInterface",
-          "ec2:DescribeNetworkInterfaces",
-          "ec2:DeleteNetworkInterface",
-          "ec2:AssignPrivateIpAddresses",
-          "ec2:UnassignPrivateIpAddresses",
-        ],
-        resources: ["*"], // must be *
-      })
-    );
-
-    // Grant access to log
-    lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          //Logs
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-        ],
-        resources: ["arn:aws:logs:*:*:*"],
-      })
-    );
-
-    // Grant X-Ray tracing permissions
-    lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          "xray:PutTraceSegments",
-          "xray:PutTelemetryRecords",
-          "xray:GetSamplingRules",
-          "xray:GetSamplingTargets",
-        ],
-        resources: ["*"],
-      })
-    );
+    lambdaRole.addToPolicy(ec2EniPolicy);
+    lambdaRole.addToPolicy(cwLogsPolicy);
+    lambdaRole.addToPolicy(xrayPolicy);
 
     // Inline policy to allow AdminAddUserToGroup action
     const adminAddUserToGroupPolicyLambda = new iam.Policy(
@@ -785,6 +722,7 @@ export class ApiGatewayStack extends cdk.Stack {
               "cognito-idp:AdminRemoveUserFromGroup",
               "cognito-idp:AdminGetUser",
               "cognito-idp:AdminListGroupsForUser",
+              "cognito-idp:AdminUpdateUserAttributes",
             ],
             resources: [
               `arn:aws:cognito-idp:${this.region}:${this.account}:userpool/${this.userPool.userPoolId}`,
@@ -793,7 +731,7 @@ export class ApiGatewayStack extends cdk.Stack {
         ],
       }
     );
-    lambdaRole.attachInlinePolicy(adminAddUserToGroupPolicyLambda);
+    publicRole.attachInlinePolicy(adminAddUserToGroupPolicyLambda);
 
     const coglambdaRole = new iam.Role(
       this,
@@ -832,21 +770,10 @@ export class ApiGatewayStack extends cdk.Stack {
           "logs:CreateLogStream",
           "logs:PutLogEvents",
         ],
-        resources: ["arn:aws:logs:*:*:*"],
+        resources: [`arn:aws:logs:${this.region}:${this.account}:*`],
       })
     );
 
-    // Grant permission to add users to an IAM group
-    coglambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["iam:AddUserToGroup"],
-        resources: [
-          `arn:aws:iam::${this.account}:user/*`,
-          `arn:aws:iam::${this.account}:group/*`,
-        ],
-      })
-    );
 
     // Redundant secrets manager access block removed
 
@@ -855,7 +782,7 @@ export class ApiGatewayStack extends cdk.Stack {
     coglambdaRole.addToPolicy(
       new iam.PolicyStatement({
         actions: ["ssm:GetParameter"],
-        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/*`],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${this.allowedOriginsParamName}`],
       })
     );
 
@@ -877,8 +804,9 @@ export class ApiGatewayStack extends cdk.Stack {
         code: lambda.Code.fromAsset("lambda/adminAuthorizerFunction"),
         handler: "adminAuthorizerFunction.handler",
         timeout: Duration.seconds(30),
-        // reservedConcurrentExecutions: 100,
-        vpc: vpcStack.vpc,
+        // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+        // before deploying. Verify in Lambda console → Account settings → Concurrency.
+        reservedConcurrentExecutions: 10,
         environment: {
           SM_COGNITO_CREDENTIALS: this.secret.secretName,
         },
@@ -886,6 +814,8 @@ export class ApiGatewayStack extends cdk.Stack {
         memorySize: 512,
         layers: [jwt],
         role: lambdaRole,
+        logRetention: logs.RetentionDays.ONE_MONTH,
+        // No VPC — only verifies JWT + reads Cognito secret, no RDS access needed
       }
     );
 
@@ -915,13 +845,16 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "userAuthorizerFunction.handler",
         timeout: Duration.seconds(30),
         memorySize: 256,
-        // reservedConcurrentExecutions: 50,
+        // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+        // before deploying. Verify in Lambda console → Account settings → Concurrency.
+        reservedConcurrentExecutions: 10,
         layers: [jwt],
-        role: lambdaRole,
+        role: publicRole,
         environment: {
           SM_COGNITO_CREDENTIALS: this.secret.secretName,
         },
         functionName: `${id}-userLambdaAuthorizer`,
+        logRetention: logs.RetentionDays.ONE_MONTH,
       }
     );
     userAuthFunction.grantInvoke(
@@ -974,8 +907,9 @@ export class ApiGatewayStack extends cdk.Stack {
           SHAREPOINT_SECRET_NAME: "KBA-SharePoint-Credentials",
         },
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         functionName: `${id}-addMemberOnSignUp`,
-        memorySize: 128,
+        memorySize: 256,
         layers: [postgres],
         role: coglambdaRole,
       }
@@ -1002,49 +936,36 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "main.handler",
         code: lambda.Code.fromAsset("lambda/textGeneration"),
         timeout: cdk.Duration.seconds(60),
-        role: lambdaRole,
-        // reservedConcurrentExecutions: 100,
+        role: textGenRole,
+        // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+        // before deploying. Verify in Lambda console → Account settings → Concurrency.
+        reservedConcurrentExecutions: 20,
         layers: [psycopgLayer, powertoolsLayer],
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         tracing: lambda.Tracing.ACTIVE,
         memorySize: 512,
+        logRetention: logs.RetentionDays.ONE_MONTH,
         environment: {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
           REGION: this.region,
           LLM_REGION: "us-west-2",
-          BEDROCK_MODEL_ID: `us.anthropic.claude-sonnet-4-6`,
         },
       }
     )
 
-    // Grant SSM parameter access for HaikuArn and SonnetArn
-      lambdaTextGen.addToRolePolicy(
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: ["ssm:GetParameter", "ssm:GetParameters"],
-          resources: [
-            `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/HaikuArn`,
-            `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/SonnetArn`,
-          ],
-        })
-      );
-
-      // Add SSM parameter names as environment variables
-      lambdaTextGen.addEnvironment("HAIKU_ARN", "/KBA/LLM/HaikuArn");
-      lambdaTextGen.addEnvironment("SONNET_ARN", "/KBA/LLM/SonnetArn");
-
-
     lambdaTextGen.addToRolePolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        actions:["ssm:GetParameter", "ssm:GetParameters"],
+        actions: ["ssm:GetParameter", "ssm:GetParameters"],
         resources: [
-          `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/HaikuArn`,
-          `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/SonnetArn`,
+          `arn:aws:ssm:${this.region}:${this.account}:parameter/KBA/LLM/ModelArn`,
         ],
       })
     );
+
+    lambdaTextGen.addEnvironment("MODEL_ARN", "/KBA/LLM/ModelArn");
 
     // --- Bedrock Input Guardrail ---
     const guardrailConfig = {
@@ -1159,7 +1080,7 @@ export class ApiGatewayStack extends cdk.Stack {
     }));
 
 
-    // Bedrock permissions
+    // Bedrock permissions — scoped to models actually in use
     const textGenBedrockPolicyStatement = new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
@@ -1170,11 +1091,7 @@ export class ApiGatewayStack extends cdk.Stack {
         "bedrock:ConverseStream",
       ],
       resources: [
-        `arn:aws:bedrock:${this.region}::foundation-model/meta.llama3-70b-instruct-v1:0`,
-        `arn:aws:bedrock:us-east-1::foundation-model/cohere.embed-v4:0`,
         `arn:aws:bedrock:${this.region}::foundation-model/cohere.embed-english-v3`,
-        `arn:aws:bedrock:${this.region}::foundation-model/mistral.mistral-large-2402-v1:0`,
-        `arn:aws:bedrock:${this.region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0`,
         `arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-sonnet-4-6`,
         `arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6`,
         `arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0`,
@@ -1191,6 +1108,7 @@ export class ApiGatewayStack extends cdk.Stack {
       handler: "handlers/userHandler.handler",
       timeout: Duration.seconds(30),
       vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       environment: {
         SM_DB_CREDENTIALS: db.secretPathUser.secretName,
         RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1198,10 +1116,13 @@ export class ApiGatewayStack extends cdk.Stack {
       },
       functionName: `${id}-userFunction`,
       memorySize: 512,
-      // reservedConcurrentExecutions: 50,
+      // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+      // before deploying. Verify in Lambda console → Account settings → Concurrency.
+      reservedConcurrentExecutions: 20,
       layers: [postgres],
-      role: lambdaRole,
+      role: publicRole,
       tracing: lambda.Tracing.ACTIVE,
+      logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
     lambdaUserFunction.addEnvironment('ALLOWED_ORIGIN_PARAM', this.allowedOriginsParamName);
@@ -1218,7 +1139,7 @@ export class ApiGatewayStack extends cdk.Stack {
       sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${this.api.restApiId}/*/*/member*`,
     });
 
-    //Allows Invoking Functions Easily for Testing Purposes
+    // TODO: remove AllowTestInvoke grants before prod hardening (test-invoke-stage is not needed in production)
     lambdaUserFunction.addPermission("AllowTestInvoke", {
       principal: new iam.ServicePrincipal("apigateway.amazonaws.com"),
       action: "lambda:InvokeFunction",
@@ -1241,6 +1162,7 @@ export class ApiGatewayStack extends cdk.Stack {
       handler: "handlers/systemMessagesHandler.handler",
       timeout: Duration.seconds(30),
       vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       environment: {
         SM_DB_CREDENTIALS: db.secretPathUser.secretName,
         RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1249,8 +1171,9 @@ export class ApiGatewayStack extends cdk.Stack {
       functionName: `${id}-systemMessagesFunction`,
       memorySize: 512,
       layers: [postgres],
-      role: lambdaRole,
+      role: publicRole,
       tracing: lambda.Tracing.ACTIVE,
+      logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
     lambdaSystemMessagesFunction.addEnvironment('ALLOWED_ORIGIN_PARAM', this.allowedOriginsParamName);
@@ -1293,6 +1216,7 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "handlers/chatSessionHandler.handler",
         timeout: Duration.seconds(30),
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         environment: {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1300,8 +1224,9 @@ export class ApiGatewayStack extends cdk.Stack {
         functionName: `${id}-chatSessionFunction`,
         memorySize: 512,
         layers: [postgres],
-        role: lambdaRole,
+        role: publicRole,
         tracing: lambda.Tracing.ACTIVE,
+        logRetention: logs.RetentionDays.ONE_MONTH,
       }
     );
 
@@ -1333,16 +1258,17 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "handlers/adminHandler.handler",
         timeout: Duration.seconds(30),
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         environment: {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
-
         },
         functionName: `${id}-adminFunction`,
         memorySize: 512,
         layers: [postgres],
         role: lambdaRole,
         tracing: lambda.Tracing.ACTIVE,
+        logRetention: logs.RetentionDays.ONE_MONTH,
       }
     );
 
@@ -1438,6 +1364,7 @@ export class ApiGatewayStack extends cdk.Stack {
       handler: "handlers/sqlRunner.handler",
       timeout: Duration.seconds(30),
       vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       environment: {
         SM_DB_CREDENTIALS: db.secretPathTableCreator.secretName,
         RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1449,6 +1376,12 @@ export class ApiGatewayStack extends cdk.Stack {
     });
     db.secretPathTableCreator.grantRead(lambdaRole);
 
+    // SNS topic declared early so glueStatusSyncFn can reference it via Lazy.string
+    const notificationTopic = new sns.Topic(this, `${id}-NotificationTopic`, {
+      topicName: `${id}-admin-notifications`,
+      displayName: "Admin Notifications",
+    });
+
     if (glueJobName) {
       const glueStatusSyncFn = new lambda.Function(this, `${id}-glueStatusSync`, {
         runtime: lambda.Runtime.NODEJS_22_X,
@@ -1456,6 +1389,7 @@ export class ApiGatewayStack extends cdk.Stack {
         handler: "handlers/glueStatusSync.handler",
         timeout: Duration.seconds(60),
         vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
         environment: {
           SM_DB_CREDENTIALS: db.secretPathUser.secretName,
           RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
@@ -1467,18 +1401,129 @@ export class ApiGatewayStack extends cdk.Stack {
         role: lambdaRole,
       });
 
-      glueStatusSyncFn.addToRolePolicy(new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["glue:GetJobRun"],
-        resources: [`arn:aws:glue:${this.region}:${this.account}:job/${glueJobName}`],
-      }));
-
       new events.Rule(this, `${id}-GlueStatusSyncRule`, {
-        schedule: events.Schedule.rate(Duration.minutes(5)),
+        eventPattern: {
+          source: ["aws.glue"],
+          detailType: ["Glue Job State Change"],
+          detail: {
+            jobName: [glueJobName],
+            state: ["SUCCEEDED", "FAILED", "STOPPED", "TIMEOUT", "ERROR"],
+          },
+        },
         targets: [new eventTargets.LambdaFunction(glueStatusSyncFn)],
-        description: "Poll Glue job status and sync to ingestion_runs table",
+        description: "React to Glue job terminal state and sync to ingestion_runs table",
       });
+
+      glueStatusSyncFn.addEnvironment(
+        "NOTIFICATION_TOPIC_ARN",
+        cdk.Lazy.string({ produce: () => notificationTopic.topicArn })
+      );
     }
+
+    // --- Export Jobs ---
+
+    const exportAccessLogsBucket = new s3.Bucket(this, `${id}-ExportAccessLogs`, {
+      bucketNamePrefix: `${id.toLowerCase()}-export-access-logs`,
+      bucketNamespace: s3.BucketNamespace.ACCOUNT_REGIONAL,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      enforceSSL: true,
+      autoDeleteObjects: true,
+      lifecycleRules: [{ expiration: Duration.days(90), id: "expire-export-access-logs-90d" }],
+    });
+
+    const exportBucket = new s3.Bucket(this, `${id}-ExportBucket`, {
+      bucketNamePrefix: `${id.toLowerCase()}-exports`,
+      bucketNamespace: s3.BucketNamespace.ACCOUNT_REGIONAL,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      lifecycleRules: [{ expiration: Duration.days(7), id: "expire-exports-7d" }],
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      serverAccessLogsBucket: exportAccessLogsBucket,
+      serverAccessLogsPrefix: "exports/",
+    });
+
+    const exportDlq = new sqs.Queue(this, `${id}-ExportDLQ`, {
+      queueName: `${id}-export-jobs-dlq`,
+      retentionPeriod: Duration.days(7),
+    });
+
+    const exportQueue = new sqs.Queue(this, `${id}-ExportQueue`, {
+      queueName: `${id}-export-jobs`,
+      visibilityTimeout: Duration.seconds(960), // 900s lambda timeout + 60s buffer
+      retentionPeriod: Duration.days(1),
+      deadLetterQueue: { queue: exportDlq, maxReceiveCount: 2 },
+    });
+
+    const exportProcessorRole = new iam.Role(this, `${id}-ExportProcessorRole`, {
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
+    exportProcessorRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        "ec2:CreateNetworkInterface",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DeleteNetworkInterface",
+        "ec2:AssignPrivateIpAddresses",
+        "ec2:UnassignPrivateIpAddresses",
+      ],
+      resources: ["*"],
+    }));
+    exportProcessorRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      resources: [`arn:aws:logs:${this.region}:${this.account}:*`],
+    }));
+    exportProcessorRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
+      resources: [exportQueue.queueArn],
+    }));
+    exportBucket.grantReadWrite(exportProcessorRole);
+    db.secretPathUser.grantRead(exportProcessorRole);
+
+    const exportProcessorLambda = new lambda.Function(this, `${id}-exportProcessor`, {
+      functionName: `${id}-exportProcessor`,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      code: lambda.Code.fromAsset("lambda"),
+      handler: "handlers/exportProcessorHandler.handler",
+      timeout: Duration.seconds(900),
+      vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
+      memorySize: 1024,
+      layers: [postgres],
+      role: exportProcessorRole,
+      tracing: lambda.Tracing.ACTIVE,
+      environment: {
+        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+        RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
+        EXPORT_BUCKET_NAME: exportBucket.bucketName,
+      },
+    });
+    const cfnExportProcessor = exportProcessorLambda.node.defaultChild as lambda.CfnFunction;
+    cfnExportProcessor.overrideLogicalId("exportProcessor");
+
+    exportProcessorLambda.addEventSource(
+      new lambdaEventSources.SqsEventSource(exportQueue, {
+        batchSize: 1,
+        reportBatchItemFailures: true,
+      })
+    );
+
+    // Grant admin Lambda: send to queue + generate presigned URLs
+    lambdaAdminFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["sqs:SendMessage"],
+      resources: [exportQueue.queueArn],
+    }));
+    exportBucket.grantRead(lambdaAdminFunction);
+
+    lambdaAdminFunction.addEnvironment("EXPORT_QUEUE_URL", exportQueue.queueUrl);
+    lambdaAdminFunction.addEnvironment("EXPORT_BUCKET_NAME", exportBucket.bucketName);
+
+    // --- End Export Jobs ---
 
     // Define WebSocket API and related resources directly in ApiGatewayStack
     this.webSocketApi = new apigatewayv2.WebSocketApi(
@@ -1497,12 +1542,19 @@ export class ApiGatewayStack extends cdk.Stack {
       code: lambda.Code.fromAsset("lambda/websocket"),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
-      // reservedConcurrentExecutions: 50,
+      // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+      // before deploying. Verify in Lambda console → Account settings → Concurrency.
+      reservedConcurrentExecutions: 20,
       tracing: lambda.Tracing.ACTIVE,
+      vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       environment: {
         SM_COGNITO_CREDENTIALS: this.secret.secretName,
+        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+        RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
       },
-      layers: [jwt],
+      layers: [jwt, postgres],
+      logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
     new cloudwatch.Alarm(this, 'ConnectFunctionConcurrencyAlarm', {
@@ -1534,6 +1586,13 @@ export class ApiGatewayStack extends cdk.Stack {
         timeout: cdk.Duration.seconds(30),
         memorySize: 256,
         tracing: lambda.Tracing.ACTIVE,
+        vpc: vpcStack.vpc,
+        securityGroups: [vpcStack.appSecurityGroup],
+        environment: {
+          SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+          RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
+        },
+        layers: [postgres],
       }
     );
 
@@ -1544,12 +1603,20 @@ export class ApiGatewayStack extends cdk.Stack {
       code: lambda.Code.fromAsset("lambda/websocket"),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
-      // reservedConcurrentExecutions: 50,
+      // TODO: Ensure the account has a minimum of 1000 unreserved concurrent executions
+      // before deploying. Verify in Lambda console → Account settings → Concurrency.
+      reservedConcurrentExecutions: 20,
       tracing: lambda.Tracing.ACTIVE,
+      vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
       environment: {
         TEXT_GEN_FUNCTION_NAME: lambdaTextGen.functionName,
+        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+        RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
       },
+      layers: [postgres],
       functionName: `${id}-DefaultFunction`,
+      logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
     new cloudwatch.Alarm(this, 'DefaultFunctionConcurrencyAlarm', {
@@ -1589,8 +1656,13 @@ export class ApiGatewayStack extends cdk.Stack {
     connectFunction.addToRolePolicy(wsPolicy);
     disconnectFunction.addToRolePolicy(wsPolicy);
     defaultFunction.addToRolePolicy(wsPolicy);
+    exportProcessorRole.addToPolicy(wsPolicy);
+    lambdaRole.addToPolicy(wsPolicy);
 
     this.secret.grantRead(connectFunction);
+    db.secretPathUser.grantRead(connectFunction);
+    db.secretPathUser.grantRead(disconnectFunction);
+    db.secretPathUser.grantRead(defaultFunction);
     // Grant the default function permission to invoke the text generation function
     lambdaTextGen.grantInvoke(defaultFunction);
 
@@ -1653,10 +1725,56 @@ export class ApiGatewayStack extends cdk.Stack {
     this.wsStage.node.addDependency(apiGatewayAccount);
 
     // Add environment variable to text generation function (include stage name)
-    lambdaTextGen.addEnvironment(
-      "WEBSOCKET_API_ENDPOINT",
-      `${this.webSocketApi.apiEndpoint}/${this.wsStage.stageName}`
+    const wsApiEndpoint = `${this.webSocketApi.apiEndpoint}/${this.wsStage.stageName}`;
+    lambdaTextGen.addEnvironment("WEBSOCKET_API_ENDPOINT", wsApiEndpoint);
+
+    // ─── SNS Notification Dispatcher ─────────────────────────────────────────
+
+    const notificationDispatcherRole = new iam.Role(this, `${id}-NotificationDispatcherRole`, {
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
+    notificationDispatcherRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      resources: [`arn:aws:logs:${this.region}:${this.account}:*`],
+    }));
+    notificationDispatcherRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["ec2:CreateNetworkInterface", "ec2:DescribeNetworkInterfaces", "ec2:DeleteNetworkInterface",
+                "ec2:AssignPrivateIpAddresses", "ec2:UnassignPrivateIpAddresses"],
+      resources: ["*"],
+    }));
+    notificationDispatcherRole.addToPolicy(wsPolicy);
+    db.secretPathUser.grantRead(notificationDispatcherRole);
+
+    const notificationDispatcherLambda = new lambda.Function(this, `${id}-NotificationDispatcher`, {
+      functionName: `${id}-notificationDispatcher`,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      code: lambda.Code.fromAsset("lambda"),
+      handler: "handlers/notificationDispatcher.handler",
+      timeout: Duration.seconds(30),
+      memorySize: 256,
+      vpc: vpcStack.vpc,
+      securityGroups: [vpcStack.appSecurityGroup],
+      layers: [postgres],
+      role: notificationDispatcherRole,
+      environment: {
+        SM_DB_CREDENTIALS: db.secretPathUser.secretName,
+        RDS_PROXY_ENDPOINT: db.rdsProxyEndpoint,
+        WEBSOCKET_API_ENDPOINT: wsApiEndpoint,
+      },
+    });
+
+    notificationTopic.addSubscription(
+      new snsSubscriptions.LambdaSubscription(notificationDispatcherLambda)
     );
+
+    // Wire topic ARN into glueStatusSync and exportProcessor
+    const notificationTopicArn = notificationTopic.topicArn;
+    notificationTopic.grantPublish(lambdaRole);          // adminFunction + glueStatusSync use lambdaRole
+    notificationTopic.grantPublish(exportProcessorRole);
+
+    exportProcessorLambda.addEnvironment("NOTIFICATION_TOPIC_ARN", notificationTopicArn);
 
     // Add WebSocket URL as stack output
     new cdk.CfnOutput(this, "WebSocketUrl", {
@@ -1664,6 +1782,51 @@ export class ApiGatewayStack extends cdk.Stack {
       description: "WebSocket URL for real-time streaming",
       exportName: `${id}-WebSocketUrl`,
     });
+
+    // -- COGNITO ORIGIN SYNC --
+    // Listens for SSM PutParameter events on the AllowedOrigins param via EventBridge.
+    // When a custom domain is added to the param, this Lambda fires (push, no polling)
+    // and calls updateUserPoolClient to keep Cognito's callback/logout allowlist in sync.
+    // No VPC — only calls public AWS endpoints (SSM, Cognito); no RDS access needed.
+    const cognitoOriginSyncFn = new lambda.Function(this, `${id}-cognitoOriginSync`, {
+      functionName: `${id}-cognitoOriginSync`,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      handler: "utils/cognitoOriginSync.handler",
+      code: lambda.Code.fromAsset("lambda/handlers"),
+      timeout: Duration.seconds(30),
+      memorySize: 128,
+      logRetention: logs.RetentionDays.ONE_MONTH,
+      environment: {
+        USER_POOL_ID: this.userPool.userPoolId,
+        APP_CLIENT_ID: this.appClient.userPoolClientId,
+        ALLOWED_ORIGINS_PARAM: this.allowedOriginsParamName,
+      },
+    });
+
+    cognitoOriginSyncFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["ssm:GetParameter"],
+      resources: [
+        `arn:aws:ssm:${this.region}:${this.account}:parameter${this.allowedOriginsParamName}`,
+      ],
+    }));
+
+    cognitoOriginSyncFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["cognito-idp:UpdateUserPoolClient"],
+      resources: [this.userPool.userPoolArn],
+    }));
+
+    const originSyncRule = new events.Rule(this, `${id}-ssmOriginChangeRule`, {
+      eventPattern: {
+        source: ["aws.ssm"],
+        detailType: ["Parameter Store Change"],
+        detail: {
+          name: [this.allowedOriginsParamName],
+          operation: ["Update", "Create"],
+        },
+      },
+    });
+
+    originSyncRule.addTarget(new eventTargets.LambdaFunction(cognitoOriginSyncFn));
 
   }
 }
