@@ -34,7 +34,7 @@ def _rewrite_query_for_retrieval(
     history_block = "\n".join(history_lines) if history_lines else "(no prior conversation)"
 
     rewrite_system_prompt = """<instructions>
-You are a search query optimizer for a knowledge base containing Canadian university IT survey responses, meeting communications, subcommittee decisions, and best practices.
+You are a search query optimizer for a knowledge base containing organizational survey responses, meeting communications, subcommittee decisions, and best practices.
 Given the conversation history and the user's latest message, produce a short, keyword-rich search query optimized for vector similarity search.
 Focus on: topics, institutions, date ranges, decisions, technologies, or initiatives mentioned.
 Output ONLY the search query — no explanation, no quotes, no preamble.

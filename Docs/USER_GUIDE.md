@@ -9,7 +9,7 @@ Once you have deployed the solution, the following user guide will help you navi
 | Index | Description |
 | ----- | ----------- |
 | [Getting Started](#getting-started) | Sign in and open the app |
-| [User View](#user-view) | Chat with the Knowledge Base Assistant using your SharePoint content |
+| [User View](#user-view) | Chat with Knowledge Bridge using your SharePoint content |
 | [Administrator View](#administrator-view) | Manage ingestion, system settings, analytics, and chat history |
 
 ---
