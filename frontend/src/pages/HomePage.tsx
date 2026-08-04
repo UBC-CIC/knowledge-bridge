@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
 
 const DEFAULT_WELCOME_MESSAGE =
-  "Welcome to the CUCCIO Knowledge Base Assistant. Click below to start a new conversation.";
+  "Welcome to Knowledge Bridge. Click below to start a new conversation.";
 const DEFAULT_DISCLAIMER = "AI can make mistakes. Check important info.";
 
 export default function HomePage() {
@@ -242,7 +242,7 @@ export default function HomePage() {
               {!activeChatSessionId ? (
                 <div className="w-full max-w-2xl text-center">
                   <h1 className="text-3xl md:text-4xl font-bold mb-4 leading-tight">
-                    CUCCIO Assistant
+                    Knowledge Bridge
                   </h1>
                   <p className="text-base md:text-lg text-muted-foreground mb-8 whitespace-pre-line">
                     {isLoadingWelcome ? "Loading..." : welcomeMessage}

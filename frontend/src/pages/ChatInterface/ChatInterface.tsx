@@ -16,7 +16,7 @@ type MaxCharactersResponse = {
 
 const DEFAULT_MAX_CHARACTERS_PER_USER_MESSAGE = 50000;
 
-const WELCOME_PROMPT = `Hello! Please act as the CUCCIO Knowledge Base Assistant.
+const WELCOME_PROMPT = `Hello! Please act as Knowledge Bridge.
 1. Introduce yourself briefly.
 2. Ask the user one of these starter questions to understand what they're looking for:
    - What topic or area can I help you find information on today?
@@ -662,8 +662,8 @@ export default function AIChatPage() {
                     isTokenLimitReached
                       ? `Daily limit reached. Resets at ${tokenResetTime || "soon"}`
                       : isStreaming
-                      ? "CUCCIO Assistant is thinking..."
-                      : "Message CUCCIO Assistant..."
+                      ? "Knowledge Bridge is thinking..."
+                      : "Message Knowledge Bridge..."
                   }
                   onSend={sendMessage}
                   disabled={isTokenLimitReached || isStreaming}

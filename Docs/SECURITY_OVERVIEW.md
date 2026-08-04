@@ -1,6 +1,6 @@
 # Security Overview
 
-**Project:** CUCCIO Knowledge Base Assistant
+**Project:** Knowledge Bridge
 **Document Type:** Public Security Architecture Overview
 **Last Updated:** May 2026
 
@@ -21,7 +21,7 @@
 
 ## 1. Introduction
 
-The CUCCIO Knowledge Base Assistant is an AI-powered conversational application that helps CUCCIO staff and CIOs query organizational SharePoint content. This document provides an overview of the security measures implemented to protect user data, ensure system integrity, and maintain service availability.
+Knowledge Bridge is an AI-powered conversational application that helps organizational staff query SharePoint content. This document provides an overview of the security measures implemented to protect user data, ensure system integrity, and maintain service availability.
 
 ### 1.1 Security Principles
 

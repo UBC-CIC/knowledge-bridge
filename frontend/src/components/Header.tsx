@@ -75,7 +75,7 @@ export default function Header({ notificationProps }: Props) {
             aria-label="Navigate to home"
           >
             <h1 className="text-xl font-semibold text-white">
-              CUCCIO Assistant
+              Knowledge Bridge
             </h1>
           </Link>
         </div>

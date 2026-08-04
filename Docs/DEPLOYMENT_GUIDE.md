@@ -505,7 +505,7 @@ cdk bootstrap \
 
 You may run the following command to deploy the stacks all at once. Replace `<YOUR-PROFILE-NAME>` with the appropriate AWS profile and `<YOUR-STACK-PREFIX>` with your chosen stack prefix.
 
-> **StackPrefix note:** The prefix is lowercased and used as the Cognito hosted UI domain (e.g. `StackPrefix=CUCCIO` → `cuccio.auth.ca-central-1.amazoncognito.com`). It must be **globally unique** across all AWS Cognito deployments. Use the same prefix you registered in Entra's redirect URI in `Docs/ENTRA_SETUP.md` Section 4.
+> **StackPrefix note:** The prefix is lowercased and used as the Cognito hosted UI domain (e.g. `StackPrefix=MYORG` → `myorg.auth.ca-central-1.amazoncognito.com`). It must be **globally unique** across all AWS Cognito deployments. Use the same prefix you registered in Entra's redirect URI in `Docs/ENTRA_SETUP.md` Section 4.
 
 ```bash
 cdk deploy --all \

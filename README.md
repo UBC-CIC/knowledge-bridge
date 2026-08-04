@@ -1,5 +1,5 @@
-﻿# CUCCIO Knowledge Base Assistant
-An AI-powered RAG assistant built for CUCCIO (Canadian University Council of Chief Information Officers) staff and CIOs. Documents are ingested from SharePoint via AWS Glue, embedded into a pgvector index on RDS PostgreSQL, and retrieved at query time to ground responses from Amazon Bedrock's Claude models.
+﻿# Knowledge Bridge
+An AI-powered RAG assistant for finding and retrieving information from SharePoint knowledge bases. Documents are ingested via AWS Glue, embedded into a pgvector index on RDS PostgreSQL, and retrieved at query time to ground responses from Amazon Bedrock's Claude models.
 
 | Index | Description |
 | :---------------------------------------------------- | :------------------------------------------------------ |
@@ -182,11 +182,11 @@ For setup instructions (SharePoint credentials, Glue IAM role, Secrets Manager c
 ### API and Usage
 
 - **[API Documentation](Docs/API_DOCUMENTATION.md)**: Comprehensive API reference for all REST and WebSocket endpoints
-- **[User Guide](Docs/USER_GUIDE.md)**: Complete guide for end-users on how to interact with the CUCCIO Knowledge Base Assistant
+- **[User Guide](Docs/USER_GUIDE.md)**: Complete guide for end-users on how to interact with Knowledge Bridge
 
 ## Credits
 
-This application was architected and developed by the UBC Cloud Innovation Centre (CIC) team for CUCCIO (Canadian University Council of Chief Information Officers). Thanks to the UBC CIC Technical and Project Management teams, and to the CUCCIO sponsor team, for their guidance and support.
+This application was architected and developed by the UBC Cloud Innovation Centre (CIC) team. Thanks to the UBC CIC Technical and Project Management teams for their guidance and support.
 
 ## License
 

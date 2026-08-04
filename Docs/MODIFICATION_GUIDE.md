@@ -1,4 +1,4 @@
-# CUCCIO Knowledge Base Assistant - Project Modification Guide
+# Knowledge Bridge - Project Modification Guide
 
 This guide covers practical modifications developers commonly need to make: styling, authentication, API extensions, frontend components, LLM configuration, database migrations, and deployment. For guardrail configuration, see `Docs/BEDROCK_GUARDRAILS.md`.
 
@@ -143,7 +143,7 @@ Edit `frontend/src/components/Footer.tsx`:
 Or use a Vite env variable to avoid rebuilding for content changes:
 
 ```tsx
-© {new Date().getFullYear()} {import.meta.env.VITE_WEBSITE_NAME || 'CUCCIO Knowledge Base Assistant'}.
+© {new Date().getFullYear()} {import.meta.env.VITE_WEBSITE_NAME || 'Knowledge Bridge'}.
 ```
 
 ---

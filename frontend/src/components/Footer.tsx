@@ -4,7 +4,7 @@ export default function Footer() {
       <div className="container mx-auto px-6 py-6">
         <div className="flex items-center justify-center">
           <div className="text-sm text-muted-foreground text-center">
-            2026 CUCCIO Assistant.
+            2026 Knowledge Bridge.
           </div>
         </div>
       </div>

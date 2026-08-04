@@ -984,12 +984,12 @@ export class ApiGatewayStack extends cdk.Stack {
       piiInputAction: 'ANONYMIZE',
       piiInputEnabled: true,
       promptAttackStrength: 'HIGH',
-      blockedInputMessaging: "Sorry, I can't help with that. I'm the CUCCIO Knowledgebase Assistant — I'm here to help you find information from CUCCIO's knowledge base.",
+      blockedInputMessaging: "Sorry, I can't help with that. I'm Knowledge Bridge — I'm here to help you find information from the knowledge base.",
     };
 
     const inputGuardrail = new bedrock.CfnGuardrail(this, 'InputGuardrail', {
       name: `${id}-input-guardrail`,
-      blockedInputMessaging: "Sorry, I can't help with that. I'm the CUCCIO Knowledgebase Assistant — I'm here to help you find information from CUCCIO's knowledge base.",
+      blockedInputMessaging: "Sorry, I can't help with that. I'm Knowledge Bridge — I'm here to help you find information from the knowledge base.",
       blockedOutputsMessaging: 'Response blocked.',
       sensitiveInformationPolicyConfig: {
         piiEntitiesConfig: [

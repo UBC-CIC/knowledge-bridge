@@ -29,7 +29,7 @@ export default function TypingIndicator({
         <div className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:-0.15s] [animation-duration:1.4s]"></div>
         <div className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce [animation-duration:1.4s]"></div>
       </div>
-      <span className="text-sm font-medium">CUCCIO Assistant is thinking{dots}</span>
+      <span className="text-sm font-medium">Knowledge Bridge is thinking{dots}</span>
     </div>
   );
 }

@@ -27,7 +27,7 @@ export default function LandingPage() {
       <div className="flex-1 flex items-center justify-center px-4">
         <div className="text-center max-w-md">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            CUCCIO Assistant
+            Knowledge Bridge
           </h1>
           <p className="text-gray-500 mb-8">
             Sign in with your Microsoft account to continue.

@@ -177,10 +177,10 @@ The redirect URI follows this pattern:
 https://<StackPrefix>.auth.<region>.amazoncognito.com/oauth2/idpresponse
 ```
 
-For example, if your `StackPrefix` is `CUCCIO` and your region is `ca-central-1`:
+For example, if your `StackPrefix` is `MYORG` and your region is `ca-central-1`:
 
 ```
-https://cuccio.auth.ca-central-1.amazoncognito.com/oauth2/idpresponse
+https://myorg.auth.ca-central-1.amazoncognito.com/oauth2/idpresponse
 ```
 
 Use the same `StackPrefix` and region you will pass to `cdk deploy`. The prefix is lowercased automatically by CDK.
@@ -480,4 +480,4 @@ The Graph token is cached in a module-level variable and reused across warm Lamb
 | Entra token endpoint | `https://login.microsoftonline.com/<tenant_id>/oauth2/v2.0/token` |
 | Entra JWKS URI | `https://login.microsoftonline.com/<tenant_id>/discovery/v2.0/keys` |
 
-`<stackprefix>` is your `StackPrefix` context value lowercased (e.g. `StackPrefix=CUCCIO` → `cuccio`). `<region>` is your AWS deployment region (e.g. `ca-central-1`).
+`<stackprefix>` is your `StackPrefix` context value lowercased (e.g. `StackPrefix=MYORG` → `myorg`). `<region>` is your AWS deployment region (e.g. `ca-central-1`).

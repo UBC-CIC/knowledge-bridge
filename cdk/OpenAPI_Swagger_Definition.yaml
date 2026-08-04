@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
-  title: CUCCIO KBA API
-  description: CUCCIO Knowledge Base Assistant API
+  title: Knowledge Bridge API
+  description: Knowledge Bridge API
   version: 1.0.0
 tags:
   - name: User
@@ -1027,7 +1027,7 @@ paths:
                     welcome_message:
                       - id: "6bda6a51-2af0-4312-8d47-89f6169ae4ad"
                         type: "welcome_message"
-                        content: "Welcome to the CUCCIO Knowledge Base Assistant. Click below to start a new conversation."
+                        content: "Welcome to Knowledge Bridge. Click below to start a new conversation."
                         character_limit: 400
                         version: 1
                         is_active: true
