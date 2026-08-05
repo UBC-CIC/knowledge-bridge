@@ -35,7 +35,17 @@ export default function LandingPage() {
           <Button
             size="lg"
             className="w-full"
-            onClick={() => signInWithRedirect({ provider: { custom: "EntraID" } })}
+            onClick={() => {
+              // Flush stale PKCE/oauth state left by any previous incomplete flow
+              const clientId = import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
+              ["oauthState", "oauthPKCE", "signInDetails"].forEach((key) => {
+                localStorage.removeItem(
+                  `CognitoIdentityServiceProvider.${clientId}.${key}`
+                );
+              });
+              localStorage.removeItem("amplify-signin-with-hostedUI");
+              signInWithRedirect({ provider: { custom: "EntraID" } });
+            }}
           >
             Sign in with Microsoft
           </Button>

@@ -206,7 +206,6 @@ export class ApiGatewayStack extends cdk.Stack {
         userSrp: true,
       },
       supportedIdentityProviders: [
-        cognito.UserPoolClientIdentityProvider.COGNITO,
         cognito.UserPoolClientIdentityProvider.custom("EntraID"),
       ],
       oAuth: {

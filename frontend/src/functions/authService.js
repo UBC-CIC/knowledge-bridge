@@ -60,15 +60,18 @@ export class AuthService {
 
   static async signOut() {
     try {
-      // Clear all auth caches on sign out
       this.clearAuthCache();
       apiCache.clear();
-
       await signOut();
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
+    } catch {
+      // ignore — redirect regardless
     }
+
+    // signOut() only clears local tokens; the Cognito session cookie lives on a
+    // different domain and must be cleared via Cognito's /logout endpoint.
+    const clientId = import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
+    const domain = import.meta.env.VITE_COGNITO_DOMAIN;
+    window.location.href = `https://${domain}/logout?client_id=${clientId}&logout_uri=${encodeURIComponent(window.location.origin)}`;
   }
 
   static async getCurrentUser() {
