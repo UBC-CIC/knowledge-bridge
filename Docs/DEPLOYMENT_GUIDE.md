@@ -192,13 +192,13 @@ Now let's clone the GitHub repository onto your machine. To do this:
 3. Clone the GitHub repository by entering the following command. Be sure to replace `<YOUR-GITHUB-USERNAME>` with your own username.
 
 ```bash
-git clone https://github.com/<YOUR-GITHUB-USERNAME>/knowledge-base-assistant.git
+git clone https://github.com/<YOUR-GITHUB-USERNAME>/knowledge-bridge.git
 ```
 
 The code should now be in the folder you created. Navigate into the root folder containing the entire codebase by running the command:
 
 ```bash
-cd knowledge-base-assistant
+cd knowledge-bridge
 ```
 
 #### Install Dependencies
