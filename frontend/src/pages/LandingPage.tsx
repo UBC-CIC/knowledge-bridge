@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { signInWithRedirect } from "aws-amplify/auth";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
@@ -36,7 +35,6 @@ export default function LandingPage() {
             size="lg"
             className="w-full"
             onClick={() => {
-              // Flush stale PKCE/oauth state left by any previous incomplete flow
               const clientId = import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
               ["oauthState", "oauthPKCE", "signInDetails"].forEach((key) => {
                 localStorage.removeItem(
@@ -44,7 +42,10 @@ export default function LandingPage() {
                 );
               });
               localStorage.removeItem("amplify-signin-with-hostedUI");
-              signInWithRedirect({ provider: { custom: "EntraID" } });
+              const domain = import.meta.env.VITE_COGNITO_DOMAIN;
+              const scope = encodeURIComponent("openid email profile");
+              const redirectUri = encodeURIComponent(window.location.origin);
+              window.location.href = `https://${domain}/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}&identity_provider=EntraID&scope=${scope}&prompt=select_account`;
             }}
           >
             Sign in with Microsoft
