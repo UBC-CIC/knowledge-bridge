@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { signInWithRedirect } from "aws-amplify/auth";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { AuthService } from "@/functions/authService";
@@ -42,10 +43,7 @@ export default function LandingPage() {
                 );
               });
               localStorage.removeItem("amplify-signin-with-hostedUI");
-              const domain = import.meta.env.VITE_COGNITO_DOMAIN;
-              const scope = encodeURIComponent("openid email profile");
-              const redirectUri = encodeURIComponent(window.location.origin);
-              window.location.href = `https://${domain}/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}&identity_provider=EntraID&scope=${scope}&prompt=select_account`;
+              signInWithRedirect({ provider: { custom: "EntraID" } });
             }}
           >
             Sign in with Microsoft

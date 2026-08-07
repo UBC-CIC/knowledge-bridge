@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { confirmSignIn} from "aws-amplify/auth";
+import { confirmSignIn, signInWithRedirect } from "aws-amplify/auth";
 import { Eye, EyeOff } from "lucide-react";
 import { AuthService } from "@/functions/authService";
 import Footer from "@/components/Footer";
@@ -170,13 +170,7 @@ export default function AdminLogin() {
                   type="button"
                   variant="outline"
                   className="w-full"
-                  onClick={() => {
-                    const clientId = import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
-                    const domain = import.meta.env.VITE_COGNITO_DOMAIN;
-                    const scope = encodeURIComponent("openid email profile");
-                    const redirectUri = encodeURIComponent(window.location.origin);
-                    window.location.href = `https://${domain}/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}&identity_provider=EntraID&scope=${scope}&prompt=select_account`;
-                  }}
+                  onClick={() => signInWithRedirect({ provider: { custom: "EntraID" } })}
                 >
                   Sign in with Microsoft
                 </Button>
