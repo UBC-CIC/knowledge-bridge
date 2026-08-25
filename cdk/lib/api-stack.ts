@@ -302,7 +302,7 @@ export class ApiGatewayStack extends cdk.Stack {
         tracingEnabled: true,
         description: `${id} — KBA REST API with Cognito auth, pgvector RAG, and SharePoint ingestion`,
         loggingLevel: apigateway.MethodLoggingLevel.INFO,
-        dataTraceEnabled: false, // TODO: enable temporarily for debugging only, never in long-running prod
+        dataTraceEnabled: false, 
         metricsEnabled: true,
         
         accessLogDestination: new apigateway.LogGroupLogDestination(
