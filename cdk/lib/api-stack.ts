@@ -205,6 +205,9 @@ export class ApiGatewayStack extends cdk.Stack {
         custom: true,
         userSrp: true,
       },
+      accessTokenValidity: Duration.hours(1),
+      idTokenValidity: Duration.hours(1),
+      refreshTokenValidity: Duration.days(1),
       supportedIdentityProviders: [
         cognito.UserPoolClientIdentityProvider.custom("EntraID"),
       ],
