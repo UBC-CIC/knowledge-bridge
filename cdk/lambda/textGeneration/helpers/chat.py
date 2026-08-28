@@ -361,12 +361,6 @@ def get_response(
 
     # 9. Assess response for intervention
     grounding = assess_response(query=query, answer_text=answer_text, sources=sources, llm_region=llm_region)
-    logger.info(
-        f"Grounding check: label={grounding.get('label')} score={grounding.get('score')} "
-        f"support={grounding.get('metrics', {}).get('support_score')} "
-        f"scope={grounding.get('metrics', {}).get('scope_alignment_score')} "
-        f"warning={grounding.get('warning_text')}"
-    )
 
     # 10. Save AI response
     ai_message_id = _save_ai_response(db_connection, chat_session_id, answer_text, used_sources, grounding.get("warning_text"))
