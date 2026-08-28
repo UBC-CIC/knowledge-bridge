@@ -218,6 +218,9 @@ export class ApiGatewayStack extends cdk.Stack {
         callbackUrls: ["http://localhost:5173"],
         logoutUrls: ["http://localhost:5173"],
       },
+      accessTokenValidity: Duration.hours(1),
+      idTokenValidity: Duration.hours(1),
+      refreshTokenValidity: Duration.days(1),
     });
     this.appClient.node.addDependency(entraOidcProvider);
 
