@@ -72,13 +72,13 @@ The following permissions are required across two APIs. Microsoft Graph handles 
 
 | Permission | Type | Admin Consent | Purpose |
 |---|---|---|---|
-| `Sites.FullControl.All` | **Application** | **Yes** | Glue job full access to SharePoint site collections |
+| `Sites.Read.All` | **Application** | **Yes** | Glue job full access to SharePoint site collections |
 
 **Steps:**
 1. Azure Portal → Microsoft Entra ID → **App Registrations** → select your application
 2. In the left sidebar, expand **Manage** → click **API permissions**
 3. Add all Microsoft Graph permissions above (**Add a permission** → **Microsoft Graph** → select Delegated or Application as appropriate)
-4. Add the SharePoint permission (**Add a permission** → **SharePoint** → **Application permissions** → `Sites.FullControl.All`)
+4. Add the SharePoint permission (**Add a permission** → **SharePoint** → **Application permissions** → `Sites.Read.All`)
 5. Click **Grant admin consent for [your organization]**
 
 > ⚠️ **Admin consent is mandatory.** Adding the permissions without clicking grant consent leaves them listed but inactive. The Lambda will receive `403 Authorization_RequestDenied` from Graph on every login until consent is granted. Both Application permission rows must show a green checkmark labeled "Granted for [org]."
