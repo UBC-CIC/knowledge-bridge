@@ -38,11 +38,14 @@ def fetch_recent_messages(
         # So current query is fine.
         cur.execute(
             """
-            SELECT sender, content, created_at
-            FROM chat_messages
-            WHERE chat_session_id = %s
+            SELECT sender, content, created_at FROM (
+                SELECT sender, content, created_at
+                FROM chat_messages
+                WHERE chat_session_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+            ) sub
             ORDER BY created_at ASC
-            LIMIT %s
             """,
             (chat_session_id, limit)
         )
