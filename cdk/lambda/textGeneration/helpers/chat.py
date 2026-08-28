@@ -12,6 +12,8 @@ from helpers.bedrock import retrieve_documents, format_context_for_prompt
 import helpers.config as config
 from helpers.message_limits import check_limit, record_message_sent
 from helpers.guardrail import invoke_guardrail, ACTION_ANONYMIZED, ACTION_BLOCKED
+from helpers.intervention import assess_response
+from helpers.intervention import assess_response
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -357,8 +359,17 @@ def get_response(
     # 8. Resolve cited sources
     used_sources = [source for i, source in enumerate(sources, 1) if i in cited_indices]
 
-    # 9. Save AI response
-    ai_message_id = _save_ai_response(db_connection, chat_session_id, answer_text, used_sources)
+    # 9. Assess response for intervention
+    grounding = assess_response(query=query, answer_text=answer_text, sources=sources, llm_region=llm_region)
+    logger.info(
+        f"Grounding check: label={grounding.get('label')} score={grounding.get('score')} "
+        f"support={grounding.get('metrics', {}).get('support_score')} "
+        f"scope={grounding.get('metrics', {}).get('scope_alignment_score')} "
+        f"warning={grounding.get('warning_text')}"
+    )
+
+    # 10. Save AI response
+    ai_message_id = _save_ai_response(db_connection, chat_session_id, answer_text, used_sources, grounding.get("warning_text"))
 
     return {
         "response": answer_text,
@@ -366,5 +377,5 @@ def get_response(
         "sessionId": chat_session_id,
         "message_id": ai_message_id,
         "message_usage": usage_info,
-        "warning": None,
+        "warning": grounding.get("warning_text"),
     }
